@@ -1,0 +1,2 @@
+-- EHMS migration placeholder.
+-- Next: create base tables, enums, constraints, RLS policies.
