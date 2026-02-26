@@ -16,6 +16,9 @@ export const APP_PAGES = [
   { path: '/team/counselors', title: 'Counselors (Team)', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD], showInNav: true },
   { path: '/counselors/reports', title: 'Sales Reports', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/requests', title: 'Requests', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD], showInNav: true },
+  { path: '/leads/payment-requests', title: 'Payment Requests', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/leads/overdue', title: 'Overdue Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/leads/converted', title: 'Converted Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Academics (Students/Teachers) ── */
   { path: '/students/hub', title: 'Students', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
@@ -26,10 +29,12 @@ export const APP_PAGES = [
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/topups/manage', title: 'Top-Ups', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/automation/hub', title: 'Automation', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Teacher Coordinator ── */
   { path: '/dashboard/tc', title: 'TC Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/tc/teacher-leads', title: 'Teacher Leads', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+
   { path: '/tc/performance', title: 'Teacher Performance', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Teacher (Individual) ── */
@@ -50,6 +55,14 @@ export const APP_PAGES = [
   { path: '/finance/payroll', title: 'Payroll', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/payment-verification', title: 'Payment Verification', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/reports', title: 'Reports', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
+
+  /* ── HR ── */
+  { path: '/dashboard/hr', title: 'HR Dashboard', group: 'Dashboards', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/attendance', title: 'Attendance', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/employees', title: 'Employees', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/salary', title: 'Salary Calculator', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/payroll', title: 'Payroll', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/payment-requests', title: 'Payment Requests', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── System ── */
   { path: '/admin/users', title: 'User Management', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },

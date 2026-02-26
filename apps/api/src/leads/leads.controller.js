@@ -29,12 +29,73 @@ export async function handleLeads(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/leads/types') {
+      const types = await leadsService.getTypes(actor);
+      if (types?.error) {
+        sendJson(res, 403, { ok: false, error: types.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, types });
+      return true;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/leads/types') {
+      const payload = await readJson(req);
+      const result = await leadsService.addType(payload.name, actor);
+      if (result?.error) {
+        sendJson(res, 403, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, ...result });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/leads/outcomes') {
       const items = await leadsService.listOutcomes(actor);
       if (items?.error) {
         sendJson(res, 403, { ok: false, error: items.error });
         return true;
       }
+      sendJson(res, 200, { ok: true, items });
+      return true;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/leads/academic-coordinators') {
+      if (actor.role !== 'counselor_head' && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only counselor head or super admin can list ACs' });
+        return true;
+      }
+      const items = await leadsService.listAcademicCoordinators();
+      sendJson(res, 200, { ok: true, items });
+      return true;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/leads/counselors') {
+      if (actor.role !== 'counselor_head' && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only counselor head or super admin can list counselors' });
+        return true;
+      }
+      const items = await leadsService.listCounselors();
+      sendJson(res, 200, { ok: true, items });
+      return true;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/leads/payment-requests') {
+      const result = await leadsService.listPaymentRequests(actor);
+      if (result?.error) {
+        sendJson(res, 403, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, items: result });
+      return true;
+    }
+
+    if (req.method === 'GET' && url.pathname === '/leads/overdue') {
+      if (actor.role !== 'counselor_head' && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only counselor head or super admin can view overdue leads' });
+        return true;
+      }
+      const items = await leadsService.listOverdueLeads();
       sendJson(res, 200, { ok: true, items });
       return true;
     }
@@ -62,6 +123,17 @@ export async function handleLeads(req, res, url) {
         return true;
       }
       sendJson(res, 200, { ok: true, count: result.count });
+      return true;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/leads/bulk-assign-ac') {
+      const payload = await readJson(req);
+      const result = await leadsService.bulkConvertToStudents(payload.lead_ids, payload.ac_user_id, actor);
+      if (result.error) {
+        sendJson(res, 403, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, count: result.count, errors: result.errors });
       return true;
     }
 
@@ -130,6 +202,21 @@ export async function handleLeads(req, res, url) {
       return true;
     }
 
+    if (req.method === 'POST' && parts.length === 3 && parts[2] === 'assign') {
+      const payload = await readJson(req);
+      const result = await leadsService.assignCounselor(leadId, payload.counselor_id, actor);
+      if (!result) {
+        sendJson(res, 404, { ok: false, error: 'lead not found' });
+        return true;
+      }
+      if (result.error) {
+        sendJson(res, 403, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, lead: result.lead });
+      return true;
+    }
+
     if (req.method === 'POST' && parts.length === 3 && parts[2] === 'demo-request') {
       const payload = await readJson(req);
       const result = await leadsService.createDemoRequest(leadId, actor, payload.scheduled_at);
@@ -172,6 +259,21 @@ export async function handleLeads(req, res, url) {
         return true;
       }
       sendJson(res, 200, { ok: true, lead: result.lead });
+      return true;
+    }
+
+    if (req.method === 'POST' && parts.length === 3 && parts[2] === 'assign-ac') {
+      const payload = await readJson(req);
+      const result = await leadsService.convertToStudent(leadId, payload.ac_user_id, actor);
+      if (!result) {
+        sendJson(res, 404, { ok: false, error: 'lead not found' });
+        return true;
+      }
+      if (result.error) {
+        sendJson(res, 403, { ok: false, error: result.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, student: result.student, lead: result.lead });
       return true;
     }
 

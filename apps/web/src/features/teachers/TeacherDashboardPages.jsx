@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { apiFetch } from '../../lib/api.js';
 
 /* ═══════ Teacher Dashboard ═══════ */
@@ -12,14 +12,27 @@ export function TeacherDashboardPage() {
     useEffect(() => {
         (async () => {
             try {
-                const [p, t, h, hist] = await Promise.all([
+                const [p, t, h, hist, demoRes] = await Promise.all([
                     apiFetch('/teachers/me').catch(() => ({ teacher: null })),
                     apiFetch('/students/sessions/today').catch(() => ({ items: [] })),
                     apiFetch('/teachers/my-hours').catch(() => ({ items: [], total_hours: 0 })),
-                    apiFetch('/students/sessions/history').catch(() => ({ items: [] }))
+                    apiFetch('/students/sessions/history').catch(() => ({ items: [] })),
+                    apiFetch('/teachers/my-demos').catch(() => ({ items: [] }))
                 ]);
                 setProfile(p.teacher);
-                setTodaySessions(t.items || []);
+                // Merge today's demos into todaySessions
+                const todayStr = new Date().toISOString().split('T')[0];
+                const todayDemos = (demoRes.items || [])
+                    .filter(d => d.scheduled_at && d.scheduled_at.startsWith(todayStr))
+                    .map(d => ({
+                        id: d.id,
+                        _type: 'demo',
+                        students: { student_name: d.leads?.student_name || 'Student' },
+                        subject: d.leads?.subject || '',
+                        started_at: d.scheduled_at,
+                        status: 'demo'
+                    }));
+                setTodaySessions([...(t.items || []).map(s => ({ ...s, _type: 'session' })), ...todayDemos]);
                 setHours(h);
                 setAllSessions(hist.items || []);
             } catch (e) { }
@@ -61,9 +74,9 @@ export function TeacherDashboardPage() {
                             </div>
                             <span style={{
                                 padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 600,
-                                background: s.status === 'completed' ? '#dcfce7' : s.status === 'scheduled' ? '#e0e7ff' : '#f3f4f6',
-                                color: s.status === 'completed' ? '#15803d' : s.status === 'scheduled' ? '#4338ca' : '#6b7280'
-                            }}>{s.status}</span>
+                                background: s._type === 'demo' ? '#ffedd5' : s.status === 'completed' ? '#dcfce7' : s.status === 'scheduled' ? '#e0e7ff' : '#f3f4f6',
+                                color: s._type === 'demo' ? '#ea580c' : s.status === 'completed' ? '#15803d' : s.status === 'scheduled' ? '#4338ca' : '#6b7280'
+                            }}>{s._type === 'demo' ? '🎯 Demo' : s.status}</span>
                         </div>
                     )) : <p className="text-muted" style={{ fontSize: '13px' }}>No sessions today</p>}
                 </article>
@@ -282,44 +295,86 @@ function RescheduleModal({ session, onClose, onDone }) {
 /* ═══════ My Timetable ═══════ */
 export function TeacherTimetablePage() {
     const [sessions, setSessions] = useState([]);
+    const [demos, setDemos] = useState([]);
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        apiFetch('/students/sessions/history')
-            .then(d => setSessions(d.items || []))
-            .catch(() => { })
-            .finally(() => setLoading(false));
+        Promise.all([
+            apiFetch('/students/sessions/history').then(d => d.items || []).catch(() => []),
+            apiFetch('/teachers/my-demos').then(d => d.items || []).catch(() => [])
+        ]).then(([s, d]) => {
+            setSessions(s);
+            setDemos(d);
+        }).finally(() => setLoading(false));
     }, []);
 
     const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-    // Group sessions by day of week
+    // Merge sessions and demos into a unified timetable grouped by day
     const timetable = useMemo(() => {
         const map = {};
         DAYS.forEach(d => { map[d] = []; });
+
         sessions.forEach(s => {
             if (s.session_date) {
                 const day = new Date(s.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
-                if (map[day]) map[day].push(s);
+                if (map[day]) map[day].push({ ...s, _type: 'session' });
             }
         });
+
+        demos.forEach(d => {
+            if (d.scheduled_at) {
+                const day = new Date(d.scheduled_at).toLocaleDateString('en-US', { weekday: 'long' });
+                if (map[day]) map[day].push({
+                    id: d.id,
+                    _type: 'demo',
+                    students: { student_name: d.leads?.student_name || 'Student' },
+                    subject: d.leads?.subject || '',
+                    started_at: d.scheduled_at,
+                    ends_at: d.ends_at,
+                    status: 'demo'
+                });
+            }
+        });
+
         return map;
-    }, [sessions]);
+    }, [sessions, demos]);
 
     if (loading) return <section className="panel"><p>Loading timetable...</p></section>;
 
     return (
         <section className="panel">
             <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Timetable</h2>
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                    <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#e0e7ff', display: 'inline-block' }} /> Session
+                </span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                    <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#ffedd5', display: 'inline-block' }} /> Demo
+                </span>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
                 {DAYS.map(day => (
                     <article key={day} className="card" style={{ padding: '16px' }}>
                         <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#4338ca' }}>{day}</h4>
-                        {timetable[day].length ? timetable[day].slice(0, 5).map(s => (
-                            <div key={s.id} style={{ padding: '6px 0', borderBottom: '1px solid #f3f4f6', fontSize: '12px' }}>
-                                <p style={{ margin: 0, fontWeight: 600 }}>{s.students?.student_name || 'Student'}</p>
+                        {timetable[day].length ? timetable[day].slice(0, 8).map(s => (
+                            <div key={s.id} style={{
+                                padding: '6px 8px', borderRadius: '6px', marginBottom: '6px', fontSize: '12px',
+                                background: s._type === 'demo' ? '#ffedd5' : '#e0e7ff',
+                                borderLeft: `3px solid ${s._type === 'demo' ? '#f97316' : '#4338ca'}`
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <p style={{ margin: 0, fontWeight: 600 }}>{s.students?.student_name || 'Student'}</p>
+                                    {s._type === 'demo' && (
+                                        <span style={{
+                                            fontSize: '9px', fontWeight: 700, padding: '1px 6px',
+                                            borderRadius: '8px', background: '#f97316', color: 'white'
+                                        }}>DEMO</span>
+                                    )}
+                                </div>
                                 <p className="text-muted" style={{ margin: '2px 0 0' }}>
                                     {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
+                                    {s.ends_at ? ` - ${new Date(s.ends_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}` : ''}
                                     {s.subject ? ` · ${s.subject}` : ''}
                                 </p>
                             </div>
@@ -337,22 +392,100 @@ export function TeacherMyProfilePage() {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
     const [slots, setSlots] = useState([]);
+
+    const [originalSlots, setOriginalSlots] = useState([]);
     const [saving, setSaving] = useState(false);
+    const [validationModal, setValidationModal] = useState({ isOpen: false, type: 'error', message: '', conflictingSlots: [], newSlot: null, mergedSlot: null });
+
     const [msg, setMsg] = useState('');
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [activeTab, setActiveTab] = useState('personal');
+    const TIME_OPTIONS = useMemo(() => generateTimeOptions(), []);
 
     async function loadProfile() {
         try {
             const d = await apiFetch('/teachers/me');
             setProfile(d.teacher);
-            setSlots(d.teacher?.teacher_availability || []);
-        } catch (e) { }
+            const sorted = (d.teacher?.teacher_availability || []).map(s => ({
+                ...s,
+                start_time: (s.start_time || '').slice(0, 5),
+                end_time: (s.end_time || '').slice(0, 5)
+            })).sort((a, b) => {
+                const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                const da = days.indexOf(a.day_of_week);
+                const db = days.indexOf(b.day_of_week);
+                if (da !== db) return da - db;
+                return (a.start_time || '').localeCompare(b.start_time || '');
+            });
+            setSlots(sorted);
+            setOriginalSlots(JSON.parse(JSON.stringify(sorted)));
+        } catch (e) { console.error(e); }
         setLoading(false);
     }
 
     useEffect(() => { loadProfile(); }, []);
 
-    function addSlot() {
-        setSlots(prev => [...prev, { day_of_week: 'Monday', start_time: '09:00', end_time: '10:00' }]);
+    function handleAddSlots(newSlots) {
+        // Validation 1: Start Time < End Time
+        for (const slot of newSlots) {
+            if (parseTime(slot.start_time) >= parseTime(slot.end_time)) {
+                setValidationModal({ isOpen: true, type: 'error', message: `Start time (${slot.start_time}) must be earlier than end time (${slot.end_time}).` });
+                return;
+            }
+        }
+
+        // Validation 2: Overlap Check
+        const conflicting = [];
+        for (const newSlot of newSlots) {
+            const overlaps = checkOverlap(newSlot, slots);
+            if (overlaps.length > 0) {
+                conflicting.push({ newSlot, overlaps });
+            }
+        }
+
+        if (conflicting.length > 0) {
+            // Handle first conflict for now (simplified UX)
+            const { newSlot, overlaps } = conflicting[0];
+            const merged = mergeSlots(newSlot, overlaps);
+            setValidationModal({
+                isOpen: true,
+                type: 'merge',
+                message: `The new slot (${newSlot.start_time} - ${newSlot.end_time}) overlaps with existing slots.`,
+                conflictingSlots: overlaps,
+                newSlot,
+                mergedSlot: merged
+            });
+            return;
+        }
+
+        const combined = [...slots, ...newSlots];
+        const sorted = combined.sort((a, b) => {
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            const da = days.indexOf(a.day_of_week);
+            const db = days.indexOf(b.day_of_week);
+            if (da !== db) return da - db;
+            return (a.start_time || '').localeCompare(b.start_time || '');
+        });
+        setSlots(sorted);
+        saveAvailability(sorted);
+    }
+
+    function confirmMerge() {
+        const { mergedSlot, conflictingSlots } = validationModal;
+        // Remove conflicting slots from current slots
+        const cleanSlots = slots.filter(s => !conflictingSlots.some(c => c.day_of_week === s.day_of_week && c.start_time === s.start_time && c.end_time === s.end_time));
+        // Add merged slot
+        const combined = [...cleanSlots, mergedSlot];
+        const sorted = combined.sort((a, b) => {
+            const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+            const da = days.indexOf(a.day_of_week);
+            const db = days.indexOf(b.day_of_week);
+            if (da !== db) return da - db;
+            return (a.start_time || '').localeCompare(b.start_time || '');
+        });
+        setSlots(sorted);
+        saveAvailability(sorted);
+        setValidationModal({ isOpen: false, type: 'error', message: '', conflictingSlots: [], newSlot: null });
     }
 
     function removeSlot(idx) {
@@ -363,97 +496,489 @@ export function TeacherMyProfilePage() {
         setSlots(prev => prev.map((s, i) => i === idx ? { ...s, [key]: val } : s));
     }
 
-    async function saveAvailability() {
+    async function saveAvailability(slotsToSave = null) {
         setSaving(true);
         setMsg('');
+        const slotsToCheck = slotsToSave || slots;
+
+        // Validation: Start Time < End Time
+        for (const slot of slotsToCheck) {
+            if (parseTime(slot.start_time) >= parseTime(slot.end_time)) {
+                setValidationModal({ isOpen: true, type: 'error', message: `Start time (${slot.start_time}) must be earlier than end time (${slot.end_time}) for ${slot.day_of_week}.` });
+                setSaving(false);
+                return;
+            }
+        }
+
         try {
             await apiFetch('/teachers/availability', {
                 method: 'PUT',
-                body: JSON.stringify({ slots })
+                body: JSON.stringify({ slots: slotsToCheck })
             });
             setMsg('Availability saved!');
-            await loadProfile();
+            /* If we saved specific slots (auto-save), likely we want to update original state to match new reality.
+               If manual save, we definitely update original state. */
+            if (slotsToSave) {
+                setOriginalSlots(JSON.parse(JSON.stringify(slotsToSave)));
+            } else {
+                await loadProfile();
+            }
         } catch (e) { setMsg('Error: ' + e.message); }
         setSaving(false);
     }
 
+    /* ════ Helper Functions ════ */
+    function parseTime(t) {
+        if (!t) return 0;
+        const [time, period] = t.split(' ');
+        let [h, m] = time.split(':').map(Number);
+        if (period === 'PM' && h !== 12) h += 12;
+        if (period === 'AM' && h === 12) h = 0;
+        return h * 60 + m;
+    }
+
+    function formatTime(m) {
+        let h = Math.floor(m / 60);
+        const min = m % 60;
+        const period = h >= 12 ? 'PM' : 'AM';
+        if (h > 12) h -= 12;
+        if (h === 0) h = 12;
+        return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')} ${period}`;
+    }
+
+    function checkOverlap(newSlot, existingSlots) {
+        return existingSlots.filter(s => {
+            if (s.day_of_week !== newSlot.day_of_week) return false;
+            const start1 = parseTime(newSlot.start_time);
+            const end1 = parseTime(newSlot.end_time);
+            const start2 = parseTime(s.start_time);
+            const end2 = parseTime(s.end_time);
+            return Math.max(start1, start2) < Math.min(end1, end2); // Overlap condition
+        });
+    }
+
+    function mergeSlots(newSlot, overlappingSlots) {
+        let minStart = parseTime(newSlot.start_time);
+        let maxEnd = parseTime(newSlot.end_time);
+
+        overlappingSlots.forEach(s => {
+            minStart = Math.min(minStart, parseTime(s.start_time));
+            maxEnd = Math.max(maxEnd, parseTime(s.end_time));
+        });
+
+        return {
+            ...newSlot,
+            start_time: formatTime(minStart),
+            end_time: formatTime(maxEnd)
+        };
+    }
+
+    const ValidationModal = ({ isOpen, type, message, onClose, onMerge }) => {
+        if (!isOpen) return null;
+        return (
+            <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+                <div style={{ background: 'white', padding: '24px', borderRadius: '12px', width: '400px', maxWidth: '90%' }}>
+                    <h3 style={{ margin: '0 0 12px', fontSize: '18px', color: type === 'error' ? '#dc2626' : '#2563eb' }}>
+                        {type === 'error' ? 'Cannot Save Slot' : 'Merge Slots?'}
+                    </h3>
+                    <p style={{ margin: '0 0 20px', color: '#4b5563', lineHeight: '1.5' }}>{message}</p>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                        <button onClick={onClose} style={{ padding: '8px 16px', background: '#e5e7eb', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>
+                            {type === 'merge' ? 'Cancel' : 'Close'}
+                        </button>
+                        {type === 'merge' && (
+                            <button onClick={onMerge} style={{ padding: '8px 16px', background: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 500 }}>
+                                Merge & Save
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+    const ReadOnlyField = ({ label, value, full }) => (
+        <div style={{ gridColumn: full ? '1 / -1' : 'auto' }}>
+            <span style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>{label}</span>
+            <div style={{
+                padding: '8px 12px',
+                background: '#f9fafb',
+                border: '1px solid #e5e7eb',
+                borderRadius: '6px',
+                fontSize: '14px',
+                color: '#111827',
+                minHeight: '40px',
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '4px'
+            }}>
+                {value || <span style={{ color: '#9ca3af' }}>—</span>}
+            </div>
+        </div>
+    );
+
+    const Badge = ({ children, color }) => (
+        <span style={{
+            background: color ? `${color}15` : '#e5e7eb',
+            color: color || '#374151',
+            padding: '2px 8px',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontWeight: 500
+        }}>{children}</span>
+    );
+
+    function parseSubjects(s) {
+        if (Array.isArray(s)) return s;
+        if (typeof s === 'string') { try { const p = JSON.parse(s); return Array.isArray(p) ? p : []; } catch { return s ? [s] : []; } }
+        return [];
+    }
+
     if (loading) return <section className="panel"><p>Loading profile...</p></section>;
+
+    const subjects = parseSubjects(profile?.subjects_taught);
+    const syllabus = parseSubjects(profile?.syllabus);
+    const languages = parseSubjects(profile?.languages);
+
+    const gridRow = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' };
 
     return (
         <section className="panel">
             <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Profile</h2>
 
+            {/* Tabs Navigation */}
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '0' }}>
+                {['Personal', 'Professional', 'Bank', 'Slots'].map(tab => {
+                    const key = tab.toLowerCase();
+                    const isActive = activeTab === key;
+                    return (
+                        <button
+                            key={key}
+                            onClick={() => setActiveTab(key)}
+                            style={{
+                                padding: '10px 20px',
+                                border: 'none',
+                                background: 'transparent',
+                                borderBottom: isActive ? '2px solid #2563eb' : '2px solid transparent',
+                                color: isActive ? '#2563eb' : '#6b7280',
+                                fontWeight: isActive ? 600 : 500,
+                                cursor: 'pointer',
+                                transition: 'all 0.2s',
+                                fontSize: '14px'
+                            }}
+                        >
+                            {tab}
+                        </button>
+                    );
+                })}
+            </div>
+
             {/* Profile Details */}
-            <article className="card" style={{ padding: '20px', marginBottom: '16px' }}>
-                <h3 style={{ margin: '0 0 12px', fontSize: '15px' }}>Details</h3>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Name</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{profile?.users?.full_name || '—'}</p>
+            {activeTab === 'personal' && (
+                <article className="card" style={{ padding: '24px', marginBottom: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>
+                        <h3 style={{ margin: 0, fontSize: '18px' }}>Personal Information</h3>
+                        <div style={{ fontWeight: 600, color: profile?.is_in_pool ? '#15803d' : '#dc2626', fontSize: '14px', padding: '4px 12px', background: profile?.is_in_pool ? '#dcfce7' : '#fee2e2', borderRadius: '20px' }}>
+                            {profile?.is_in_pool ? '✅ Active Pool Member' : '❌ Inactive'}
+                        </div>
                     </div>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Email</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 500, fontSize: '13px' }}>{profile?.users?.email || '—'}</p>
+
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Full Name" value={profile?.users?.full_name} />
+                        <ReadOnlyField label="Teacher Code" value={profile?.teacher_code} />
+                        <ReadOnlyField label="Email" value={profile?.users?.email} />
+                        <ReadOnlyField label="Phone" value={profile?.phone} />
                     </div>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Teacher Code</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{profile?.teacher_code || '—'}</p>
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Gender" value={profile?.gender} />
+                        <ReadOnlyField label="Date of Birth" value={profile?.dob} />
                     </div>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Experience</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{profile?.experience_level || '—'}</p>
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Address" value={profile?.address} />
+                        <ReadOnlyField label="Pincode" value={profile?.pincode} />
+                        <ReadOnlyField label="City" value={profile?.city} />
+                        <ReadOnlyField label="Place/Area" value={profile?.place} />
                     </div>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Rate per Hour</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 600 }}>{profile?.per_hour_rate ? `₹${profile.per_hour_rate}` : '—'}</p>
+                </article>
+            )}
+
+            {activeTab === 'professional' && (
+                <article className="card" style={{ padding: '24px', marginBottom: '24px' }}>
+                    <h3 style={{ margin: '0 0 16px', fontSize: '18px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>Professional Details</h3>
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Qualification" value={profile?.qualification} />
+                        <ReadOnlyField label="Experience" value={profile?.experience_level} />
+                        <ReadOnlyField label="Exp. Duration" value={profile?.experience_duration} />
+                        <ReadOnlyField label="Rate per Hour" value={profile?.per_hour_rate ? `₹${profile.per_hour_rate}/hr` : null} />
                     </div>
-                    <div>
-                        <span className="text-muted" style={{ fontSize: '12px' }}>Pool Status</span>
-                        <p style={{ margin: '2px 0 0', fontWeight: 600, color: profile?.is_in_pool ? '#15803d' : '#dc2626' }}>
-                            {profile?.is_in_pool ? '✅ Active' : '❌ Inactive'}
-                        </p>
+
+
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Subjects" value={subjects.length ? subjects.map((s, i) => <Badge key={i} color="#3b82f6">{s}</Badge>) : null} full />
+                        <ReadOnlyField label="Syllabus" value={syllabus.length ? syllabus.map((m, i) => <Badge key={i} color="#15803d">{m}</Badge>) : null} full />
+                        <ReadOnlyField label="Languages" value={languages.length ? languages.map((b, i) => <Badge key={i} color="#8b5cf6">{b}</Badge>) : null} full />
                     </div>
-                </div>
-            </article>
+                </article>
+            )}
+
+            {activeTab === 'bank' && (
+                <article className="card" style={{ padding: '24px', marginBottom: '24px' }}>
+                    <h3 style={{ margin: '0 0 16px', fontSize: '18px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>Bank Information</h3>
+                    <div style={gridRow}>
+                        <ReadOnlyField label="Account Holder" value={profile?.account_holder_name} />
+                        <ReadOnlyField label="Account Number" value={profile?.account_number} />
+                        <ReadOnlyField label="IFSC Code" value={profile?.ifsc_code} />
+                    </div>
+                    <div style={gridRow}>
+                        <ReadOnlyField label="UPI ID" value={profile?.upi_id} />
+                        <ReadOnlyField label="GPay Name" value={profile?.gpay_holder_name} />
+                        <ReadOnlyField label="GPay Number" value={profile?.gpay_number} />
+                    </div>
+                </article>
+            )}
 
             {/* Preferred Time / Availability */}
-            <article className="card" style={{ padding: '20px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                    <h3 style={{ margin: 0, fontSize: '15px' }}>Preferred Teaching Times</h3>
-                    <button className="small primary" onClick={addSlot}>+ Add Slot</button>
-                </div>
-
-                {slots.length === 0 ? (
-                    <p className="text-muted" style={{ fontSize: '13px' }}>No time slots set. Add your available times.</p>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                        {slots.map((slot, idx) => (
-                            <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                <select value={slot.day_of_week} onChange={e => updateSlot(idx, 'day_of_week', e.target.value)} style={{ flex: '1 1 120px', padding: '6px 8px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '13px' }}>
-                                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-                                </select>
-                                <input type="time" value={slot.start_time} onChange={e => updateSlot(idx, 'start_time', e.target.value)} style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '13px' }} />
-                                <span style={{ fontSize: '13px', color: '#6b7280' }}>to</span>
-                                <input type="time" value={slot.end_time} onChange={e => updateSlot(idx, 'end_time', e.target.value)} style={{ padding: '6px 8px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '13px' }} />
-                                <button className="small danger" onClick={() => removeSlot(idx)} style={{ fontSize: '11px' }}>✕</button>
-                            </div>
-                        ))}
+            {activeTab === 'slots' && (
+                <article className="card" style={{ padding: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>
+                        <h3 style={{ margin: 0, fontSize: '18px' }}>Preferred Teaching Times</h3>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            {msg && <span style={{ fontSize: '14px', fontWeight: 500, color: msg.startsWith('Error') ? '#dc2626' : '#10b981' }}>{msg}</span>}
+                            {JSON.stringify(slots) !== JSON.stringify(originalSlots) ? (
+                                <button className="primary" onClick={() => saveAvailability()} disabled={saving} style={{ padding: '6px 16px', fontSize: '14px' }}>
+                                    {saving ? 'Saving...' : 'Save Changes'}
+                                </button>
+                            ) : (
+                                <span style={{ fontSize: '13px', color: '#9ca3af', fontStyle: 'italic' }}>Saved</span>
+                            )}
+                            <button className="small primary" onClick={() => setShowAddModal(true)}>+ Add Slot</button>
+                        </div>
                     </div>
-                )}
 
-                <div style={{ marginTop: '16px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <button className="primary" onClick={saveAvailability} disabled={saving}>
-                        {saving ? 'Saving...' : 'Save Availability'}
-                    </button>
-                    {msg ? <span style={{ fontSize: '13px', color: msg.startsWith('Error') ? '#dc2626' : '#10b981' }}>{msg}</span> : null}
-                </div>
-            </article>
+                    {slots.length === 0 ? (
+                        <p className="text-muted" style={{ fontSize: '14px', fontStyle: 'italic' }}>No time slots set. Please add your available teaching times.</p>
+                    ) : (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+                            {DAYS.filter(d => slots.some(s => s.day_of_week === d)).map(day => (
+                                <div key={day} style={{ background: '#f9fafb', padding: '12px', borderRadius: '8px', border: '1px solid #e5e7eb' }}>
+                                    <h4 style={{ margin: '0 0 12px', fontSize: '15px', color: '#111827', fontWeight: 600, borderBottom: '1px solid #e5e7eb', paddingBottom: '8px' }}>{day}</h4>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                        {slots.map((slot, idx) => {
+                                            if (slot.day_of_week !== day) return null;
+                                            return (
+                                                <div key={idx} style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                                                        <div style={{ flex: 1, minWidth: '105px' }}>
+                                                            <CustomDropdown
+                                                                value={slot.start_time}
+                                                                onChange={v => updateSlot(idx, 'start_time', v)}
+                                                                options={TIME_OPTIONS}
+                                                                placeholder="Start"
+                                                            />
+                                                        </div>
+                                                        <span style={{ fontSize: '12px', color: '#6b7280' }}>-</span>
+                                                        <div style={{ flex: 1, minWidth: '105px' }}>
+                                                            <CustomDropdown
+                                                                value={slot.end_time}
+                                                                onChange={v => updateSlot(idx, 'end_time', v)}
+                                                                options={TIME_OPTIONS}
+                                                                placeholder="End"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <button className="small danger" onClick={() => removeSlot(idx)} style={{ fontSize: '12px', background: 'transparent', color: '#ef4444', border: 'none', padding: '4px' }} title="Remove Slot">
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </article>
+            )}
+
+            <AddAvailabilityModal
+                isOpen={showAddModal}
+                onClose={() => setShowAddModal(false)}
+                onAdd={handleAddSlots}
+                existingSlots={slots}
+            />
+            <ValidationModal
+                isOpen={validationModal.isOpen}
+                type={validationModal.type}
+                message={validationModal.message}
+                onClose={() => setValidationModal({ ...validationModal, isOpen: false })}
+                onMerge={confirmMerge}
+            />
         </section>
     );
 }
 
+
+/* ─── Custom Dropdown (Local Version) ─── */
+function CustomDropdown({ value, onChange, options, placeholder }) {
+    const [open, setOpen] = useState(false);
+    // Use a ref to close on click outside - basic implementation without extra dependency
+    const ref = useRef(null);
+    const selected = options.find(o => o.value === value);
+
+    useEffect(() => {
+        function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+        document.addEventListener('mousedown', close);
+        return () => document.removeEventListener('mousedown', close);
+    }, []);
+
+    return (
+        <div className="custom-dropdown" ref={ref} style={{ position: 'relative' }}>
+            <div
+                onClick={() => setOpen(!open)}
+                style={{
+                    padding: '8px 12px', background: 'white', border: '1px solid #d1d5db', borderRadius: '6px',
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', fontSize: '14px', minHeight: '38px'
+                }}
+            >
+                <span style={{ color: selected ? '#111827' : '#9ca3af' }}>{selected ? selected.label : (placeholder || 'Select...')}</span>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                    <polyline points="6 9 12 15 18 9"></polyline>
+                </svg>
+            </div>
+            {open && (
+                <div style={{
+                    position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10,
+                    background: 'white', border: '1px solid #d1d5db', borderRadius: '6px', marginTop: '4px',
+                    maxHeight: '200px', overflowY: 'auto', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
+                }}>
+                    {options.map(o => (
+                        <div key={o.value}
+                            onClick={() => { onChange(o.value); setOpen(false); }}
+                            style={{
+                                padding: '8px 12px', fontSize: '14px', cursor: 'pointer',
+                                background: o.value === value ? '#eff6ff' : 'transparent',
+                                color: o.value === value ? '#2563eb' : '#374151',
+                                borderBottom: '1px solid #f3f4f6'
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.background = '#f9fafb'}
+                            onMouseLeave={e => e.currentTarget.style.background = o.value === value ? '#eff6ff' : 'transparent'}
+                        >
+                            {o.label}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function generateTimeOptions() {
+    const options = [];
+    const startHour = 6; // 6 AM
+    const endHour = 22; // 10 PM
+    for (let h = startHour; h <= endHour; h++) {
+        for (let m = 0; m < 60; m += 15) {
+            const hh = h.toString().padStart(2, '0');
+            const mm = m.toString().padStart(2, '0');
+            const time24 = `${hh}:${mm}`;
+
+            // Format 12h label
+            const period = h < 12 ? 'AM' : 'PM';
+            const h12 = h % 12 || 12;
+            const label = `${h12}:${mm} ${period}`;
+
+            options.push({ value: time24, label });
+        }
+    }
+    return options;
+}
+
+function AddAvailabilityModal({ isOpen, onClose, onAdd }) {
+    if (!isOpen) return null;
+
+    const [selectedDays, setSelectedDays] = useState([]);
+    const [startTime, setStartTime] = useState('09:00');
+    const [endTime, setEndTime] = useState('10:00');
+    const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const TIME_OPTIONS = useMemo(() => generateTimeOptions(), []);
+
+    const toggleDay = (day) => {
+        setSelectedDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]);
+    };
+
+    const handleAdd = () => {
+        if (selectedDays.length === 0) return alert('Please select at least one day.');
+        if (!startTime || !endTime) return alert('Please select start and end time.');
+        if (startTime >= endTime) return alert('Start time must be before end time.');
+
+        const newSlots = selectedDays.map(day => ({
+            day_of_week: day,
+            start_time: startTime,
+            end_time: endTime
+        }));
+        onAdd(newSlots);
+        onClose();
+        setSelectedDays([]);
+    };
+
+    return (
+        <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
+        }}>
+            <div style={{ background: 'white', padding: '24px', borderRadius: '12px', width: '90%', maxWidth: '400px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' }}>
+                <h3 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 600 }}>Add Availability</h3>
+
+                <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'block', fontSize: '14px', marginBottom: '8px', fontWeight: 500, color: '#374151' }}>Select Days</label>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {DAYS.map(day => (
+                            <button key={day} onClick={() => toggleDay(day)} style={{
+                                padding: '6px 12px', borderRadius: '20px', fontSize: '13px', border: '1px solid',
+                                background: selectedDays.includes(day) ? '#eff6ff' : 'white',
+                                borderColor: selectedDays.includes(day) ? '#2563eb' : '#d1d5db',
+                                color: selectedDays.includes(day) ? '#1e40af' : '#374151',
+                                cursor: 'pointer',
+                                transition: 'all 0.2s'
+                            }}>
+                                {day.slice(0, 3)}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '24px' }}>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '14px', marginBottom: '6px', fontWeight: 500, color: '#374151' }}>Start Time</label>
+                        <CustomDropdown
+                            value={startTime}
+                            onChange={setStartTime}
+                            options={TIME_OPTIONS}
+                            placeholder="Start"
+                        />
+                    </div>
+                    <div>
+                        <label style={{ display: 'block', fontSize: '14px', marginBottom: '6px', fontWeight: 500, color: '#374151' }}>End Time</label>
+                        <CustomDropdown
+                            value={endTime}
+                            onChange={setEndTime}
+                            options={TIME_OPTIONS}
+                            placeholder="End"
+                        />
+                    </div>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                    <button onClick={onClose} style={{ padding: '8px 16px', background: 'transparent', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: '14px' }}>Cancel</button>
+                    <button onClick={handleAdd} className="primary" style={{ padding: '8px 20px', fontSize: '14px' }}>Add Slots</button>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 /* ═══════ Teacher Reports ═══════ */
 export function TeacherReportsPage() {

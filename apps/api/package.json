@@ -8,7 +8,9 @@
     "seed:users": "node -r dotenv/config scripts/create_users.js"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.990.0",
     "@aws-sdk/credential-provider-node": "^3.972.9",
+    "@aws-sdk/lib-storage": "^3.990.0",
     "@supabase/supabase-js": "^2.57.4",
     "busboy": "^1.6.0",
     "dotenv": "^16.4.5",

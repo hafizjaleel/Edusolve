@@ -73,6 +73,26 @@ export async function handleUsers(req, res) {
 
             if (error) throw error;
 
+            // Auto-add to employees table (for HR attendance/salary) — skip teachers and super_admin
+            const skipRoles = ['super_admin', 'teacher'];
+            if (!skipRoles.includes(role)) {
+              const deptMap = {
+                counselor_head: 'Sales', counselor: 'Sales',
+                academic_coordinator: 'Academics', teacher_coordinator: 'Academics',
+                finance: 'Finance', hr: 'HR'
+              };
+              await adminClient.from('employees').insert({
+                user_id: data.user.id,
+                full_name: name || email,
+                email: email,
+                designation: role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+                department: deptMap[role] || 'General',
+                employee_type: 'staff',
+                is_active: true,
+                joined_date: new Date().toISOString().slice(0, 10)
+              }).catch(() => { /* ignore if employees table doesn't exist yet */ });
+            }
+
             sendJson(res, 201, { ok: true, user: data.user });
             return true;
         }

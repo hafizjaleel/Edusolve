@@ -2,6 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
 
 function TeacherPoolTable({ items, onOpenProfile }) {
+  const [showSlotsFor, setShowSlotsFor] = useState(null);
+
+  const ClockIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+  );
+
+  // Close popover on click outside could be nice, but toggle is fine for now.
+
   return (
     <div className="table-wrap mobile-friendly-table">
       <table>
@@ -11,6 +22,8 @@ function TeacherPoolTable({ items, onOpenProfile }) {
             <th>Name</th>
             <th>Email</th>
             <th>Experience</th>
+
+            <th>Preferred Time</th>
             <th>Rate</th>
             <th>Profile</th>
           </tr>
@@ -22,6 +35,48 @@ function TeacherPoolTable({ items, onOpenProfile }) {
               <td data-label="Name">{item.users?.full_name || '-'}</td>
               <td data-label="Email">{item.users?.email || '-'}</td>
               <td data-label="Experience">{item.experience_level || '-'}</td>
+
+              <td data-label="Preferred Time">
+                <div style={{ position: 'relative', display: 'inline-block' }}>
+                  <button
+                    type="button"
+                    className="secondary small"
+                    style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    onClick={(e) => { e.stopPropagation(); setShowSlotsFor(showSlotsFor === item.id ? null : item.id); }}
+                    title="View Availability"
+                  >
+                    <ClockIcon />
+                  </button>
+                  {showSlotsFor === item.id && (
+                    <div style={{
+                      position: 'absolute', top: '100%', right: '0', zIndex: 50,
+                      background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px',
+                      padding: '12px', minWidth: '220px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+                      textAlign: 'left'
+                    }}>
+                      {console.log('Slots for', item.id, item.teacher_availability)}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+                        <strong style={{ fontSize: '12px', color: '#374151' }}>Preferred Slots</strong>
+                        <button type="button" onClick={() => setShowSlotsFor(null)} style={{ border: 'none', background: 'transparent', fontSize: '16px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+                      </div>
+                      {(item.teacher_availability && item.teacher_availability.length > 0) ? (
+                        <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                          {item.teacher_availability.map((s, idx) => (
+                            <div key={idx} style={{ fontSize: '11px', marginBottom: '4px', paddingBottom: '4px', borderBottom: '1px solid #f3f4f6' }}>
+                              <span style={{ fontWeight: 600, color: '#4b5563', display: 'block' }}>{s.day_of_week}</span>
+                              <span style={{ color: '#6b7280' }}>
+                                {(s.start_time || '').slice(0, 5)} - {(s.end_time || '').slice(0, 5)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>No slots added.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </td>
               <td data-label="Rate">{item.per_hour_rate || '-'}</td>
               <td data-label="Profile">
                 <button type="button" className="secondary" onClick={() => onOpenProfile(item.id)}>Open</button>
@@ -272,8 +327,8 @@ export function TeacherProfilePage({ teacherProfileId }) {
               {(teacher?.teacher_availability || []).map((slot, idx) => (
                 <tr key={`${slot.day_of_week}-${idx}`}>
                   <td data-label="Day">{slot.day_of_week}</td>
-                  <td data-label="From">{slot.start_time}</td>
-                  <td data-label="To">{slot.end_time}</td>
+                  <td data-label="From">{(slot.start_time || '').slice(0, 5)}</td>
+                  <td data-label="To">{(slot.end_time || '').slice(0, 5)}</td>
                 </tr>
               ))}
               {!(teacher?.teacher_availability || []).length ? (

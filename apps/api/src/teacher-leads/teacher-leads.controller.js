@@ -1,4 +1,4 @@
-import { getSupabaseAdminClient } from '../config/supabase.js';
+import { getSupabaseAdminClient, getSupabaseAuthClient } from '../config/supabase.js';
 import { readJson, sendJson } from '../common/http.js';
 
 const nowIso = () => new Date().toISOString();
@@ -13,6 +13,23 @@ function actorFromHeaders(req) {
 }
 
 const TC_ROLES = ['teacher_coordinator', 'super_admin'];
+
+// ─── Helper: Generate Teacher Code ───
+async function generateTeacherCode(adminClient) {
+    const date = new Date();
+    const yy = String(date.getFullYear()).slice(-2);
+    const monthNames = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
+    const mmm = monthNames[date.getMonth()];
+
+    // Get exact count of existing teachers for sequential numbering
+    const { count, error } = await adminClient
+        .from('teacher_profiles')
+        .select('*', { count: 'exact', head: true });
+    
+    if (error) throw new Error(error.message);
+    const sequence = (count || 0) + 1;
+    return `T${yy}${mmm}${String(sequence).padStart(3, '0')}`; // e.g., T26FEB042
+}
 
 export async function handleTeacherLeads(req, res, url) {
     if (!url.pathname.startsWith('/teacher-leads')) return false;
@@ -40,6 +57,24 @@ export async function handleTeacherLeads(req, res, url) {
                 .order('created_at', { ascending: false });
             if (error) throw new Error(error.message);
             sendJson(res, 200, { ok: true, items: data || [] });
+            return true;
+        }
+
+        // GET /teacher-leads/rejection-reasons
+        if (req.method === 'GET' && parts.length === 2 && parts[1] === 'rejection-reasons') {
+            const { data, error } = await adminClient
+                .from('rejection_reasons')
+                .select('*')
+                .order('reason', { ascending: true });
+            if (error) throw new Error(error.message);
+            sendJson(res, 200, { ok: true, items: data || [] });
+            return true;
+        }
+
+        // GET /teacher-leads/next-teacher-code
+        if (req.method === 'GET' && parts.length === 2 && parts[1] === 'next-teacher-code') {
+            const code = await generateTeacherCode(adminClient);
+            sendJson(res, 200, { ok: true, teacherCode: code });
             return true;
         }
 
@@ -87,8 +122,8 @@ export async function handleTeacherLeads(req, res, url) {
         // POST /teacher-leads — create
         if (req.method === 'POST' && parts.length === 1) {
             const payload = await readJson(req);
-            if (!payload.full_name) {
-                sendJson(res, 400, { ok: false, error: 'full_name is required' });
+            if (!payload.full_name || !payload.phone) {
+                sendJson(res, 400, { ok: false, error: 'full_name and phone are required' });
                 return true;
             }
             const { data, error } = await adminClient
@@ -96,11 +131,17 @@ export async function handleTeacherLeads(req, res, url) {
                 .insert({
                     full_name: payload.full_name,
                     email: payload.email || null,
-                    phone: payload.phone || null,
-                    subject: payload.subject || null,
+                    phone: payload.phone,
+                    subjects: Array.isArray(payload.subjects) ? JSON.stringify(payload.subjects) : '[]',
+                    boards: Array.isArray(payload.boards) ? JSON.stringify(payload.boards) : '[]',
+                    mediums: Array.isArray(payload.mediums) ? JSON.stringify(payload.mediums) : '[]',
                     experience_level: payload.experience_level || 'fresher',
+                    experience_type: payload.experience_type || null,
+                    experience_duration: payload.experience_duration || null,
                     qualification: payload.qualification || null,
-                    status: 'sourced',
+                    place: payload.place || null,
+                    city: payload.city || null,
+                    status: 'new',
                     coordinator_id: actor.userId,
                     notes: payload.notes || null,
                     created_at: nowIso(),
@@ -114,7 +155,7 @@ export async function handleTeacherLeads(req, res, url) {
             await adminClient.from('teacher_lead_history').insert({
                 teacher_lead_id: data.id,
                 old_status: null,
-                new_status: 'sourced',
+                new_status: 'new',
                 changed_by: actor.userId,
                 note: 'Lead created',
                 created_at: nowIso()
@@ -144,11 +185,40 @@ export async function handleTeacherLeads(req, res, url) {
             if (payload.full_name) updates.full_name = payload.full_name;
             if (payload.email !== undefined) updates.email = payload.email;
             if (payload.phone !== undefined) updates.phone = payload.phone;
-            if (payload.subject !== undefined) updates.subject = payload.subject;
+            if (payload.subjects !== undefined) updates.subjects = Array.isArray(payload.subjects) ? JSON.stringify(payload.subjects) : payload.subjects;
+            if (payload.boards !== undefined) updates.boards = Array.isArray(payload.boards) ? JSON.stringify(payload.boards) : payload.boards;
+            if (payload.mediums !== undefined) updates.mediums = Array.isArray(payload.mediums) ? JSON.stringify(payload.mediums) : payload.mediums;
             if (payload.experience_level) updates.experience_level = payload.experience_level;
+            if (payload.experience_type !== undefined) updates.experience_type = payload.experience_type;
+            if (payload.experience_duration !== undefined) updates.experience_duration = payload.experience_duration;
             if (payload.qualification !== undefined) updates.qualification = payload.qualification;
+            if (payload.place !== undefined) updates.place = payload.place;
+            if (payload.city !== undefined) updates.city = payload.city;
             if (payload.notes !== undefined) updates.notes = payload.notes;
+            // Interview Schedule
+            if (payload.interview_date !== undefined) updates.interview_date = payload.interview_date;
+            if (payload.interview_time !== undefined) updates.interview_time = payload.interview_time;
+            if (payload.second_interview_date !== undefined) updates.second_interview_date = payload.second_interview_date;
+            if (payload.second_interview_time !== undefined) updates.second_interview_time = payload.second_interview_time;
+            // Account details
+            if (payload.account_holder_name !== undefined) updates.account_holder_name = payload.account_holder_name;
+            if (payload.account_number !== undefined) updates.account_number = payload.account_number;
+            if (payload.ifsc_code !== undefined) updates.ifsc_code = payload.ifsc_code;
+            if (payload.gpay_holder_name !== undefined) updates.gpay_holder_name = payload.gpay_holder_name;
+            if (payload.gpay_number !== undefined) updates.gpay_number = payload.gpay_number;
+            if (payload.upi_id !== undefined) updates.upi_id = payload.upi_id;
+            if (payload.rejection_reason !== undefined) updates.rejection_reason = payload.rejection_reason;
+            if (payload.communication_level !== undefined) updates.communication_level = payload.communication_level;
             if (payload.status) updates.status = payload.status;
+
+            // Validate required fields when approving
+            if (payload.status === 'approved') {
+                const merged = { ...current, ...updates };
+                if (!merged.communication_level) {
+                    sendJson(res, 400, { ok: false, error: 'communication_level is required for approval' });
+                    return true;
+                }
+            }
 
             const { data, error } = await adminClient
                 .from('teacher_leads')
@@ -190,77 +260,117 @@ export async function handleTeacherLeads(req, res, url) {
                 return true;
             }
 
-            if (!payload.user_id) {
-                sendJson(res, 400, { ok: false, error: 'user_id required (the auth user id for this teacher)' });
+            if (!payload.email || !payload.password) {
+                sendJson(res, 400, { ok: false, error: 'email and password are required to create teacher login' });
                 return true;
             }
 
-            // Generate teacher code
-            const { data: existing } = await adminClient
-                .from('teacher_profiles')
-                .select('teacher_code')
-                .not('teacher_code', 'is', null)
-                .order('created_at', { ascending: false })
-                .limit(200);
-            let maxNum = 0;
-            for (const row of existing || []) {
-                const num = Number((row.teacher_code || '').replace(/^TCR/i, ''));
-                if (Number.isFinite(num) && num > maxNum) maxNum = num;
-            }
-            const teacherCode = `TCR${String(maxNum + 1).padStart(6, '0')}`;
+            // Helper to format Postgres Array literal: {val1,val2}
+            const toPgArray = (arr) => {
+                if (typeof arr === 'string' && arr.trim().startsWith('[')) {
+                    try { arr = JSON.parse(arr); } catch (e) { }
+                }
+                if (!Array.isArray(arr) || arr.length === 0) return '{}';
+                return `{${arr.map(s => `"${(s || '').replace(/"/g, '\\"')}"`).join(',')}}`;
+            };
 
-            // Check if profile exists
-            const { data: existingProfile } = await adminClient
+            // Create Auth User
+            // Reuse adminClient if it has service role (it should)
+            const { data: userData, error: userError } = await adminClient.auth.admin.createUser({
+                email: payload.email,
+                password: payload.password,
+                email_confirm: true,
+                user_metadata: { role: 'teacher', full_name: lead.full_name }
+            });
+
+            if (userError) {
+                // If user exists, we cannot proceed as easy (or we link existing user)? 
+                // Assumption: New email implies new user. If exists, show error.
+                sendJson(res, 400, { ok: false, error: `Failed to create login: ${userError.message}` });
+                return true;
+            }
+            const newUserId = userData.user.id;
+
+            // Ensure public.users record exists (Trigger might be missing or delayed)
+            const { error: publicUserError } = await adminClient
+                .from('users')
+                .insert({
+                    id: newUserId,
+                    email: payload.email,
+                    full_name: lead.full_name,
+                    is_active: true,
+                    created_at: nowIso(),
+                    updated_at: nowIso()
+                });
+            
+            if (publicUserError) {
+                // Ignore if already exists (dublicate key) but log if other error
+                if (!publicUserError.message.includes('duplicate key')) {
+                     console.error('Failed to create public user:', publicUserError);
+                }
+            }
+
+            // Generate Teacher Code
+            const teacherCode = await generateTeacherCode(adminClient);
+
+            // Create Teacher Profile
+            // Create Teacher Profile
+            const payloadInsert = {
+                user_id: newUserId,
+                teacher_code: teacherCode,
+                experience_level: lead.experience_level || null,
+                per_hour_rate: payload.per_hour_rate ?? null,
+                is_in_pool: true,
+                phone: lead.phone || null,
+                qualification: lead.qualification || null,
+                subjects_taught: toPgArray(lead.subjects),
+                syllabus: toPgArray(lead.boards),
+                languages: toPgArray(lead.mediums),
+                experience_duration: lead.experience_duration || null,
+                experience_type: lead.experience_type || null,
+                place: lead.place || null,
+                city: lead.city || null,
+                communication_level: lead.communication_level || null,
+                account_holder_name: lead.account_holder_name || null,
+                account_number: lead.account_number || null,
+                ifsc_code: lead.ifsc_code || null,
+                gpay_holder_name: lead.gpay_holder_name || null,
+                gpay_number: lead.gpay_number || null,
+                upi_id: lead.upi_id || null,
+                created_at: nowIso(),
+                updated_at: nowIso()
+            };
+            console.log('Insert Payload:', payloadInsert);
+
+            const { data: teacherProfile, error: ce } = await adminClient
                 .from('teacher_profiles')
+                .insert(payloadInsert)
                 .select('*')
-                .eq('user_id', payload.user_id)
-                .maybeSingle();
-
-            let teacherProfile;
-            if (existingProfile) {
-                const { data: updated, error: ue } = await adminClient
-                    .from('teacher_profiles')
-                    .update({
-                        is_in_pool: true,
-                        experience_level: lead.experience_level || existingProfile.experience_level,
-                        per_hour_rate: payload.per_hour_rate ?? existingProfile.per_hour_rate,
-                        updated_at: nowIso()
-                    })
-                    .eq('id', existingProfile.id)
-                    .select('*')
-                    .single();
-                if (ue) throw new Error(ue.message);
-                teacherProfile = updated;
-            } else {
-                const { data: created, error: ce } = await adminClient
-                    .from('teacher_profiles')
-                    .insert({
-                        user_id: payload.user_id,
-                        teacher_code: teacherCode,
-                        experience_level: lead.experience_level || null,
-                        per_hour_rate: payload.per_hour_rate ?? null,
-                        is_in_pool: true,
-                        created_at: nowIso(),
-                        updated_at: nowIso()
-                    })
-                    .select('*')
-                    .single();
-                if (ce) throw new Error(ce.message);
-                teacherProfile = created;
+                .single();
+            if (ce) {
+                console.error('Error creating teacher profile:', ce);
+                throw new Error(ce.message);
             }
 
-            // Mark lead as onboarded + link to teacher profile
+            console.log('Converting Lead:', lead.id, lead.full_name);
+            console.log('Lead Data:', { subjects: lead.subjects, boards: lead.boards, mediums: lead.mediums });
+            
+            // Mark lead as converted and closed
             await adminClient
                 .from('teacher_leads')
-                .update({ status: 'onboarded', converted_teacher_id: teacherProfile.id, updated_at: nowIso() })
+                .update({ 
+                    converted_teacher_id: teacherProfile.id, 
+                    status: 'closed', // Move to closed tab
+                    updated_at: nowIso() 
+                })
                 .eq('id', id);
 
             await adminClient.from('teacher_lead_history').insert({
                 teacher_lead_id: id,
                 old_status: lead.status,
-                new_status: 'onboarded',
+                new_status: 'closed',
                 changed_by: actor.userId,
-                note: `Converted to teacher ${teacherProfile.teacher_code || teacherProfile.id}`,
+                note: `Converted to teacher ${teacherCode} (Login Created)`,
                 created_at: nowIso()
             });
 

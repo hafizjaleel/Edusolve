@@ -1,14 +1,38 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { apiFetch } from '../../../lib/api.js';
+import { CreatableSelect } from '../../../components/ui/CreatableSelect.jsx';
 
 export function AddLeadModal({ onClose, onSuccess }) {
     const [studentName, setStudentName] = useState('');
     const [contactNumber, setContactNumber] = useState('');
     const [subject, setSubject] = useState('');
+    const [leadType, setLeadType] = useState('');
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
+    const [leadTypes, setLeadTypes] = useState([]);
+
+    async function fetchLeadTypes() {
+        const res = await apiFetch('/leads/types');
+        if (res.ok) setLeadTypes(res.types || []);
+    }
+
+    async function handleAddType(name) {
+        const res = await apiFetch('/leads/types', {
+            method: 'POST',
+            body: JSON.stringify({ name })
+        });
+        if (res.ok) {
+            setLeadTypes(prev => [...prev, name].sort());
+        } else {
+            console.error('Failed to save lead type:', res.error);
+        }
+    }
+
+    useEffect(() => {
+        fetchLeadTypes();
+    }, []);
 
     async function onSubmit(e) {
         e.preventDefault();
@@ -21,6 +45,7 @@ export function AddLeadModal({ onClose, onSuccess }) {
                     student_name: studentName,
                     contact_number: contactNumber,
                     subject,
+                    lead_type: leadType,
                     email
                 })
             });
@@ -49,6 +74,16 @@ export function AddLeadModal({ onClose, onSuccess }) {
                         Subject
                         <input value={subject} onChange={(e) => setSubject(e.target.value)} />
                     </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <CreatableSelect
+                            label="Lead Type"
+                            value={leadType}
+                            onChange={setLeadType}
+                            options={leadTypes}
+                            placeholder="Select or Add New"
+                            onAdd={handleAddType}
+                        />
+                    </div>
                     <label>
                         Email (Optional)
                         <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
