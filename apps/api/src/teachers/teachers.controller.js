@@ -41,6 +41,8 @@ async function generateTeacherCode(adminClient) {
 export async function handleTeachers(req, res, url) {
   if (!url.pathname.startsWith('/teachers')) return false;
 
+  const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
   const adminClient = getSupabaseAdminClient();
   if (!adminClient) {
     sendJson(res, 500, { ok: false, error: 'supabase admin is not configured' });
@@ -57,7 +59,82 @@ export async function handleTeachers(req, res, url) {
         .eq('is_in_pool', true)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
+      
+      const items = (data || []).map(p => {
+        if (p.teacher_availability) {
+          p.teacher_availability = p.teacher_availability.map(s => ({
+            ...s,
+            day_of_week: typeof s.day_of_week === 'number' ? DAY_MAP[s.day_of_week] : s.day_of_week
+          }));
+        }
+        return p;
+      });
+
+      // Fetch upcoming booked demos for all pool teachers
+      const teacherUserIds = items.map(t => t.user_id).filter(Boolean);
+      let bookedDemos = [];
+      if (teacherUserIds.length) {
+        const { data: demos } = await adminClient
+          .from('demo_sessions')
+          .select('id, teacher_id, scheduled_at, ends_at, status, leads(student_name, subject)')
+          .in('teacher_id', teacherUserIds)
+          .eq('status', 'scheduled')
+          .gte('scheduled_at', new Date().toISOString());
+        bookedDemos = demos || [];
+      }
+
+      // Attach booked demos to each teacher
+      for (const t of items) {
+        t.booked_demos = bookedDemos.filter(d => d.teacher_id === t.user_id);
+      }
+
+      sendJson(res, 200, { ok: true, items });
+      return true;
+    }
+
+
+
+
+    // ── GET /teachers/my-demos — teacher's upcoming demo sessions ──
+    if (req.method === 'GET' && url.pathname === '/teachers/my-demos') {
+      if (actor.role !== 'teacher') {
+        sendJson(res, 403, { ok: false, error: 'teacher role required' });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('demo_sessions')
+        .select('*, leads(student_name, subject, class_level, contact_number)')
+        .eq('teacher_id', actor.userId)
+        .in('status', ['scheduled'])
+        .order('scheduled_at', { ascending: true });
+      if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
+    // ── GET /teachers/me — teacher gets own profile ──
+    if (req.method === 'GET' && url.pathname === '/teachers/me') {
+      if (actor.role !== 'teacher') {
+        sendJson(res, 403, { ok: false, error: 'teacher role required' });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .select('*, users(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .eq('user_id', actor.userId)
+        .maybeSingle();
+      if (error) throw new Error(error.message);
+      if (!data) {
+        sendJson(res, 404, { ok: false, error: 'teacher profile not found' });
+        return true;
+      }
+      if (data.teacher_availability) {
+        data.teacher_availability = data.teacher_availability.map(s => ({
+          ...s,
+          day_of_week: typeof s.day_of_week === 'number' ? DAY_MAP[s.day_of_week] : s.day_of_week
+        }));
+      }
+      sendJson(res, 200, { ok: true, teacher: data });
       return true;
     }
 
@@ -79,8 +156,81 @@ export async function handleTeachers(req, res, url) {
         sendJson(res, 404, { ok: false, error: 'teacher profile not found' });
         return true;
       }
+      if (data.teacher_availability) {
+        data.teacher_availability = data.teacher_availability.map(s => ({
+          ...s,
+          day_of_week: typeof s.day_of_week === 'number' ? DAY_MAP[s.day_of_week] : s.day_of_week
+        }));
+      }
       sendJson(res, 200, { ok: true, teacher: data });
       return true;
+    }
+
+    // ── PATCH /teachers/:id — update teacher profile ──
+    if (req.method === 'PATCH' && parts.length === 2 && parts[0] === 'teachers') {
+      try {
+        if (!isTeacherCoordinator(actor) && actor.role !== 'super_admin') {
+          sendJson(res, 403, { ok: false, error: 'role not allowed to update teacher profile' });
+          return true;
+        }
+        const teacherId = parts[1];
+        const payload = await readJson(req);
+        
+        // Whitelist allowed fields for update
+        const allowed = [
+          'experience_level', 'per_hour_rate', 'phone', 'qualification', 
+          'subjects_taught', 'syllabus', 'languages', 'experience_duration', 
+          'experience_type', 'place', 'city', 'communication_level',
+          'account_holder_name', 'account_number', 'ifsc_code', 
+          'gpay_holder_name', 'gpay_number', 'upi_id',
+          'gender', 'dob', 'address', 'pincode'
+        ];
+        
+        const updates = {};
+        for (const k of allowed) {
+          if (payload[k] !== undefined) updates[k] = payload[k];
+        }
+        
+        // Check if full_name is the only thing being updated
+        if (Object.keys(updates).length === 0 && !payload.full_name) {
+          sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
+          return true;
+        }
+        
+        if (Object.keys(updates).length > 0) {
+            updates.updated_at = nowIso();
+            const { error: updateError } = await adminClient
+            .from('teacher_profiles')
+            .update(updates)
+            .eq('id', teacherId);
+            if (updateError) throw new Error(updateError.message);
+        }
+
+        // Also allow updating user full name if provided
+        if (payload.full_name) {
+           // efficient way: get user_id from profile first? NO, we can do it in one go if we knew user_id
+           // But we need to return the updated object anyway.
+           const { data: current } = await adminClient.from('teacher_profiles').select('user_id').eq('id', teacherId).single();
+           if (current && current.user_id) {
+               await adminClient.from('users').update({ full_name: payload.full_name }).eq('id', current.user_id);
+           }
+        }
+        
+        // Return updated profile
+        const { data: updatedProfile, error: fetchError } = await adminClient
+          .from('teacher_profiles')
+          .select('*, users(id,email,full_name)')
+          .eq('id', teacherId)
+          .single();
+          
+        if (fetchError) throw new Error(fetchError.message);
+
+        sendJson(res, 200, { ok: true, teacher: updatedProfile });
+        return true;
+      } catch (e) {
+        sendJson(res, 500, { ok: false, error: e.message });
+        return true;
+      }
     }
 
     if (req.method === 'POST' && url.pathname === '/teachers/recruitment/success') {
@@ -148,25 +298,7 @@ export async function handleTeachers(req, res, url) {
       return true;
     }
 
-    // ── GET /teachers/me — teacher gets own profile ──
-    if (req.method === 'GET' && url.pathname === '/teachers/me') {
-      if (actor.role !== 'teacher') {
-        sendJson(res, 403, { ok: false, error: 'teacher role required' });
-        return true;
-      }
-      const { data, error } = await adminClient
-        .from('teacher_profiles')
-        .select('*, users(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
-        .eq('user_id', actor.userId)
-        .maybeSingle();
-      if (error) throw new Error(error.message);
-      if (!data) {
-        sendJson(res, 404, { ok: false, error: 'teacher profile not found' });
-        return true;
-      }
-      sendJson(res, 200, { ok: true, teacher: data });
-      return true;
-    }
+
 
     // ── PUT /teachers/availability — replace all availability slots ──
     if (req.method === 'PUT' && url.pathname === '/teachers/availability') {
@@ -187,16 +319,20 @@ export async function handleTeachers(req, res, url) {
       const slots = payload.slots || [];
 
       // Delete existing slots
-      await adminClient.from('teacher_availability').delete().eq('teacher_id', profile.id);
+      await adminClient.from('teacher_availability').delete().eq('teacher_profile_id', profile.id);
 
       // Insert new slots
       if (slots.length > 0) {
-        const rows = slots.map(s => ({
-          teacher_id: profile.id,
-          day_of_week: s.day_of_week,
-          start_time: s.start_time,
-          end_time: s.end_time
-        }));
+        const rows = slots.map(s => {
+          const dayIndex = DAY_MAP.indexOf(s.day_of_week);
+          if (dayIndex === -1) throw new Error(`Invalid day: ${s.day_of_week}`);
+          return {
+            teacher_profile_id: profile.id,
+            day_of_week: dayIndex,
+            start_time: s.start_time,
+            end_time: s.end_time
+          };
+        });
         const { error: insertError } = await adminClient.from('teacher_availability').insert(rows);
         if (insertError) throw new Error(insertError.message);
       }

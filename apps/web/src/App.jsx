@@ -6,9 +6,12 @@ import AppShell from './components/AppShell.jsx';
 import PageView from './components/PageView.jsx';
 import {
   AllLeadsPage,
+  ConvertedLeadsPage,
   DemoManagementPage,
   LeadDetailsPage,
-  MyLeadsPage
+  MyLeadsPage,
+  OverdueLeadsPage,
+  PaymentRequestsPage
 } from './features/leads/LeadsPages.jsx';
 import { TodayLeadsPage } from './features/leads/TodayLeadsPage.jsx';
 import {
@@ -28,6 +31,7 @@ import {
   TeacherPoolPage,
   AutomationPage
 } from './features/academic/AcademicPages.jsx';
+import { SubjectsBoardsPage } from './features/academic/SubjectsBoardsPage.jsx';
 import { CounselorTeamPage } from './features/counselors/CounselorPages.jsx';
 import { CounselorReportsPage } from './features/counselors/CounselorReportsPage.jsx';
 import { CounselorRequestsPage } from './features/requests/CounselorRequestsPage.jsx';
@@ -35,6 +39,7 @@ import { VerificationQueuePage, SessionLogsPage } from './features/sessions/Sess
 import { TeacherProfilePage } from './features/teachers/TeacherPages.jsx';
 import { TCDashboardPage, TeacherLeadsPage, TCTeacherPoolPage, TeacherPerformancePage } from './features/teachers/TeacherCoordinatorPages.jsx';
 import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherReportsPage, TeacherInvoicesPage } from './features/teachers/TeacherDashboardPages.jsx';
+import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPayrollPage, HRPaymentRequestsPage } from './features/hr/HRPages.jsx';
 import { getSession, logout } from './lib/auth.js';
 import { defaultPageForRole, getPageByPath, pagesForRole } from './lib/routes.js';
 import { ROLE_OPTIONS } from './lib/roles.js';
@@ -53,6 +58,7 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [activePath, setActivePath] = useState('');
   const [selectedLeadId, setSelectedLeadId] = useState('');
+  const [leadDetailsTab, setLeadDetailsTab] = useState('profile');
   const [selectedTeacherProfileId, setSelectedTeacherProfileId] = useState('');
 
   useEffect(() => {
@@ -108,8 +114,9 @@ export default function App() {
     window.location.hash = '';
   }
 
-  function openLeadDetails(leadId) {
+  function openLeadDetails(leadId, tab = 'profile') {
     setSelectedLeadId(leadId);
+    setLeadDetailsTab(tab);
     onNavigate('/leads/details');
   }
 
@@ -130,8 +137,11 @@ export default function App() {
     if (page.path === '/leads/all') return <AllLeadsPage onOpenDetails={openLeadDetails} selectedLeadId={selectedLeadId} />;
     if (page.path === '/leads/today') return <TodayLeadsPage onOpenDetails={openLeadDetails} role={role} />;
     if (page.path === '/leads/mine') return <MyLeadsPage onOpenDetails={openLeadDetails} />;
-    if (page.path === '/leads/details') return <LeadDetailsPage leadId={selectedLeadId} />;
-    if (page.path === '/leads/demo-management') return <DemoManagementPage leadId={selectedLeadId} />;
+    if (page.path === '/leads/details') return <LeadDetailsPage leadId={selectedLeadId} initialTab={leadDetailsTab} />;
+    if (page.path === '/leads/demo-management') return <DemoManagementPage leadId={selectedLeadId} onOpenDetails={openLeadDetails} />;
+    if (page.path === '/leads/converted') return <ConvertedLeadsPage />;
+    if (page.path === '/leads/payment-requests') return <PaymentRequestsPage />;
+    if (page.path === '/leads/overdue') return <OverdueLeadsPage />;
 
     /* Students */
     if (page.path === '/students/hub') return <StudentsHubPage role={role} />;
@@ -172,7 +182,8 @@ export default function App() {
 
     /* Teacher Coordinator */
     if (page.path === '/dashboard/tc') return <TCDashboardPage />;
-    if (page.path === '/tc/teacher-leads') return <TeacherLeadsPage />;
+    if (page.path === '/tc/teacher-leads') return <TeacherLeadsPage onNavigate={onNavigate} />;
+
     if (page.path === '/tc/teacher-pool') return <TeacherPoolPage />;
     if (page.path === '/tc/performance') return <TeacherPerformancePage />;
 
@@ -181,6 +192,9 @@ export default function App() {
 
     /* Automation */
     if (page.path === '/automation/hub') return <AutomationPage />;
+
+    /* Subjects & Boards */
+    if (page.path === '/manage/subjects') return <SubjectsBoardsPage />;
 
     /* Finance */
     if (page.path === '/dashboard/finance') return <FinanceDashboardPage />;
@@ -191,6 +205,14 @@ export default function App() {
     if (page.path === '/finance/payroll') return <PayrollPage />;
     if (page.path === '/finance/payment-verification') return <PaymentVerificationPage />;
     if (page.path === '/finance/reports') return <FinanceReportsPage />;
+
+    /* HR */
+    if (page.path === '/dashboard/hr') return <HRDashboardPage />;
+    if (page.path === '/hr/attendance') return <AttendancePage />;
+    if (page.path === '/hr/employees') return <EmployeesPage />;
+    if (page.path === '/hr/salary') return <SalaryCalculatorPage />;
+    if (page.path === '/hr/payroll') return <HRPayrollPage />;
+    if (page.path === '/hr/payment-requests') return <HRPaymentRequestsPage />;
 
     /* Super Admin & System */
     if (page.path === '/dashboard/super-admin') return <SuperAdminDashboardPage />;

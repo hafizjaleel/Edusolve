@@ -19,3 +19,6 @@ Starter monorepo scaffold.
 - Role-aware UI shell and module navigation
 - Leads module first slice: all leads, my leads, lead details edit, soft delete, demo request
 - Supabase-ready auth path with dev fallback mode
+
+## Best Practices
+- **UI/UX**: Use SVG icons instead of emojis for all UI elements (buttons, labels, status indicators).

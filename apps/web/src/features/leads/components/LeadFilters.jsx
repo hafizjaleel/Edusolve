@@ -31,6 +31,7 @@ export function LeadFilters({ onFilterChange, counselors = [], children }) {
                     <option value="demo_scheduled">Demo Scheduled</option>
                     <option value="demo_done">Demo Done</option>
                     <option value="payment_pending">Payment Pending</option>
+                    <option value="payment_verification">Payment Verification</option>
                     <option value="joined">Joined</option>
                     <option value="dropped">Dropped</option>
                 </select>

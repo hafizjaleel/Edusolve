@@ -7,6 +7,7 @@ function StatusBadge({ status }) {
         demo_scheduled: '#f59e0b',
         demo_done: '#3b82f6',
         payment_pending: '#ef4444',
+        payment_verification: '#f97316',
         joined: '#10b981',
         dropped: '#6b7280'
     };
@@ -156,6 +157,12 @@ export function TodayLeadsPage({ onOpenDetails, role }) {
                                     <span className="text-muted">Subject</span>
                                     <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{lead.subject || '—'}</p>
                                 </div>
+                                {lead.lead_type && (
+                                    <div>
+                                        <span className="text-muted">Lead Type</span>
+                                        <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{lead.lead_type}</p>
+                                    </div>
+                                )}
                                 {lead.email ? (
                                     <div>
                                         <span className="text-muted">Email</span>

@@ -24,6 +24,7 @@ export function CounselorDashboardPage() {
     const demoScheduled = items.filter((lead) => lead.status === 'demo_scheduled').length;
     const demoDone = items.filter((lead) => lead.status === 'demo_done').length;
     const paymentPending = items.filter((lead) => lead.status === 'payment_pending').length;
+    const paymentVerification = items.filter((lead) => lead.status === 'payment_verification').length;
     const joined = items.filter((lead) => lead.status === 'joined').length;
     const dropped = items.filter((lead) => lead.status === 'dropped').length;
 
@@ -36,7 +37,7 @@ export function CounselorDashboardPage() {
 
     const conversionRate = total > 0 ? Math.round((joined / total) * 100) : 0;
 
-    return { total, active, newLeads, demoScheduled, demoDone, paymentPending, joined, dropped, todayLeads, conversionRate };
+    return { total, active, newLeads, demoScheduled, demoDone, paymentPending, paymentVerification, joined, dropped, todayLeads, conversionRate };
   }, [items]);
 
   // Recent 5 leads
@@ -62,6 +63,7 @@ export function CounselorDashboardPage() {
             { label: 'Demo Scheduled', count: metrics.demoScheduled, color: '#f59e0b' },
             { label: 'Demo Done', count: metrics.demoDone, color: '#3b82f6' },
             { label: 'Payment Pending', count: metrics.paymentPending, color: '#ef4444' },
+            { label: 'Payment Verification', count: metrics.paymentVerification, color: '#f97316' },
           ].map(item => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>

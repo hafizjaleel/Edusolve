@@ -5,7 +5,8 @@ export const ROLES = {
   TEACHER_COORDINATOR: 'teacher_coordinator',
   ACADEMIC_COORDINATOR: 'academic_coordinator',
   TEACHER: 'teacher',
-  FINANCE: 'finance'
+  FINANCE: 'finance',
+  HR: 'hr'
 };
 
 export const ROLE_OPTIONS = [
@@ -15,5 +16,6 @@ export const ROLE_OPTIONS = [
   { label: 'Teacher Coordinator', value: ROLES.TEACHER_COORDINATOR },
   { label: 'Academic Coordinator', value: ROLES.ACADEMIC_COORDINATOR },
   { label: 'Teacher', value: ROLES.TEACHER },
-  { label: 'Finance', value: ROLES.FINANCE }
+  { label: 'Finance', value: ROLES.FINANCE },
+  { label: 'HR', value: ROLES.HR }
 ];

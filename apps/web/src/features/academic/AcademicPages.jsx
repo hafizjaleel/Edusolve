@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef, Fragment } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { SearchSelect } from '../../components/ui/SearchSelect.jsx';
 
@@ -100,41 +100,122 @@ export function AcademicCoordinatorDashboardPage() {
   );
 }
 
+function SubjectSelect({ value, onChange, options, required }) {
+  return (
+    <select
+      value={value}
+      onChange={async (e) => {
+        if (e.target.value === '--add-new--') {
+          const newName = prompt('Enter new subject name:');
+          if (newName && newName.trim()) {
+            const trimmed = newName.trim();
+            try {
+              await apiFetch('/subjects', { method: 'POST', body: JSON.stringify({ name: trimmed }) });
+              onChange(trimmed, true);
+            } catch (err) {
+              alert(err.message);
+              onChange('', false);
+            }
+          } else {
+            onChange('', false);
+          }
+        } else {
+          onChange(e.target.value, false);
+        }
+      }}
+      required={required}
+    >
+      <option value="">Select Subject</option>
+      {options.map(s => <option key={s} value={s}>{s}</option>)}
+      <option value="--add-new--">+ Add New Subject</option>
+    </select>
+  );
+}
+
 /* ═══════ Student Detail (inline) ═══════ */
 function StudentDetailPage({ studentId, onBack }) {
   const [student, setStudent] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [messages, setMessages] = useState([]);
+  const [demoSessions, setDemoSessions] = useState([]);
+  const [paymentRequests, setPaymentRequests] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('profile');
   const [aTeacher, setATeacher] = useState('');
   const [aSubject, setASubject] = useState('');
-  const [aNote, setANote] = useState('');
+  const [aDay, setADay] = useState('');
+  const [aTime, setATime] = useState('');
   const [msgText, setMsgText] = useState('');
+  const [subjectOptions, setSubjectOptions] = useState([]);
+
+  const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const timeOptions = useMemo(() => {
+    const times = [];
+    for (let h = 6; h <= 22; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === 22 && m > 0) break; // Ends exactly at 10:00 PM
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const hour12 = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+        const mins = m.toString().padStart(2, '0');
+        times.push(`${hour12}:${mins} ${ampm}`);
+      }
+    }
+    return times;
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const d = await apiFetch(`/students/${studentId}`);
-      setStudent(d.student); setAssignments(d.assignments || []); setSessions(d.sessions || []); setMessages(d.messages || []);
-      const p = await apiFetch('/teachers/pool'); setTeachers(p.items || []);
+      setStudent(d.student);
+      setAssignments(d.assignments || []);
+      setSessions(d.sessions || []);
+      setMessages(d.messages || []);
+      setDemoSessions(d.demoSessions || []);
+      setPaymentRequests(d.paymentRequests || []);
+      const p = await apiFetch('/teachers/pool');
+      setTeachers(p.items || []);
+      const subjs = await apiFetch('/subjects');
+      setSubjectOptions((subjs.subjects || []).map(s => s.name));
     } catch (e) { setError(e.message); }
   }, [studentId]);
   useEffect(() => { load(); }, [load]);
 
   async function assignTeacher(e) {
     e.preventDefault();
-    try { await apiFetch(`/students/${studentId}/assignments`, { method: 'POST', body: JSON.stringify({ teacher_id: aTeacher, subject: aSubject, schedule_note: aNote }) }); setATeacher(''); setASubject(''); setANote(''); await load(); } catch (e) { setError(e.message); }
+    const scheduleNote = aDay && aTime ? `${aDay} at ${aTime}` : '';
+    try {
+      await apiFetch(`/students/${studentId}/assignments`, {
+        method: 'POST',
+        body: JSON.stringify({ teacher_id: aTeacher, subject: aSubject, day: aDay, time: aTime, schedule_note: scheduleNote })
+      });
+      setATeacher(''); setASubject(''); setADay(''); setATime('');
+      await load();
+    } catch (e) { setError(e.message); }
   }
-  async function removeAssignment(id) { try { await apiFetch(`/students/${studentId}/assignments/${id}`, { method: 'DELETE' }); await load(); } catch (e) { setError(e.message); } }
+
+  async function removeAssignment(id) {
+    try { await apiFetch(`/students/${studentId}/assignments/${id}`, { method: 'DELETE' }); await load(); } catch (e) { setError(e.message); }
+  }
+
+  async function acceptAssignment(id) {
+    try { await apiFetch(`/students/${studentId}/assignments/${id}/accept`, { method: 'POST' }); await load(); } catch (e) { setError(e.message); }
+  }
+
   async function sendMessage(e) {
     e.preventDefault(); if (!msgText.trim()) return;
     try { await apiFetch(`/students/${studentId}/messages/send-reminder`, { method: 'POST', body: JSON.stringify({ message: msgText, type: 'general' }) }); setMsgText(''); await load(); } catch (e) { setError(e.message); }
   }
 
   if (!student) return <section className="panel">{error ? <p className="error">{error}</p> : <p>Loading...</p>}</section>;
-  const tabs = [{ id: 'profile', label: 'Profile' }, { id: 'teachers', label: `Teachers (${assignments.length})` }, { id: 'sessions', label: `Sessions (${sessions.length})` }, { id: 'chat', label: `Messages (${messages.length})` }];
+  const tabs = [
+    { id: 'profile', label: 'Profile' },
+    { id: 'teachers', label: `Teachers (${assignments.length})` },
+    { id: 'sessions', label: `Sessions (${sessions.length})` },
+    { id: 'chat', label: `Messages (${messages.length})` },
+    { id: 'lead_data', label: 'Lead Data' }
+  ];
 
   return (
     <section className="panel">
@@ -149,11 +230,12 @@ function StudentDetailPage({ studentId, onBack }) {
       {tab === 'profile' ? <div className="grid-two">
         <article className="card"><h3>Info</h3><div className="detail-grid">
           <div><span className="eyebrow">Code</span><p><strong>{student.student_code || '—'}</strong></p></div>
-          <div><span className="eyebrow">Class</span><p>{student.class_level || '—'}</p></div>
-          <div><span className="eyebrow">Parent</span><p>{student.parent_name || '—'}</p></div>
-          <div><span className="eyebrow">Student No.</span><p>{student.contact_number || '—'}</p></div>
-          <div><span className="eyebrow">Parent No.</span><p>{student.parent_number || '—'}</p></div>
-          <div><span className="eyebrow">Package</span><p>{student.package_name || '—'}</p></div>
+          <div><span className="eyebrow">Class</span><p>{student.class_level || student.leads?.class_level || '—'}</p></div>
+          <div><span className="eyebrow">Subject</span><p>{student.leads?.subject || '—'}</p></div>
+          <div><span className="eyebrow">Parent</span><p>{student.parent_name || student.leads?.parent_name || '—'}</p></div>
+          <div><span className="eyebrow">Student No.</span><p>{(student.leads?.country_code ? student.leads.country_code + ' ' : '') + (student.contact_number || student.leads?.contact_number || '—')}</p></div>
+          <div><span className="eyebrow">Package</span><p>{student.package_name || student.leads?.package_name || '—'}</p></div>
+          <div><span className="eyebrow">Source</span><p>{student.leads?.source || '—'}</p></div>
           <div><span className="eyebrow">Notification</span><p>{student.notification_pref || 'WhatsApp'}</p></div>
           <div><span className="eyebrow">Joined</span><p>{student.joined_at ? new Date(student.joined_at).toLocaleDateString('en-IN') : '—'}</p></div>
         </div></article>
@@ -164,8 +246,64 @@ function StudentDetailPage({ studentId, onBack }) {
       </div> : null}
 
       {tab === 'teachers' ? <div>
-        <article className="card">{assignments.length ? <div className="assignment-cards">{assignments.map(a => <div key={a.id} className="assignment-card"><div className="assignment-info"><strong>{a.users?.full_name || a.teacher_id}</strong><span className="status-tag">{a.subject}</span>{a.schedule_note ? <p className="muted">{a.schedule_note}</p> : null}</div><button type="button" className="danger small" onClick={() => removeAssignment(a.id)}>Remove</button></div>)}</div> : <p className="muted">No teachers assigned.</p>}</article>
-        <article className="card"><h3>Assign Teacher</h3><form className="form-grid" onSubmit={assignTeacher}><label>Teacher<select value={aTeacher} onChange={e => setATeacher(e.target.value)} required><option value="">Select</option>{teachers.map(t => <option key={t.id} value={t.user_id}>{t.users?.full_name || t.teacher_code}</option>)}</select></label><label>Subject<input value={aSubject} onChange={e => setASubject(e.target.value)} required placeholder="e.g. Mathematics" /></label><label>Schedule Note<input value={aNote} onChange={e => setANote(e.target.value)} placeholder="e.g. Mon/Wed 4-5 PM" /></label><button type="submit">Assign</button></form></article>
+        <article className="card">
+          {assignments.length ? (
+            <div className="assignment-cards">
+              {assignments.map(a => (
+                <div key={a.id} className="assignment-card" style={{ borderLeft: a.status === 'pending' ? '4px solid #f59e0b' : '4px solid #10b981' }}>
+                  <div className="assignment-info">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <strong>{a.users?.full_name || a.teacher_id}</strong>
+                      <span className={`status-tag small ${a.status === 'pending' ? 'warning' : 'success'}`}>{a.status === 'pending' ? 'Pending' : 'Accepted'}</span>
+                    </div>
+                    <span className="status-tag">{a.subject}</span>
+                    {a.schedule_note ? <p className="muted">{a.schedule_note}</p> : null}
+                  </div>
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    {a.status === 'pending' && <button type="button" className="success small" onClick={() => acceptAssignment(a.id)}>Accept</button>}
+                    <button type="button" className="danger small" onClick={() => removeAssignment(a.id)}>Remove</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : <p className="muted">No teachers assigned.</p>}
+        </article>
+
+        <article className="card">
+          <h3>Assign Teacher Candidate</h3>
+          <p className="muted" style={{ fontSize: '12px', marginBottom: '16px' }}>Assign teachers to propose them to the student. If multiple candidates are proposed for one subject, accepting one will automatically remove the rest.</p>
+          <form className="form-grid" onSubmit={assignTeacher}>
+            <label>Subject<SubjectSelect value={aSubject} onChange={(v, isNew) => { setASubject(v); if (isNew) setSubjectOptions(prev => [...prev, v]); }} options={subjectOptions} required /></label>
+            <label>Day<select value={aDay} onChange={e => setADay(e.target.value)} required><option value="">Select Day</option>{dayOptions.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
+            <label>Time<select value={aTime} onChange={e => setATime(e.target.value)} required><option value="">Select Time</option>{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+            <label>Teacher
+              <select value={aTeacher} onChange={e => setATeacher(e.target.value)} required disabled={!aSubject || !aDay || !aTime}>
+                <option value="">Select a matched teacher</option>
+                {(() => {
+                  const filtered = teachers.filter(t => {
+                    if (!aSubject) return true;
+                    const target = aSubject.trim().toLowerCase();
+                    const subjects = Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : []);
+                    return subjects.some(s => (s || '').trim().toLowerCase() === target);
+                  });
+                  if (filtered.length === 0 && aSubject) return <option disabled>No teachers found for this subject</option>;
+                  return filtered.map(t => {
+                    let slots = [];
+                    try { slots = typeof t.teacher_availability === 'string' ? JSON.parse(t.teacher_availability) : (t.teacher_availability || []); } catch (e) { }
+                    const isAvailable = slots.some(slot => slot.day_of_week === aDay);
+                    return (
+                      <option key={t.id} value={t.user_id}>
+                        {t.users?.full_name || t.teacher_code} {isAvailable ? '(Available)' : '⚠️ (Schedule Conflict)'}
+                      </option>
+                    );
+                  });
+                })()}
+              </select>
+            </label>
+
+            <button type="submit" disabled={!aTeacher} style={{ gridColumn: '1 / -1' }}>Assign as Candidate</button>
+          </form>
+        </article>
       </div> : null}
 
       {tab === 'sessions' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Date</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th></tr></thead><tbody>{sessions.map(s => <tr key={s.id}><td data-label="Date">{s.session_date}</td><td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td><td data-label="Subject">{s.subject || '—'}</td><td data-label="Hrs">{s.duration_hours}h</td><td data-label="Status"><span className={`status-tag ${s.session_verifications?.[0]?.status === 'approved' ? 'success' : ''}`}>{s.session_verifications?.[0]?.status || 'pending'}</span></td></tr>)}{!sessions.length ? <tr><td colSpan="5">No sessions.</td></tr> : null}</tbody></table></div></article> : null}
@@ -174,18 +312,115 @@ function StudentDetailPage({ studentId, onBack }) {
         <div className="chat-messages">{!messages.length ? <div className="chat-empty"><p>No messages yet.</p></div> : null}{messages.map(m => <div key={m.id} className={`chat-bubble ${m.direction}`}><div className="chat-bubble-content"><p>{m.content}</p><div className="chat-meta"><span className={`delivery-status ${m.delivery_status}`}>{m.delivery_status === 'delivered' ? '✓✓' : m.delivery_status === 'sent' ? '✓' : m.delivery_status === 'failed' ? '✗' : '⏳'}</span><span className="chat-time">{new Date(m.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}</span></div></div></div>)}</div>
         <form className="chat-compose" onSubmit={sendMessage}><input value={msgText} onChange={e => setMsgText(e.target.value)} placeholder="Type a message..." required /><button type="submit">Send</button></form>
       </article> : null}
+
+      {tab === 'lead_data' ? <div>
+        <article className="card" style={{ marginBottom: '16px' }}>
+          <h3>Original Lead Information</h3>
+          {student.leads ? (
+            <div className="detail-grid">
+              <div><span className="eyebrow">Status History</span><p>{student.leads.status || '—'}</p></div>
+              <div><span className="eyebrow">Assigned To</span><p>{student.leads.counselor_id ? 'Assigned Counselor' : 'Unassigned'}</p></div>
+              <div><span className="eyebrow">Assigned At</span><p>{student.leads.assigned_at ? new Date(student.leads.assigned_at).toLocaleDateString('en-IN') : '—'}</p></div>
+              <div><span className="eyebrow">Follow-Up Date</span><p>{student.leads.next_followup_date ? new Date(student.leads.next_followup_date).toLocaleDateString('en-IN') : '—'}</p></div>
+              <div><span className="eyebrow">Lost Reason</span><p>{student.leads.lost_reason || '—'}</p></div>
+              <div style={{ gridColumn: '1 / -1' }}><span className="eyebrow">Counselor Notes</span><p style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{student.leads.counselor_notes || '—'}</p></div>
+              <div style={{ gridColumn: '1 / -1' }}><span className="eyebrow">Initial Remarks</span><p style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{student.leads.remarks || '—'}</p></div>
+            </div>
+          ) : (
+            <p className="muted">No original lead record found for this student.</p>
+          )}
+        </article>
+
+        <article className="card">
+          <h3>Demo Sessions</h3>
+          <div className="table-wrap mobile-friendly-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Teacher</th>
+                  <th>Status</th>
+                  <th>Outcome</th>
+                </tr>
+              </thead>
+              <tbody>
+                {demoSessions.map(d => {
+                  const tProf = d.users?.teacher_profiles?.[0];
+                  const codeLabel = tProf?.teacher_code ? ` (${tProf.teacher_code})` : '';
+                  return (
+                    <tr key={d.id}>
+                      <td data-label="Date">{new Date(d.scheduled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}</td>
+                      <td data-label="Teacher">{d.users?.full_name ? `${d.users.full_name}${codeLabel}` : '—'}</td>
+                      <td data-label="Status"><span className={`status-tag ${d.status === 'completed' ? 'success' : ''}`}>{d.status}</span></td>
+                      <td data-label="Outcome" style={{ whiteSpace: 'pre-wrap', fontSize: '0.9em' }}>{d.outcome || '—'}</td>
+                    </tr>
+                  );
+                })}
+                {!demoSessions.length && <tr><td colSpan="4">No demo sessions found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article className="card" style={{ marginTop: '16px' }}>
+          <h3>Payment History</h3>
+          <div className="table-wrap mobile-friendly-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Total Amt</th>
+                  <th>Hours</th>
+                  <th>Paid Amt</th>
+                  <th>Status</th>
+                  <th>Screenshot</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paymentRequests.map(p => (
+                  <tr key={p.id}>
+                    <td data-label="Date">{new Date(p.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' })}</td>
+                    <td data-label="Total Amt">{p.total_amount ? `₹${p.total_amount}` : '—'}</td>
+                    <td data-label="Hours">{p.hours || '—'}</td>
+                    <td data-label="Paid Amt" style={{ color: '#15803d', fontWeight: 600 }}>₹{p.amount}</td>
+                    <td data-label="Status"><span className="status-tag success">{p.status}</span></td>
+                    <td data-label="Screenshot">
+                      {p.screenshot_url ? <a href={p.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#2563eb' }}>View</a> : '—'}
+                    </td>
+                  </tr>
+                ))}
+                {!paymentRequests.length && <tr><td colSpan="6">No payment history found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      </div> : null}
     </section>
   );
 }
 
 /* ═══════ Student Onboarding Form (multi-schedule, multi-assignment) ═══════ */
-function StudentOnboardingForm({ teachers, onDone }) {
+function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }) {
   const [f, setF] = useState({ name: '', parent: '', studentNumber: '', parentNumber: '', classLevel: '', package: '', totalHours: '', notifPref: 'whatsapp' });
   const [assigns, setAssigns] = useState([{ teacherId: '', subject: '', scheduleNote: '', day: '', time: '' }]);
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
-  const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
+  const timeOptions = useMemo(() => {
+    const times = [];
+    for (let h = 6; h <= 22; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === 22 && m > 0) break; // Ends exactly at 10:00 PM
+        const ampm = h >= 12 ? 'PM' : 'AM';
+        const hour12 = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+        const mins = m.toString().padStart(2, '0');
+        times.push(`${hour12}:${mins} ${ampm}`);
+      }
+    }
+    return times;
+  }, []);
 
   function updateAssign(idx, k, v) { setAssigns(prev => prev.map((a, i) => i === idx ? { ...a, [k]: v } : a)); }
   function addAssign() { setAssigns(prev => [...prev, { teacherId: '', subject: '', scheduleNote: '', day: '', time: '' }]); }
@@ -225,10 +460,33 @@ function StudentOnboardingForm({ teachers, onDone }) {
         </div>
         {assigns.map((a, i) => (
           <div key={i} className="onboard-assign-row">
-            <label>Teacher<select value={a.teacherId} onChange={e => updateAssign(i, 'teacherId', e.target.value)}><option value="">Select</option>{teachers.map(t => <option key={t.id} value={t.user_id}>{t.users?.full_name || t.teacher_code}</option>)}</select></label>
-            <label>Subject <input value={a.subject} onChange={e => updateAssign(i, 'subject', e.target.value)} placeholder="e.g. Maths" /></label>
-            <label>Day<select value={a.day} onChange={e => updateAssign(i, 'day', e.target.value)}><option value="">Day</option>{dayNames.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-            <label>Time <input type="time" value={a.time} onChange={e => updateAssign(i, 'time', e.target.value)} /></label>
+            <label>Subject<SubjectSelect value={a.subject} onChange={(v, isNew) => { updateAssign(i, 'subject', v); if (isNew && onNewSubjectAdded) onNewSubjectAdded(v); }} options={subjects} required /></label>
+            <label>Day<select value={a.day} onChange={e => updateAssign(i, 'day', e.target.value)} required><option value="">Day</option>{dayNames.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
+            <label>Time<select value={a.time} onChange={e => updateAssign(i, 'time', e.target.value)} required><option value="">Time</option>{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
+            <label>Teacher
+              <select value={a.teacherId} onChange={e => updateAssign(i, 'teacherId', e.target.value)} required disabled={!a.subject || !a.day || !a.time}>
+                <option value="">Select Candidate</option>
+                {(() => {
+                  const filtered = teachers.filter(t => {
+                    if (!a.subject) return true;
+                    const target = a.subject.trim().toLowerCase();
+                    const tSubjects = Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : []);
+                    return tSubjects.some(s => (s || '').trim().toLowerCase() === target);
+                  });
+                  if (filtered.length === 0 && a.subject) return <option disabled>No teachers found for this subject</option>;
+                  return filtered.map(t => {
+                    let slots = [];
+                    try { slots = typeof t.teacher_availability === 'string' ? JSON.parse(t.teacher_availability) : (t.teacher_availability || []); } catch (e) { }
+                    const isAvailable = slots.some(slot => slot.day_of_week === a.day);
+                    return (
+                      <option key={t.id} value={t.user_id}>
+                        {t.users?.full_name || t.teacher_code} {isAvailable ? '(Available)' : '⚠️ (Schedule Conflict)'}
+                      </option>
+                    );
+                  });
+                })()}
+              </select>
+            </label>
             <label>Note <input value={a.scheduleNote} onChange={e => updateAssign(i, 'scheduleNote', e.target.value)} placeholder="e.g. Mon/Wed" /></label>
             {assigns.length > 1 ? <button type="button" className="danger small" onClick={() => removeAssign(i)} style={{ alignSelf: 'end', marginBottom: 4 }}>✕</button> : null}
           </div>
@@ -246,6 +504,7 @@ export function StudentsHubPage({ role }) {
   const [selId, setSelId] = useState(null);
   const [students, setStudents] = useState([]);
   const [teachers, setTeachers] = useState([]);
+  const [subjectsList, setSubjectsList] = useState([]);
   const [error, setError] = useState('');
   const isAC = role === 'academic_coordinator';
 
@@ -260,7 +519,14 @@ export function StudentsHubPage({ role }) {
     setError('');
     try {
       const d = await apiFetch('/students'); setStudents(d.items || []);
-      if (isAC && teachers.length === 0) { const tp = await apiFetch('/teachers/pool'); setTeachers(tp.items || []); }
+      if (isAC && teachers.length === 0) {
+        const [tp, subjs] = await Promise.all([
+          apiFetch('/teachers/pool'),
+          apiFetch('/subjects')
+        ]);
+        setTeachers(tp.items || []);
+        setSubjectsList((subjs.subjects || []).map(s => s.name));
+      }
     } catch (e) { setError(e.message); }
   }, [isAC, teachers.length]);
   useEffect(() => { loadData(); }, [loadData]);
@@ -273,7 +539,7 @@ export function StudentsHubPage({ role }) {
       <div className="tabs-row">{tabs.map(t => <button key={t.id} type="button" className={activeTab === t.id ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab(t.id)}>{t.label}</button>)}</div>
       <article className="card">
         {activeTab === 'students' ? <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th><th>Teachers</th></tr></thead><tbody>{students.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}><td data-label="ID">{s.student_code || '—'}</td><td data-label="Name">{s.student_name}</td><td data-label="Class">{s.class_level || '—'}</td><td data-label="Status"><span className={`status-tag ${s.status === 'active' ? 'success' : ''}`}>{s.status}</span></td><td data-label="Hours Left"><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td><td data-label="Teachers">{(s.student_teacher_assignments || []).filter(a => a.is_active).map(a => <span key={a.id} className="status-tag small" style={{ marginRight: 4 }}>{a.users?.full_name || '?'}·{a.subject}</span>)}{!(s.student_teacher_assignments || []).filter(a => a.is_active).length ? <span className="muted">None</span> : null}</td></tr>)}{!students.length ? <tr><td colSpan="6">No students.</td></tr> : null}</tbody></table></div> : null}
-        {activeTab === 'onboard' ? <StudentOnboardingForm teachers={teachers} onDone={loadData} /> : null}
+        {activeTab === 'onboard' ? <StudentOnboardingForm teachers={teachers} subjects={subjectsList} onDone={loadData} onNewSubjectAdded={(newSubj) => setSubjectsList(prev => [...prev, newSubj])} /> : null}
       </article>
     </section>
   );
@@ -485,6 +751,15 @@ export function TopUpsPage() {
 }
 
 /* ═══════ Teacher Pool ═══════ */
+function formatTime12(t) {
+  if (!t) return '';
+  const [h, m] = t.split(':');
+  const hour = parseInt(h, 10);
+  const ampm = hour >= 12 ? 'PM' : 'AM';
+  const hour12 = hour % 12 || 12;
+  return `${hour12}:${m} ${ampm}`;
+}
+
 export function TeacherPoolPage() {
   const [teachers, setTeachers] = useState([]);
   const [error, setError] = useState('');
@@ -496,6 +771,15 @@ export function TeacherPoolPage() {
   const [fSyllabus, setFSyllabus] = useState('');
   const [fTime, setFTime] = useState('');
   const [selectedMapDay, setSelectedMapDay] = useState(new Date().getDay()); // Default to today
+  const [viewTeacher, setViewTeacher] = useState(null);
+  const [showSlotsFor, setShowSlotsFor] = useState(null);
+
+  const ClockIcon = () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <polyline points="12 6 12 12 16 14"></polyline>
+    </svg>
+  );
 
   useEffect(() => { (async () => { try { const d = await apiFetch('/teachers/pool'); setTeachers(d.items || []); } catch (e) { setError(e.message); } })(); }, []);
   useEffect(() => { function close(e) { if (!e.target.closest('.filter-panel') && !e.target.closest('.filter-toggle-btn')) setFiltersOpen(false); } if (filtersOpen) document.addEventListener('click', close); return () => document.removeEventListener('click', close); }, [filtersOpen]);
@@ -519,6 +803,7 @@ export function TeacherPoolPage() {
   function clearFilters() { setFExp(''); setFLang(''); setFSubj(''); setFSyllabus(''); setFTime(''); }
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const fullDayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const hours = Array.from({ length: 14 }, (_, i) => i + 7);
 
   return (
@@ -547,29 +832,143 @@ export function TeacherPoolPage() {
         </div>
       </div>
 
-      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th></tr></thead><tbody>{filtered.map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">{t.preferred_time || '—'}</td></tr>)}{!filtered.length ? <tr><td colSpan="8">No teachers match filters.</td></tr> : null}</tbody></table></div></article> : null}
+      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th><th>View</th></tr></thead><tbody>{filtered.map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">
+        <div style={{ position: 'relative', display: 'inline-block' }}>
+          <button
+            type="button"
+            className="secondary small"
+            style={{ padding: '4px 8px', display: 'flex', alignItems: 'center', gap: '4px' }}
+            onClick={(e) => { e.stopPropagation(); setShowSlotsFor(showSlotsFor === t.id ? null : t.id); }}
+            title="View Availability"
+          >
+            <ClockIcon />
+          </button>
+          {showSlotsFor === t.id && (
+            <div style={{
+              position: 'absolute', top: '100%', right: '0', zIndex: 50,
+              background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px',
+              padding: '12px', minWidth: '220px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
+              textAlign: 'left'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
+                <strong style={{ fontSize: '12px', color: '#374151' }}>Preferred Slots</strong>
+                <button type="button" onClick={() => setShowSlotsFor(null)} style={{ border: 'none', background: 'transparent', fontSize: '16px', cursor: 'pointer', lineHeight: 1 }}>&times;</button>
+              </div>
+              {(t.teacher_availability && t.teacher_availability.length > 0) ? (
+                <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                  {t.teacher_availability.map((s, idx) => (
+                    <div key={idx} style={{ fontSize: '11px', marginBottom: '4px', paddingBottom: '4px', borderBottom: '1px solid #f3f4f6' }}>
+                      <span style={{ fontWeight: 600, color: '#4b5563', display: 'block' }}>{s.day_of_week}</span>
+                      <span style={{ color: '#6b7280' }}>
+                        {formatTime12(s.start_time)} - {formatTime12(s.end_time)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize: '11px', color: '#9ca3af', margin: 0 }}>No slots added.</p>
+              )}
+            </div>
+          )}
+        </div>
+      </td><td data-label="View"><button onClick={() => setViewTeacher(t)} className="secondary small">View</button></td></tr>)}{!filtered.length ? <tr><td colSpan="9">No teachers match filters.</td></tr> : null}</tbody></table></div></article> : null}
 
       {view === 'map' ? <article className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <p className="muted" style={{ fontSize: 13 }}>Availability for <strong>{dayLabels[selectedMapDay]}</strong> (Green = Available)</p>
+          <p className="muted" style={{ fontSize: 13 }}>Availability for <strong>{dayLabels[selectedMapDay]}</strong> (Green = Available, Orange = Demo Booked)</p>
           <div className="day-tabs">
             {dayLabels.map((d, i) => <button key={d} type="button" className={`day-tab-btn ${selectedMapDay === i ? 'active' : ''}`} onClick={() => setSelectedMapDay(i)}>{d}</button>)}
           </div>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table className="avail-map-table"><thead><tr><th>Teacher</th>{hours.map(h => <th key={h} className="avail-map-th">{h}:00</th>)}</tr></thead>
+        <div style={{ overflowX: 'hidden', width: '100%' }}>
+          <table className="avail-map-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ width: '150px', position: 'sticky', left: 0, zIndex: 10, background: 'white' }}>Teacher</th>
+                {hours.map(h => <th key={h} colSpan={4} className="avail-map-th" style={{ textAlign: 'center', borderLeft: '1px solid #e5e7eb', fontSize: '10px', padding: '4px 0' }}>{h > 12 ? h - 12 : h}{h >= 12 ? 'p' : 'a'}</th>)}
+              </tr>
+              <tr>
+                <th style={{ position: 'sticky', left: 0, zIndex: 10, background: 'white' }}></th>
+                {hours.map(h => (
+                  <Fragment key={h}>
+                    {['00', '15', '30', '45'].map(m => (
+                      <th key={m} style={{
+                        fontSize: '9px',
+                        padding: '2px 0',
+                        width: '8px',
+                        height: '40px',
+                        verticalAlign: 'bottom',
+                        borderLeft: m === '00' ? '1px solid #e5e7eb' : '1px solid #f9fafb',
+                        color: '#9ca3af',
+                        fontWeight: 400
+                      }}>
+                        <div style={{ transform: 'rotate(-90deg)', transformOrigin: 'center bottom', width: '12px', height: '12px', marginLeft: '-2px', marginBottom: '4px' }}>{m}</div>
+                      </th>
+                    ))}
+                  </Fragment>
+                ))}
+              </tr>
+            </thead>
             <tbody>{filtered.map(t => {
               const slots = (t.teacher_availability || []);
-              return <tr key={t.id}><td style={{ whiteSpace: 'nowrap', fontWeight: 600, fontSize: 13, textAlign: 'left', padding: '4px 8px' }}>{t.users?.full_name || t.teacher_code}<br /><span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>₹{t.per_hour_rate || '?'}/hr</span></td>
+              const demos = (t.booked_demos || []);
+              return <tr key={t.id}>
+                <td style={{ width: '150px', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 13, textAlign: 'left', padding: '4px 8px', position: 'sticky', left: 0, background: 'white', zIndex: 9, borderRight: '1px solid #eee', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.users?.full_name}>
+                  {t.users?.full_name || t.teacher_code}
+                  <br /><span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>₹{t.per_hour_rate || '?'}/hr</span>
+                </td>
                 {hours.map(h => {
-                  const avail = slots.some(s => s.day_of_week === selectedMapDay && parseInt(s.start_time) <= h && parseInt(s.end_time) > h);
-                  return <td key={h} className={avail ? 'avail-cell avail-yes' : 'avail-cell'}></td>;
+                  return [0, 15, 30, 45].map(m => {
+                    const cellStart = h * 60 + m;
+                    const cellEnd = cellStart + 15;
+
+                    const isAvail = slots.some(s => {
+                      if (s.day_of_week !== fullDayLabels[selectedMapDay]) return false;
+                      const [sh, sm] = s.start_time.split(':').map(Number);
+                      const [eh, em] = s.end_time.split(':').map(Number);
+                      const startMins = sh * 60 + sm;
+                      const endMins = eh * 60 + em;
+                      return startMins <= cellStart && endMins >= cellEnd;
+                    });
+
+                    // Check if a demo is booked in this cell
+                    const isDemo = demos.some(d => {
+                      if (!d.scheduled_at) return false;
+                      const dDate = new Date(d.scheduled_at);
+                      const dDay = dDate.toLocaleDateString('en-US', { weekday: 'long' });
+                      if (dDay !== fullDayLabels[selectedMapDay]) return false;
+                      const dStartMins = dDate.getHours() * 60 + dDate.getMinutes();
+                      const dEndMins = d.ends_at ? new Date(d.ends_at).getHours() * 60 + new Date(d.ends_at).getMinutes() : dStartMins + 60;
+                      return dStartMins <= cellStart && dEndMins >= cellEnd;
+                    });
+
+                    const cellClass = isDemo ? 'avail-cell avail-demo' : isAvail ? 'avail-cell avail-yes' : 'avail-cell';
+                    const title = isDemo
+                      ? `${h}:${m.toString().padStart(2, '0')} - Demo Booked`
+                      : `${h}:${m.toString().padStart(2, '0')} - ${isAvail ? 'Available' : 'Unavailable'}`;
+
+                    return (
+                      <td
+                        key={`${h}-${m}`}
+                        className={cellClass}
+                        style={{
+                          borderLeft: m === 0 ? '1px solid #e5e7eb' : '1px solid #f3f4f6',
+                          height: '30px',
+                          padding: 0,
+                          ...(isDemo ? { background: '#fb923c' } : {})
+                        }}
+                        title={title}
+                      />
+                    );
+                  });
                 })}
               </tr>;
             })}</tbody>
           </table>
         </div>
       </article> : null}
+
+      {viewTeacher && <ViewTeacherModal teacher={viewTeacher} onClose={() => setViewTeacher(null)} />}
     </section>
   );
 }
@@ -774,5 +1173,532 @@ export function AutomationPage() {
         <article className="card"><h3>Settings</h3><div className="detail-grid"><div><span className="eyebrow">Auto-Remind</span><p>Manual. Set up n8n schedule for auto.</p></div></div></article>
       </div> : null}
     </section>
+  );
+}
+
+/* ─── Helpers & Icons for ViewTeacherModal ─── */
+const Icon = ({ d, color = 'currentColor', size = 16 }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+    <path d={d} />
+  </svg>
+);
+
+const ICONS = {
+  edit: 'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7 M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
+  x: 'M18 6L6 18M6 6l12 12',
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 1 0 0-6',
+  chevronDown: 'M6 9l6 6 6-6',
+  chevronUp: 'M18 15l-6-6-6 6'
+};
+
+/* ─── Custom Dropdown ─── */
+function CustomDropdown({ value, onChange, options, placeholder, icon }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const selected = options.find(o => o.value === value);
+
+  useEffect(() => {
+    function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  return (
+    <div className="custom-dropdown" ref={ref}>
+      <div className={`custom-dropdown-trigger${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {selected?.icon && <Icon d={selected.icon} size={14} color={open ? 'var(--primary)' : 'var(--muted)'} />}
+          {selected ? <span>{selected.label}</span> : <span className="dd-placeholder">{placeholder || 'Select...'}</span>}
+        </div>
+        <Icon d={ICONS.chevronDown} size={12} className="custom-dropdown-arrow" />
+      </div>
+      {open && (
+        <div className="custom-dropdown-menu">
+          {options.map(o => (
+            <div key={o.value}
+              className={`custom-dropdown-item${o.value === value ? ' selected' : ''}`}
+              onClick={() => { onChange(o.value); setOpen(false); }}>
+              {o.icon && <Icon d={o.icon} size={14} />}
+              {o.label}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ─── Multi-Select Dropdown with "Create new" ─── */
+function MultiSelectDropdown({ value = [], onChange, options, placeholder, onCreate }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef(null);
+
+  useEffect(() => {
+    function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
+  const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
+  const exactMatch = options.some(o => o.toLowerCase() === search.toLowerCase());
+
+  const toggle = (opt) => {
+    const set = new Set(value);
+    if (set.has(opt)) set.delete(opt);
+    else set.add(opt);
+    onChange(Array.from(set));
+  };
+
+  return (
+    <div className="custom-dropdown" ref={ref}>
+      <div className={`custom-dropdown-trigger${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)} style={{ minHeight: '42px', height: 'auto', flexWrap: 'wrap', gap: '4px' }}>
+        {value.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', flex: 1 }}>
+            {value.map(v => (
+              <span key={v} style={{ background: '#eff6ff', color: '#3b82f6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                {v} <span onClick={(e) => { e.stopPropagation(); toggle(v); }} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Icon d="M18 6L6 18M6 6l12 12" size={12} /></span>
+              </span>
+            ))}
+          </div>
+        ) : <span className="dd-placeholder">{placeholder || 'Select...'}</span>}
+        <Icon d="M6 9l6 6 6-6" size={14} />
+      </div>
+      {open && (
+        <div className="custom-dropdown-menu">
+          <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search..."
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', border: 'none', borderBottom: '1px solid #eee', padding: '8px 12px', fontSize: '13px', outline: 'none', marginBottom: '4px' }} />
+          <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
+            {filtered.map(opt => (
+              <div key={opt} className={`custom-dropdown-item${value.includes(opt) ? ' selected' : ''}`}
+                onClick={() => toggle(opt)}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                {opt}
+                {value.includes(opt) && <span style={{ color: '#3b82f6' }}><Icon d="M20 6L9 17l-5-5" size={14} /></span>}
+              </div>
+            ))}
+            {filtered.length === 0 && <div style={{ padding: '8px 12px', fontSize: '12px', color: '#999' }}>No options found</div>}
+          </div>
+          {search && !exactMatch && onCreate && (
+            <div onClick={() => { onCreate(search); setSearch(''); }}
+              style={{ padding: '10px 12px', background: '#eff6ff', color: '#3b82f6', borderTop: '1px solid #dbeafe', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Icon d="M12 5v14M5 12h14" size={12} /> Create "{search}"
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const STATUS_COLORS = {
+  new: '#6366f1',
+  contacted: '#8b5cf6',
+  first_interview: '#f59e0b',
+  first_interview_done: '#e67e22',
+  second_interview: '#3b82f6',
+  second_interview_done: '#0ea5e9',
+  approved: '#10b981',
+  rejected: '#ef4444',
+  closed: '#6b7280'
+};
+
+const STATUS_LABELS = {
+  new: 'New',
+  contacted: 'Contacted',
+  first_interview: 'First Interview',
+  first_interview_done: 'First Interview Done',
+  second_interview: 'Second Interview',
+  second_interview_done: 'Second Interview Done',
+  approved: 'Approved',
+  rejected: 'Rejected',
+  closed: 'Closed'
+};
+
+function parseSubjects(s) {
+  if (Array.isArray(s)) return s;
+  if (typeof s === 'string') { try { const p = JSON.parse(s); return Array.isArray(p) ? p : []; } catch { return s ? [s] : []; } }
+  return [];
+}
+
+/* ─── View Lead Modal (Reused for Teachers) ─── */
+/* ─── View Lead Modal (Reused for Teachers) ─── */
+function ViewTeacherModal({ teacher, onClose }) {
+  const [activeTab, setActiveTab] = useState('details');
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Adapt teacher object to lead structure if needed or use as is
+  // The teacher object from pool has users.full_name, phone, etc.
+  const lead = {
+    ...teacher,
+    full_name: teacher.users?.full_name || 'Unknown',
+    email: teacher.users?.email,
+    status: 'approved' // Teachers are approved
+  };
+
+  const subjects = parseSubjects(teacher.subjects_taught);
+  const languages = parseSubjects(teacher.languages);
+  const syllabus = parseSubjects(teacher.syllabus);
+
+  const gridRow = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' };
+
+  const ReadOnlyField = ({ label, value, full }) => (
+    <div style={{ gridColumn: full ? 'span 2' : 'auto' }}>
+      <span style={{ display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' }}>{label}</span>
+      <div style={{
+        padding: '8px 12px',
+        background: '#f9fafb',
+        border: '1px solid #e5e7eb',
+        borderRadius: '6px',
+        fontSize: '14px',
+        color: '#111827',
+        minHeight: '40px',
+        display: 'flex',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '4px'
+      }}>
+        {value || <span style={{ color: '#9ca3af' }}>—</span>}
+      </div>
+    </div>
+  );
+
+  const Badge = ({ children, color }) => (
+    <span style={{
+      background: color ? `${color}15` : '#e5e7eb',
+      color: color || '#374151',
+      padding: '2px 8px',
+      borderRadius: '4px',
+      fontSize: '12px',
+      fontWeight: 500
+    }}>{children}</span>
+  );
+
+  if (isEditing) {
+    return <EditTeacherModal teacher={teacher} onClose={() => setIsEditing(false)} onSave={() => { setIsEditing(false); onClose(); /* Refresh triggers parent re-render? No, need to trigger reload or refetch */ window.location.reload(); }} />;
+  }
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal card" style={{ maxWidth: '800px', width: '95vw', maxHeight: '90vh', overflowY: 'auto', padding: '0' }}>
+        <div style={{ padding: '24px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{lead.full_name}</h3>
+            <Badge color="#10b981">Active Teacher</Badge>
+          </div>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: '4px' }}>
+            <Icon d={ICONS.x} size={20} />
+          </button>
+        </div>
+
+        <div style={{ padding: '24px' }}>
+          <h4 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '8px' }}>Personal Information</h4>
+          <div style={gridRow}>
+            <ReadOnlyField label="Full Name" value={lead.full_name} />
+            <ReadOnlyField label="Teacher Code" value={teacher.teacher_code} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="Phone" value={lead.phone} />
+            <ReadOnlyField label="Email" value={lead.email} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="Gender" value={teacher.gender} />
+            <ReadOnlyField label="Date of Birth" value={teacher.dob} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="Address" value={teacher.address} />
+            <ReadOnlyField label="Pincode" value={teacher.pincode} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="Place/Area" value={teacher.place} />
+            <ReadOnlyField label="City" value={teacher.city} />
+          </div>
+
+          <h4 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginTop: '24px' }}>Professional Details</h4>
+          <div style={{ ...gridRow, gridTemplateColumns: '1fr 1fr 1fr' }}>
+            <ReadOnlyField label="Subjects" value={subjects.length ? subjects.map((s, i) => <Badge key={i} color="#3b82f6">{s}</Badge>) : null} />
+            <ReadOnlyField label="Languages" value={languages.length ? languages.map((b, i) => <Badge key={i} color="#8b5cf6">{b}</Badge>) : null} />
+            <ReadOnlyField label="Syllabus" value={syllabus.length ? syllabus.map((m, i) => <Badge key={i} color="#15803d">{m}</Badge>) : null} />
+          </div>
+
+          <div style={{ ...gridRow, gridTemplateColumns: '1fr 1fr 1fr' }}>
+            <ReadOnlyField label="Experience" value={teacher.experience_level} />
+            <ReadOnlyField label="Exp. Duration" value={teacher.experience_duration} />
+            <ReadOnlyField label="Rate/hr" value={teacher.per_hour_rate ? `₹${teacher.per_hour_rate}` : '—'} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="Communication Level" value={teacher.communication_level} />
+            <ReadOnlyField label="Pref. Time" value={teacher.preferred_time} />
+          </div>
+
+          <h4 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginTop: '24px' }}>Bank Details</h4>
+          <div style={gridRow}>
+            <ReadOnlyField label="Account Holder" value={teacher.account_holder_name} />
+            <ReadOnlyField label="Account Number" value={teacher.account_number} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="IFSC Code" value={teacher.ifsc_code} />
+            <ReadOnlyField label="UPI ID" value={teacher.upi_id} />
+          </div>
+          <div style={gridRow}>
+            <ReadOnlyField label="GPay Name" value={teacher.gpay_holder_name} />
+            <ReadOnlyField label="GPay Number" value={teacher.gpay_number} />
+          </div>
+
+          <h4 style={{ fontSize: '16px', fontWeight: 600, color: '#111827', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '8px', marginTop: '24px' }}>Availability Slots</h4>
+          <div className="table-wrap mobile-friendly-table">
+            <table>
+              <thead><tr><th>Day</th><th>From</th><th>To</th></tr></thead>
+              <tbody>
+                {(teacher.teacher_availability || []).map((s, idx) => (
+                  <tr key={idx}>
+                    <td>{s.day_of_week}</td>
+                    <td>{formatTime12(s.start_time)}</td>
+                    <td>{formatTime12(s.end_time)}</td>
+                  </tr>
+                ))}
+                {!(teacher.teacher_availability || []).length && <tr><td colSpan="3" style={{ textAlign: 'center', color: '#9ca3af' }}>No slots added.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px' }}>
+            <button onClick={() => setIsEditing(true)} className="primary">Edit Details</button>
+            <button onClick={onClose} className="secondary">Close</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditTeacherModal({ teacher, onClose, onSave }) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  // Metadata state
+  const [allSubjects, setAllSubjects] = useState([]);
+  const [allBoards, setAllBoards] = useState([]);
+  const [allMediums, setAllMediums] = useState([]);
+
+  const [formData, setFormData] = useState({
+    full_name: teacher.users?.full_name || '',
+    phone: teacher.phone || '',
+    email: teacher.users?.email || '', // Read-only usually
+    gender: teacher.gender || '',
+    dob: teacher.dob || '',
+    address: teacher.address || '',
+    pincode: teacher.pincode || '',
+    city: teacher.city || '',
+    place: teacher.place || '',
+    qualification: teacher.qualification || '',
+
+    // Dropdowns / MultiSelects
+    subjects_taught: parseSubjects(teacher.subjects_taught),
+    syllabus: parseSubjects(teacher.syllabus), // Boards
+    languages: parseSubjects(teacher.languages), // Mediums
+
+    experience_level: teacher.experience_level || 'fresher',
+    experience_type: teacher.experience_type || '',
+    experience_duration: teacher.experience_duration || '',
+    per_hour_rate: teacher.per_hour_rate || '',
+    communication_level: teacher.communication_level || '',
+
+    // Bank
+    account_holder_name: teacher.account_holder_name || '',
+    account_number: teacher.account_number || '',
+    ifsc_code: teacher.ifsc_code || '',
+    upi_id: teacher.upi_id || '',
+    gpay_holder_name: teacher.gpay_holder_name || '',
+    gpay_number: teacher.gpay_number || ''
+  });
+
+  useEffect(() => {
+    apiFetch('/subjects').then(r => r.ok && setAllSubjects(r.subjects.map(s => s.name)));
+    apiFetch('/boards').then(r => r.ok && setAllBoards(r.boards.map(b => b.name)));
+    apiFetch('/mediums').then(r => r.ok && setAllMediums(r.mediums.map(m => m.name)));
+  }, []);
+
+  const createSubject = async (name) => {
+    const res = await apiFetch('/subjects', { method: 'POST', body: { name } });
+    if (res.ok) {
+      setAllSubjects(prev => [...prev, res.subject.name].sort());
+      setFormData(f => ({ ...f, subjects_taught: [...f.subjects_taught, res.subject.name] }));
+    }
+  };
+
+  const createBoard = async (name) => {
+    const res = await apiFetch('/boards', { method: 'POST', body: { name } });
+    if (res.ok) {
+      setAllBoards(prev => [...prev, res.board.name].sort());
+      setFormData(f => ({ ...f, syllabus: [...f.syllabus, res.board.name] }));
+    }
+  };
+
+  const createMedium = async (name) => {
+    const res = await apiFetch('/mediums', { method: 'POST', body: { name } });
+    if (res.ok) {
+      setAllMediums(prev => [...prev, res.medium.name].sort());
+      setFormData(f => ({ ...f, languages: [...f.languages, res.medium.name] }));
+    }
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const updateField = (name, value) => {
+    setFormData(prev => ({ ...prev, [name]: value }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await apiFetch(`/teachers/${teacher.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(formData)
+      });
+      onSave();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const InputField = ({ label, name, type = 'text', required, style }) => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', ...style }}>
+      <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>{label} {required && <span style={{ color: '#ef4444' }}>*</span>}</label>
+      <input
+        type={type}
+        name={name}
+        value={formData[name]}
+        onChange={handleChange}
+        style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '14px' }}
+        required={required}
+      />
+    </div>
+  );
+
+  const isExperienced = formData.experience_level !== 'fresher';
+
+  return (
+    <div className="modal-overlay">
+      <div className="modal card" style={{ maxWidth: '800px', width: '95vw', maxHeight: '90vh', overflowY: 'auto', padding: '0' }}>
+        <form onSubmit={handleSubmit}>
+          <div style={{ padding: '24px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>Edit Teacher Details</h3>
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: '4px' }}>
+              <Icon d={ICONS.x} size={20} />
+            </button>
+          </div>
+
+          <div style={{ padding: '24px' }}>
+            {error && <div className="error-message" style={{ marginBottom: '16px', color: '#dc2626', background: '#fee2e2', padding: '12px', borderRadius: '6px' }}>{error}</div>}
+
+            {/* Personal Details */}
+            <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>Personal Information</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <InputField label="Full Name" name="full_name" required />
+              <InputField label="Phone" name="phone" />
+              <InputField label="Gender" name="gender" />
+              <InputField label="Date of Birth" name="dob" type="date" />
+              <InputField label="Address" name="address" />
+              <InputField label="Pincode" name="pincode" />
+              <InputField label="Place/Area" name="place" />
+              <InputField label="City" name="city" />
+            </div>
+
+            {/* Professional Details */}
+            <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#374151', marginTop: '20px', marginBottom: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>Professional Information</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <InputField label="Qualification" name="qualification" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Communication Level</label>
+                <CustomDropdown
+                  value={formData.communication_level}
+                  onChange={v => updateField('communication_level', v)}
+                  options={['Fluent', 'Mixed', 'Average', 'Poor'].map(l => ({ value: l, label: l }))}
+                  placeholder="Select level"
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Experience Level</label>
+                <CustomDropdown
+                  value={formData.experience_level}
+                  onChange={v => updateField('experience_level', v)}
+                  options={[{ value: 'fresher', label: 'Fresher' }, { value: 'experienced', label: 'Experienced' }]}
+                  placeholder="Select level"
+                />
+              </div>
+              {isExperienced && (
+                <>
+                  <InputField label="Exp. Type" name="experience_type" />
+                  <InputField label="Exp. Duration" name="experience_duration" />
+                </>
+              )}
+              <InputField label="Rate per Hour" name="per_hour_rate" type="number" />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Subjects</label>
+                <MultiSelectDropdown
+                  value={formData.subjects_taught}
+                  onChange={v => updateField('subjects_taught', v)}
+                  options={allSubjects}
+                  onCreate={createSubject}
+                  placeholder="Select subjects..."
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Languages (Mediums)</label>
+                <MultiSelectDropdown
+                  value={formData.languages}
+                  onChange={v => updateField('languages', v)}
+                  options={allMediums}
+                  onCreate={createMedium}
+                  placeholder="Select languages..."
+                />
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Syllabus (Boards)</label>
+                <MultiSelectDropdown
+                  value={formData.syllabus}
+                  onChange={v => updateField('syllabus', v)}
+                  options={allBoards}
+                  onCreate={createBoard}
+                  placeholder="Select boards..."
+                />
+              </div>
+            </div>
+
+            {/* Bank Details */}
+            <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#374151', marginTop: '20px', marginBottom: '12px', borderTop: '1px solid #e5e7eb', paddingTop: '16px' }}>Bank Information</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              <InputField label="Account Holder Name" name="account_holder_name" />
+              <InputField label="Account Number" name="account_number" />
+              <InputField label="IFSC Code" name="ifsc_code" />
+              <InputField label="UPI ID" name="upi_id" />
+              <InputField label="GPay Name" name="gpay_holder_name" />
+              <InputField label="GPay Number" name="gpay_number" />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid #e5e7eb' }}>
+              <button type="button" onClick={onClose} className="secondary">Cancel</button>
+              <button type="submit" className="primary" disabled={loading}>{loading ? 'Saving...' : 'Save Changes'}</button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

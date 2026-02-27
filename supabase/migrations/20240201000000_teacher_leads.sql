@@ -7,8 +7,8 @@ create table if not exists teacher_leads (
   subject text,
   experience_level text default 'fresher',
   qualification text,
-  status text not null default 'sourced',
-  -- statuses: sourced → contacted → interview_scheduled → interview_done → demo_class → approved → onboarded → rejected
+  status text not null default 'new',
+  -- statuses: new → contacted → first_interview → first_interview_done → second_interview → second_interview_done → approved → rejected
   notes text,
   coordinator_id uuid references auth.users(id),
   converted_teacher_id uuid references teacher_profiles(id),

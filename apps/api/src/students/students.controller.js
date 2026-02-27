@@ -44,11 +44,17 @@ export async function handleStudents(req, res, url) {
         return true;
       }
 
-      const { data, error } = await adminClient
+      let query = adminClient
         .from('students')
         .select('*, student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
+
+      if (isAC(actor)) {
+        query = query.eq('academic_coordinator_id', actor.userId);
+      }
+
+      const { data, error } = await query;
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
       return true;
@@ -179,7 +185,7 @@ export async function handleStudents(req, res, url) {
       const studentId = parts[1];
       const { data, error } = await adminClient
         .from('students')
-        .select('*')
+        .select('*, leads!students_lead_id_fkey(*)')
         .eq('id', studentId)
         .is('deleted_at', null)
         .maybeSingle();
@@ -194,7 +200,6 @@ export async function handleStudents(req, res, url) {
         .from('student_teacher_assignments')
         .select('*, users!student_teacher_assignments_teacher_id_fkey(id, full_name, email)')
         .eq('student_id', studentId)
-        .eq('is_active', true)
         .order('created_at', { ascending: false });
 
       // Fetch recent sessions
@@ -213,12 +218,35 @@ export async function handleStudents(req, res, url) {
         .order('created_at', { ascending: false })
         .limit(50);
 
+      let demoSessions = [];
+      let paymentRequests = [];
+
+      if (data.lead_id) {
+        // Fetch demo sessions
+        const { data: ds } = await adminClient
+          .from('demo_sessions')
+          .select('*, users!demo_sessions_teacher_id_fkey(id, full_name, teacher_profiles(teacher_code))')
+          .eq('lead_id', data.lead_id)
+          .order('scheduled_at', { ascending: false });
+        if (ds) demoSessions = ds;
+
+        // Fetch payment requests
+        const { data: pr } = await adminClient
+          .from('payment_requests')
+          .select('*')
+          .eq('lead_id', data.lead_id)
+          .order('created_at', { ascending: false });
+        if (pr) paymentRequests = pr;
+      }
+
       sendJson(res, 200, {
         ok: true,
         student: data,
         assignments: assignments || [],
         sessions: sessions || [],
-        messages: messages || []
+        messages: messages || [],
+        demoSessions,
+        paymentRequests
       });
       return true;
     }
@@ -255,19 +283,62 @@ export async function handleStudents(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('student_teacher_assignments')
-        .upsert({
+        .insert({
           student_id: studentId,
           teacher_id: payload.teacher_id,
           subject: payload.subject,
+          day: payload.day || null,
+          time: payload.time || null,
           schedule_note: payload.schedule_note || null,
-          is_active: true,
+          status: 'pending',
+          is_active: false,
           assigned_by: actor.userId,
           updated_at: nowIso()
-        }, { onConflict: 'student_id,teacher_id,subject' })
+        })
         .select('*, users!student_teacher_assignments_teacher_id_fkey(id, full_name)')
         .single();
       if (error) throw new Error(error.message);
       sendJson(res, 201, { ok: true, assignment: data });
+      return true;
+    }
+
+    // ─── POST /students/:id/assignments/:aid/accept ──────────
+    if (req.method === 'POST' && parts.length === 5 && parts[0] === 'students' && parts[2] === 'assignments' && parts[4] === 'accept') {
+      if (!isAC(actor)) {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator can accept assignments' });
+        return true;
+      }
+      const studentId = parts[1];
+      const assignmentId = parts[3];
+
+      // 1. Get the assignment to know the subject
+      const { data: assignment, error: err1 } = await adminClient
+        .from('student_teacher_assignments')
+        .select('subject, status')
+        .eq('id', assignmentId)
+        .eq('student_id', studentId)
+        .single();
+      if (err1) { sendJson(res, 404, { ok: false, error: 'Assignment not found' }); return true; }
+      if (assignment.status === 'accepted') { sendJson(res, 400, { ok: false, error: 'Already accepted' }); return true; }
+
+      // 2. Mark this one as accepted and active
+      const { data: updated, error: err2 } = await adminClient
+        .from('student_teacher_assignments')
+        .update({ status: 'accepted', is_active: true, updated_at: nowIso() })
+        .eq('id', assignmentId)
+        .select()
+        .single();
+      if (err2) throw new Error(err2.message);
+
+      // 3. Delete any other 'pending' assignments for the SAME subject and student
+      await adminClient
+        .from('student_teacher_assignments')
+        .delete()
+        .eq('student_id', studentId)
+        .eq('subject', assignment.subject)
+        .eq('status', 'pending');
+
+      sendJson(res, 200, { ok: true, assignment: updated });
       return true;
     }
 
