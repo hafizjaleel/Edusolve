@@ -69,7 +69,7 @@ export async function handleStudents(req, res, url) {
       const today = new Date().toISOString().slice(0, 10);
       let query = adminClient
         .from('academic_sessions')
-        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email)')
+        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(id,type,status)')
         .eq('session_date', today)
         .order('started_at', { ascending: true });
       if (actor.role === 'teacher') query = query.eq('teacher_id', actor.userId);
@@ -87,7 +87,7 @@ export async function handleStudents(req, res, url) {
       }
       let query = adminClient
         .from('academic_sessions')
-        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email)')
+        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(id,type,status,reason,verified_at)')
         .order('session_date', { ascending: false })
         .limit(50);
       if (actor.role === 'teacher') query = query.eq('teacher_id', actor.userId);
@@ -99,7 +99,7 @@ export async function handleStudents(req, res, url) {
 
     // ─── GET /students/sessions/week ───────────────────────
     if (req.method === 'GET' && url.pathname === '/students/sessions/week') {
-      if (!['academic_coordinator', 'finance', 'super_admin'].includes(actor.role)) {
+      if (!['academic_coordinator', 'teacher', 'finance', 'super_admin'].includes(actor.role)) {
         sendJson(res, 403, { ok: false, error: 'session access is not allowed for this role' });
         return true;
       }
@@ -118,13 +118,15 @@ export async function handleStudents(req, res, url) {
       const startDate = monday.toISOString().slice(0, 10);
       const endDate = sunday.toISOString().slice(0, 10);
 
-      const { data, error } = await adminClient
+      let query = adminClient
         .from('academic_sessions')
-        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name)')
+        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name), session_verifications(id,type,status)')
         .gte('session_date', startDate)
         .lte('session_date', endDate)
         .order('session_date', { ascending: true })
         .order('started_at', { ascending: true });
+      if (actor.role === 'teacher') query = query.eq('teacher_id', actor.userId);
+      const { data, error } = await query;
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [], weekStart: startDate, weekEnd: endDate });
       return true;
@@ -248,6 +250,32 @@ export async function handleStudents(req, res, url) {
         demoSessions,
         paymentRequests
       });
+      return true;
+    }
+
+    // ─── GET /students/:student_id/availability ─────────────
+    if (req.method === 'GET' && parts.length === 3 && parts[0] === 'students' && parts[2] === 'availability') {
+      const studentId = parts[1];
+      const startDate = url.searchParams.get('start_date');
+      const endDate = url.searchParams.get('end_date');
+
+      if (!startDate || !endDate) {
+        sendJson(res, 400, { ok: false, error: 'start_date and end_date required' });
+        return true;
+      }
+
+      // Get booked classes within range for this student
+      const { data: classes, error: cErr } = await adminClient
+        .from('academic_sessions')
+        .select('session_date, started_at, duration_hours')
+        .eq('student_id', studentId)
+        .gte('session_date', startDate)
+        .lte('session_date', endDate)
+        .in('status', ['completed', 'rescheduled', 'scheduled']);
+
+      if (cErr) throw new Error(cErr.message);
+
+      sendJson(res, 200, { ok: true, classes: classes || [] });
       return true;
     }
 
@@ -376,8 +404,8 @@ export async function handleStudents(req, res, url) {
           student_id: studentId,
           teacher_id: payload.teacher_id,
           session_date: payload.session_date,
-          started_at: payload.started_at || null,
-          ended_at: payload.ended_at || null,
+          started_at: payload.started_at ? `${payload.session_date}T${payload.started_at}:00+05:30` : null,
+          ended_at: payload.ended_at ? `${payload.session_date}T${payload.ended_at}:00+05:30` : null,
           duration_hours: Number(payload.duration_hours),
           subject: payload.subject || null,
           status: 'completed',
@@ -389,6 +417,58 @@ export async function handleStudents(req, res, url) {
         .single();
       if (error) throw new Error(error.message);
       sendJson(res, 201, { ok: true, session: data });
+      return true;
+    }
+
+    // ─── POST /students/:id/sessions/bulk ───────────────────
+    if (req.method === 'POST' && parts.length === 4 && parts[0] === 'students' && parts[2] === 'sessions' && parts[3] === 'bulk') {
+      if (!isAC(actor)) {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator can schedule classes' });
+        return true;
+      }
+      const studentId = parts[1];
+      const payload = await readJson(req);
+      const { teacher_id, start_date, end_date, days_of_week, started_at, duration_hours, subject } = payload;
+
+      if (!teacher_id || !start_date || !end_date || !days_of_week || !days_of_week.length || !started_at || !duration_hours) {
+        sendJson(res, 400, { ok: false, error: 'missing required fields' });
+        return true;
+      }
+
+      const start = new Date(`${start_date}T00:00:00Z`);
+      const end = new Date(`${end_date}T00:00:00Z`);
+      const sessionRecords = [];
+      const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        const dayName = DAY_MAP[d.getUTCDay()];
+        if (days_of_week.includes(dayName)) {
+          const dateStr = d.toISOString().split('T')[0];
+          sessionRecords.push({
+            student_id: studentId,
+            teacher_id: teacher_id,
+            session_date: dateStr,
+            started_at: started_at ? `${dateStr}T${started_at}:00+05:30` : null,
+            duration_hours: Number(duration_hours),
+            subject: subject || null,
+            status: 'scheduled',
+            created_at: nowIso()
+          });
+        }
+      }
+
+      if (sessionRecords.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'no valid dates found in range' });
+        return true;
+      }
+
+      const { data, error } = await adminClient
+        .from('academic_sessions')
+        .insert(sessionRecords)
+        .select('*');
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 201, { ok: true, count: data.length });
       return true;
     }
 

@@ -530,7 +530,6 @@ function LeadCard({ lead, onStatusChange, onReject, onView, onConvert }) {
 /* ═══════ Teacher Leads Pipeline ═══════ */
 export function TeacherLeadsPage({ onNavigate }) {
     const [leads, setLeads] = useState([]);
-    const [showAddModal, setShowAddModal] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [activeTab, setActiveTab] = useState('new');
@@ -618,8 +617,7 @@ export function TeacherLeadsPage({ onNavigate }) {
 
     return (
         <section className="panel">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-                <h2 style={{ margin: 0, fontSize: '20px' }}>Teacher Leads</h2>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
                 {activeTab === 'rejected' ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                         <span style={{ fontSize: '13px', color: '#4b5563', fontWeight: 600 }}>Filter by Reason:</span>
@@ -644,9 +642,7 @@ export function TeacherLeadsPage({ onNavigate }) {
                             />
                         </div>
                     </div>
-                ) : (
-                    <button className="primary" onClick={() => setShowAddModal(true)}>+ Add Teacher Lead</button>
-                )}
+                ) : null}
             </div>
 
             <div className="tabs-row" style={{ marginBottom: '16px', flexWrap: 'wrap', gap: '4px' }}>
@@ -655,10 +651,21 @@ export function TeacherLeadsPage({ onNavigate }) {
                         key={tab.id}
                         className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
                         onClick={() => setActiveTab(tab.id)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                     >
                         {tab.id !== 'all' && <StatusIcon status={tab.id} size={13} />}
-                        {tab.label} ({tab.id === 'all' ? leads.length : leads.filter(l => l.status === tab.id).length})
+                        <span>{tab.label}</span>
+                        <span style={{
+                            background: activeTab === tab.id ? (STATUS_COLORS[tab.id] || '#3b82f6') : `${STATUS_COLORS[tab.id] || '#6b7280'}1a`,
+                            color: activeTab === tab.id ? '#ffffff' : (STATUS_COLORS[tab.id] || '#6b7280'),
+                            padding: '2px 6px',
+                            borderRadius: '10px',
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            lineHeight: 1
+                        }}>
+                            {tab.id === 'all' ? leads.length : leads.filter(l => l.status === tab.id).length}
+                        </span>
                     </button>
                 ))}
             </div>
@@ -685,9 +692,6 @@ export function TeacherLeadsPage({ onNavigate }) {
                     />
                 ))}
             </div>
-
-            {/* Add Lead Modal */}
-            {showAddModal ? <AddTeacherLeadModal onClose={() => setShowAddModal(false)} onDone={() => { setShowAddModal(false); loadLeads(); }} /> : null}
 
             {/* Approval Modal */}
             {showApprovalModal ? <ApprovalModal lead={showApprovalModal} onClose={() => setShowApprovalModal(null)} onDone={() => { setShowApprovalModal(null); loadLeads(); }} /> : null}
@@ -1397,7 +1401,6 @@ export function TCTeacherPoolPage() {
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Teacher Pool ({teachers.length})</h2>
             {error ? <p className="error">{error}</p> : null}
 
             {!teachers.length ? (
@@ -1544,7 +1547,6 @@ export function TeacherPerformancePage() {
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Teacher Performance</h2>
 
             <div className="grid-three" style={{ marginBottom: '16px' }}>
                 <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
@@ -1940,5 +1942,195 @@ function ViewLeadModal({ lead, onClose, onEdit }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+/* ═══════ TC All Leads (Table View) ═══════ */
+export function TCAllLeadsPage({ onNavigate }) {
+    const [leads, setLeads] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showAddModal, setShowAddModal] = useState(false);
+    const [search, setSearch] = useState('');
+    const [statusFilter, setStatusFilter] = useState('all');
+    const [dateFilter, setDateFilter] = useState('all');
+
+    const [showViewModal, setShowViewModal] = useState(null);
+
+    useEffect(() => {
+        apiFetch('/teacher-leads').then(res => {
+            setLeads(res.items || []);
+            setLoading(false);
+        }).catch(err => {
+            console.error(err);
+            setLoading(false);
+        });
+    }, []);
+
+    const filteredLeads = useMemo(() => {
+        return leads.filter(lead => {
+            // Search
+            if (search && !lead.full_name?.toLowerCase().includes(search.toLowerCase()) &&
+                !lead.phone?.includes(search) &&
+                !lead.email?.toLowerCase().includes(search.toLowerCase())) {
+                return false;
+            }
+
+            // Status filter
+            if (statusFilter !== 'all' && lead.status !== statusFilter) return false;
+
+            // Date filter
+            if (dateFilter !== 'all') {
+                const leadDate = new Date(lead.created_at);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                if (dateFilter === 'today') {
+                    if (leadDate < today) return false;
+                } else if (dateFilter === 'yesterday') {
+                    const yesterday = new Date(today);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    if (leadDate < yesterday || leadDate >= today) return false;
+                } else if (dateFilter === 'last7') {
+                    const last7 = new Date(today);
+                    last7.setDate(last7.getDate() - 7);
+                    if (leadDate < last7) return false;
+                } else if (dateFilter === 'last30') {
+                    const last30 = new Date(today);
+                    last30.setDate(last30.getDate() - 30);
+                    if (leadDate < last30) return false;
+                }
+            }
+
+            return true;
+        });
+    }, [leads, search, statusFilter, dateFilter]);
+
+    return (
+        <section className="panel">
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+                <h2 style={{ margin: 0, fontSize: '20px' }}>All Teacher Leads</h2>
+                <button className="primary" onClick={() => setShowAddModal(true)}>+ Add Teacher Lead</button>
+            </div>
+
+            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <div style={{ flex: '1 1 200px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Search</label>
+                        <input
+                            type="text"
+                            placeholder="Search name, phone, email..."
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                        />
+                    </div>
+                    <div style={{ flex: '0 0 160px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Status</label>
+                        <select
+                            value={statusFilter}
+                            onChange={e => setStatusFilter(e.target.value)}
+                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: 'white' }}
+                        >
+                            <option value="all">All Statuses</option>
+                            {STATUS_STEPS.map(s => <option key={s} value={s}>{STATUS_LABELS[s]}</option>)}
+                            <option value="rejected">Rejected</option>
+                        </select>
+                    </div>
+                    <div style={{ flex: '0 0 160px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: '#6b7280', marginBottom: '4px' }}>Date Received</label>
+                        <select
+                            value={dateFilter}
+                            onChange={e => setDateFilter(e.target.value)}
+                            style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', backgroundColor: 'white' }}
+                        >
+                            <option value="all">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="yesterday">Yesterday (1 day ago)</option>
+                            <option value="last7">Last 7 Days</option>
+                            <option value="last30">Last 30 Days</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <div className="card" style={{ overflowX: 'auto' }}>
+                {loading ? (
+                    <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Loading leads...</div>
+                ) : filteredLeads.length === 0 ? (
+                    <div style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>No leads found.</div>
+                ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                        <thead>
+                            <tr style={{ borderBottom: '1px solid #e5e7eb', background: '#f9fafb' }}>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Date Received</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Name</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151', minWidth: '120px' }}>Contact</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Experience</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Status</th>
+                                <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151', textAlign: 'right' }}>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {filteredLeads.map(lead => (
+                                <tr key={lead.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                                    <td style={{ padding: '12px 16px', color: '#6b7280', whiteSpace: 'nowrap' }}>
+                                        <div style={{ fontWeight: 500, color: '#111827' }}>
+                                            {lead.created_at ? new Date(lead.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : 'Unknown'}
+                                        </div>
+                                        <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                                            {lead.created_at ? new Date(lead.created_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}
+                                        </div>
+                                    </td>
+                                    <td style={{ padding: '12px 16px', fontWeight: 500, color: '#111827' }}>
+                                        {lead.full_name}
+                                    </td>
+                                    <td style={{ padding: '12px 16px', color: '#4b5563' }}>
+                                        <div>{lead.phone || '-'}</div>
+                                        {lead.email && <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '2px' }}>{lead.email}</div>}
+                                    </td>
+                                    <td style={{ padding: '12px 16px', color: '#4b5563' }}>
+                                        {lead.experience_level || '-'}
+                                    </td>
+                                    <td style={{ padding: '12px 16px' }}>
+                                        <span style={{
+                                            padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                                            background: `${STATUS_COLORS[lead.status] || '#6b7280'}18`,
+                                            color: STATUS_COLORS[lead.status] || '#6b7280',
+                                            display: 'inline-flex', alignItems: 'center', gap: '4px'
+                                        }}>
+                                            <StatusIcon status={lead.status} size={12} />
+                                            {STATUS_LABELS[lead.status] || lead.status}
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                                        <button
+                                            className="small secondary"
+                                            onClick={() => setShowViewModal(lead)}
+                                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                                        >
+                                            View
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                )}
+            </div>
+
+            {/* View Lead Modal */}
+            {showViewModal ? <ViewLeadModal lead={showViewModal} onClose={() => setShowViewModal(null)} onEdit={() => { }} /> : null}
+
+            {/* Add Lead Modal */}
+            {showAddModal ? (
+                <AddTeacherLeadModal
+                    onClose={() => setShowAddModal(false)}
+                    onDone={() => {
+                        setShowAddModal(false);
+                        apiFetch('/teacher-leads').then(res => setLeads(res.items || []));
+                    }}
+                />
+            ) : null}
+        </section>
     );
 }

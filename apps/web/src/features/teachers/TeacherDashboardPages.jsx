@@ -1,6 +1,36 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
 import { apiFetch } from '../../lib/api.js';
 
+export function isSessionVerified(session) {
+    if (session.status === 'verified') return true;
+    const sv = session.session_verifications || [];
+    const svArr = Array.isArray(sv) ? sv : [sv];
+    return svArr.some(v => v.type === 'approval' && v.status === 'approved');
+}
+
+export function getSessionDisplayStatus(session) {
+    if (session._type === 'demo') return { label: '🎯 Demo', bg: '#ffedd5', color: '#ea580c' };
+    if (session.status === 'rescheduled') return { label: '🔄 Rescheduled', bg: '#fee2e2', color: '#ef4444' };
+
+    if (isSessionVerified(session)) return { label: '✅ Verified', bg: '#dcfce7', color: '#15803d' };
+
+    const sv = session.session_verifications || [];
+    const svArr = Array.isArray(sv) ? sv : [sv];
+
+    if (svArr.some(v => v.type === 'approval' && v.status === 'pending')) {
+        return { label: '⏳ Waiting for verification', bg: '#fef3c7', color: '#d97706' };
+    }
+    if (svArr.some(v => v.type === 'reschedule' && v.status === 'pending')) {
+        return { label: '⏳ Reschedule pending', bg: '#fef3c7', color: '#d97706' };
+    }
+
+    if (session.status === 'completed') return { label: 'Completed', bg: '#cffafe', color: '#0891b2' };
+    if (session.status === 'scheduled') return { label: 'Scheduled', bg: '#e0e7ff', color: '#4338ca' };
+    if (session.status === 'in_progress') return { label: 'In Progress', bg: '#ffedd5', color: '#ea580c' };
+
+    return { label: session.status || 'Unknown', bg: '#f3f4f6', color: '#6b7280' };
+}
+
 /* ═══════ Teacher Dashboard ═══════ */
 export function TeacherDashboardPage() {
     const [profile, setProfile] = useState(null);
@@ -72,11 +102,15 @@ export function TeacherDashboardPage() {
                                     {s.subject ? ` · ${s.subject}` : ''}
                                 </p>
                             </div>
-                            <span style={{
-                                padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 600,
-                                background: s._type === 'demo' ? '#ffedd5' : s.status === 'completed' ? '#dcfce7' : s.status === 'scheduled' ? '#e0e7ff' : '#f3f4f6',
-                                color: s._type === 'demo' ? '#ea580c' : s.status === 'completed' ? '#15803d' : s.status === 'scheduled' ? '#4338ca' : '#6b7280'
-                            }}>{s._type === 'demo' ? '🎯 Demo' : s.status}</span>
+                            {(() => {
+                                const st = getSessionDisplayStatus(s);
+                                return (
+                                    <span style={{
+                                        padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 600,
+                                        background: st.bg, color: st.color
+                                    }}>{st.label}</span>
+                                );
+                            })()}
                         </div>
                     )) : <p className="text-muted" style={{ fontSize: '13px' }}>No sessions today</p>}
                 </article>
@@ -136,6 +170,9 @@ export function TeacherTodaySessionsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [rescheduleSession, setRescheduleSession] = useState(null);
+    const [confirmSession, setConfirmSession] = useState(null); // custom confirm modal
+    const [approvalReason, setApprovalReason] = useState(''); // Teacher note for approval
+    const [approving, setApproving] = useState(false);
 
     async function loadSessions() {
         try {
@@ -147,13 +184,29 @@ export function TeacherTodaySessionsPage() {
 
     useEffect(() => { loadSessions(); }, []);
 
-    async function handleRequestApproval(id) {
-        if (!confirm('Mark this session as completed and request approval?')) return;
+    async function handleConfirmApproval() {
+        if (!confirmSession) return;
+        setApproving(true);
         try {
-            await apiFetch(`/teachers/sessions/${id}/request-approval`, { method: 'POST', body: '{}' });
-            alert('Approval requested!');
+            await apiFetch(`/teachers/sessions/${confirmSession.id}/request-approval`, {
+                method: 'POST',
+                body: JSON.stringify({ reason: approvalReason.trim() || undefined })
+            });
+            setConfirmSession(null);
+            setApprovalReason('');
             await loadSessions();
-        } catch (e) { alert(e.message); }
+        } catch (e) {
+            console.error('Approval error:', e);
+            setError(e.message);
+        }
+        setApproving(false);
+    }
+
+    function isSessionEnded(s) {
+        if (!s.started_at || !s.duration_hours) return false;
+        const startTime = new Date(s.started_at);
+        const endTime = new Date(startTime.getTime() + s.duration_hours * 60 * 60 * 1000);
+        return new Date() >= endTime;
     }
 
     const statusColors = {
@@ -167,8 +220,6 @@ export function TeacherTodaySessionsPage() {
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Today's Sessions</h2>
-
             {loading ? <p>Loading sessions...</p> : null}
             {error ? <p className="error">{error}</p> : null}
 
@@ -180,81 +231,207 @@ export function TeacherTodaySessionsPage() {
             ) : null}
 
             <div className="today-leads-grid">
-                {sessions.map(s => (
-                    <div key={s.id} className="card today-lead-card" style={{
-                        padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px',
-                        borderLeft: `4px solid ${statusColors[s.status] || '#6b7280'}`,
-                    }}>
-                        {/* Header */}
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>{s.students?.student_name || 'Student'}</h3>
-                                <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '12px' }}>{s.students?.student_code || ''}</p>
-                            </div>
-                            <span style={{
-                                padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-                                background: `${statusColors[s.status] || '#6b7280'}18`,
-                                color: statusColors[s.status] || '#6b7280', textTransform: 'capitalize'
-                            }}>{s.status}</span>
-                        </div>
+                {sessions.map(s => {
+                    const ended = isSessionEnded(s);
+                    const isScheduled = (s.status === 'scheduled' || s.status === 'in_progress' || s.status === 'rescheduled');
 
-                        {/* Details */}
-                        <div className="today-lead-details">
-                            <div>
-                                <span className="text-muted">Time</span>
-                                <p style={{ margin: '2px 0 0', fontWeight: 500 }}>
-                                    {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
-                                </p>
-                            </div>
-                            <div>
-                                <span className="text-muted">Subject</span>
-                                <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.subject || 'General'}</p>
-                            </div>
-                            <div>
-                                <span className="text-muted">Duration</span>
-                                <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.duration_hours ? `${s.duration_hours}h` : '—'}</p>
-                            </div>
-                            <div>
-                                <span className="text-muted">Date</span>
-                                <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.session_date || '—'}</p>
-                            </div>
-                        </div>
+                    // 30-min restriction logic
+                    let minutesUntilStart = Infinity;
+                    if (s.started_at) {
+                        const startMs = new Date(s.started_at).getTime();
+                        minutesUntilStart = (startMs - Date.now()) / (1000 * 60);
+                    }
+                    const canReschedule = minutesUntilStart > 30;
 
-                        {/* Actions */}
-                        {s.status === 'scheduled' || s.status === 'in_progress' ? (
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                                <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                                    onClick={() => handleRequestApproval(s.id)}>
-                                    ✅ Send Approval
-                                </button>
-                                <button className="small danger" style={{ fontSize: '12px' }}
-                                    onClick={() => setRescheduleSession(s)}>
-                                    🔄 Reschedule
-                                </button>
+                    // Check for pending reschedule request in session_verifications
+                    const sv = s.session_verifications || [];
+                    const svArr = Array.isArray(sv) ? sv : [sv];
+                    const hasPendingReschedule = svArr.some(v => v.type === 'reschedule' && v.status === 'pending');
+                    const hasPendingApproval = svArr.some(v => v.type === 'approval' && v.status === 'pending');
+                    return (
+                        <div key={s.id} className="card today-lead-card" style={{
+                            padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px',
+                            borderLeft: `4px solid ${statusColors[s.status] || '#6b7280'}`,
+                        }}>
+                            {/* Header */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div>
+                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>{s.students?.student_name || 'Student'}</h3>
+                                    <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '12px' }}>{s.students?.student_code || ''}</p>
+                                </div>
+                                {(() => {
+                                    const st = getSessionDisplayStatus(s);
+                                    return (
+                                        <span style={{
+                                            padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                                            background: st.bg, color: st.color
+                                        }}>{st.label}</span>
+                                    );
+                                })()}
                             </div>
-                        ) : null}
-                        {s.status === 'completed' ? (
-                            <p style={{ margin: 0, fontSize: '12px', color: '#f59e0b', fontWeight: 600 }}>⏳ Waiting for approval</p>
-                        ) : null}
-                        {s.status === 'verified' ? (
-                            <p style={{ margin: 0, fontSize: '12px', color: '#15803d', fontWeight: 600 }}>✅ Approved</p>
-                        ) : null}
-                    </div>
-                ))}
+
+                            {/* Details */}
+                            <div className="today-lead-details">
+                                <div>
+                                    <span className="text-muted">Time</span>
+                                    <p style={{ margin: '2px 0 0', fontWeight: 500 }}>
+                                        {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
+                                    </p>
+                                </div>
+                                <div>
+                                    <span className="text-muted">Subject</span>
+                                    <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.subject || 'General'}</p>
+                                </div>
+                                <div>
+                                    <span className="text-muted">Duration</span>
+                                    <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.duration_hours ? `${s.duration_hours}h` : '—'}</p>
+                                </div>
+                                <div>
+                                    <span className="text-muted">Date</span>
+                                    <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{s.session_date || '—'}</p>
+                                </div>
+                            </div>
+
+                            {/* Actions */}
+                            {isScheduled && ended && !hasPendingReschedule && !hasPendingApproval ? (
+                                <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
+                                        onClick={() => setConfirmSession(s)}>
+                                        ✅ Send Approval
+                                    </button>
+                                </div>
+                            ) : null}
+                            {isScheduled && !ended && !hasPendingReschedule && !hasPendingApproval ? (
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <p style={{ margin: 0, fontSize: '12px', color: '#6366f1', fontWeight: 600 }}>
+                                        📅 {minutesUntilStart > 0 && minutesUntilStart <= 30 ? `Starts in ${Math.ceil(minutesUntilStart)} mins` : 'Session not ended'}
+                                    </p>
+                                    {canReschedule ? (
+                                        <button className="small danger" style={{ fontSize: '12px', marginLeft: 'auto' }}
+                                            onClick={() => setRescheduleSession(s)}>
+                                            {s.status === 'rescheduled' ? '🔄 Reschedule Again' : '🔄 Reschedule'}
+                                        </button>
+                                    ) : (
+                                        <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: 'auto', fontStyle: 'italic' }}>
+                                            {minutesUntilStart <= 30 && minutesUntilStart > 0 ? 'Locked' : ''}
+                                        </span>
+                                    )}
+                                </div>
+                            ) : null}
+                        </div>
+                    );
+                })}
             </div>
 
-            {rescheduleSession ? (
-                <RescheduleModal session={rescheduleSession} onClose={() => setRescheduleSession(null)} onDone={() => { setRescheduleSession(null); loadSessions(); }} />
-            ) : null}
-        </section>
+            {/* Custom Confirm Modal */}
+            {
+                confirmSession && (
+                    <div className="modal-overlay" onClick={() => !approving && setConfirmSession(null)}>
+                        <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+                            <h3 style={{ margin: '0 0 12px' }}>Confirm Approval</h3>
+                            <p style={{ margin: '0 0 8px', color: '#374151' }}>Mark this session as completed and request coordinator approval?</p>
+                            <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                                <p style={{ margin: 0, fontSize: '13px' }}><strong>{confirmSession.students?.student_name}</strong> · {confirmSession.subject || 'Class'}</p>
+                                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#6b7280' }}>
+                                    {confirmSession.started_at ? new Date(confirmSession.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
+                                    {confirmSession.duration_hours ? ` · ${confirmSession.duration_hours}h` : ''}
+                                </p>
+                            </div>
+                            <div style={{ marginBottom: '16px' }}>
+                                <label style={{ display: 'block', fontSize: '13px', fontWeight: 500, marginBottom: '4px' }}>Session Note (Optional)</label>
+                                <textarea
+                                    value={approvalReason}
+                                    onChange={e => setApprovalReason(e.target.value)}
+                                    placeholder="e.g. Class ran 15 mins over to finish topic"
+                                    rows={2}
+                                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }}
+                                />
+                            </div>
+                            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                <button type="button" className="secondary" onClick={() => setConfirmSession(null)} disabled={approving}>Cancel</button>
+                                <button type="button" onClick={handleConfirmApproval} disabled={approving}>
+                                    {approving ? 'Sending...' : 'Yes, Send Approval'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {
+                rescheduleSession ? (
+                    <RescheduleModal session={rescheduleSession} onClose={() => setRescheduleSession(null)} onDone={() => { setRescheduleSession(null); loadSessions(); }} />
+                ) : null
+            }
+        </section >
     );
 }
 
 function RescheduleModal({ session, onClose, onDone }) {
+    function extractTime(ts) {
+        if (!ts) return '';
+        if (ts.includes('T')) {
+            return new Date(ts).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
+        }
+        return ts.slice(0, 5);
+    }
+
+    // Generate 15-minute interval time slots from 6:00 AM to 10:00 PM
+    const timeSlots = [];
+    for (let h = 6; h <= 22; h++) {
+        for (let m = 0; m < 60; m += 15) {
+            const hh = String(h).padStart(2, '0');
+            const mm = String(m).padStart(2, '0');
+            const hr12 = h % 12 || 12;
+            const ampm = h >= 12 ? 'PM' : 'AM';
+            timeSlots.push({ value: `${hh}:${mm}`, label: `${hr12}:${mm} ${ampm}` });
+        }
+    }
+
     const [reason, setReason] = useState('');
-    const [newDate, setNewDate] = useState('');
-    const [newTime, setNewTime] = useState('');
+    const [newDate, setNewDate] = useState(session.session_date || '');
+    const [newTime, setNewTime] = useState(extractTime(session.started_at));
+    const [newDuration, setNewDuration] = useState(session.duration_hours || '');
     const [err, setErr] = useState('');
+    const [studentClasses, setStudentClasses] = useState([]);
+    const [loadingSlots, setLoadingSlots] = useState(false);
+
+    // Fetch student's existing sessions for the selected date
+    useEffect(() => {
+        if (!newDate || !session.student_id) return;
+        setLoadingSlots(true);
+        apiFetch(`/students/${session.student_id}/availability?start_date=${newDate}&end_date=${newDate}`)
+            .then(res => setStudentClasses(res.classes || []))
+            .catch(() => setStudentClasses([]))
+            .finally(() => setLoadingSlots(false));
+    }, [newDate, session.student_id]);
+
+    // Check if a time slot overlaps with any of the student's existing classes
+    const isSlotOverlapping = (slotValue) => {
+        // slotValue is "HH:mm"
+        if (!newDuration || newDuration <= 0) return false;
+
+        const [slotH, slotM] = slotValue.split(':').map(Number);
+        // Start time in minutes from midnight
+        const newStartMins = (slotH * 60) + slotM;
+        // End time in minutes from midnight
+        const newEndMins = newStartMins + (Number(newDuration) * 60);
+
+        for (const cls of studentClasses) {
+            // Ignore the very session we are trying to reschedule!
+            if (cls.id === session.id) continue;
+
+            const [clsH, clsM] = extractTime(cls.started_at).split(':').map(Number);
+            const clsStartMins = (clsH * 60) + clsM;
+            const clsEndMins = clsStartMins + (Number(cls.duration_hours || 1) * 60);
+
+            // Overlap logic: (StartA < EndB) and (EndA > StartB)
+            if (newStartMins < clsEndMins && newEndMins > clsStartMins) {
+                return true;
+            }
+        }
+        return false;
+    };
 
     async function handleSubmit(e) {
         e.preventDefault();
@@ -263,27 +440,85 @@ function RescheduleModal({ session, onClose, onDone }) {
         try {
             await apiFetch(`/teachers/sessions/${session.id}/reschedule`, {
                 method: 'POST',
-                body: JSON.stringify({ reason, new_date: newDate || null, new_time: newTime || null })
+                body: JSON.stringify({ reason, new_date: newDate || null, new_time: newTime || null, new_duration: newDuration || null })
             });
             onDone();
         } catch (e) { setErr(e.message); }
     }
 
+    const currentTime = extractTime(session.started_at);
+
+    // Calculate today's date and current minutes for validation
+    const nowLocal = new Date();
+    // Create YYYY-MM-DD string handling local timezone properly
+    const todayStr = nowLocal.getFullYear() + '-' + String(nowLocal.getMonth() + 1).padStart(2, '0') + '-' + String(nowLocal.getDate()).padStart(2, '0');
+    const currentMinsLocal = nowLocal.getHours() * 60 + nowLocal.getMinutes();
+
     return (
         <div className="modal-overlay">
             <div className="modal card" style={{ maxWidth: '420px' }}>
                 <h3>Reschedule Session</h3>
-                <p className="text-muted" style={{ margin: '0 0 12px', fontSize: '13px' }}>
-                    Student: <strong>{session.students?.student_name}</strong> · {session.session_date}
-                </p>
+                <div style={{ background: '#f9fafb', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                    <p style={{ margin: 0, fontSize: '13px' }}>
+                        <strong>{session.students?.student_name}</strong> · {session.subject || 'Class'}
+                    </p>
+                    <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>
+                        📅 {session.session_date} · 🕐 {currentTime}
+                    </p>
+                </div>
                 <form className="form-grid" onSubmit={handleSubmit}>
                     <label>Reason *<textarea value={reason} onChange={e => setReason(e.target.value)} required rows={2} placeholder="Why are you rescheduling?" /></label>
-                    <label>New Date<input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} /></label>
-                    <label>New Time<input type="time" value={newTime} onChange={e => setNewTime(e.target.value)} /></label>
+                    <label>New Date<input type="date" value={newDate} min={todayStr} onChange={e => setNewDate(e.target.value)} /></label>
+                    <label>Start Time
+                        <select value={newTime} onChange={e => setNewTime(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px' }} disabled={loadingSlots}>
+                            <option value="">{loadingSlots ? 'Loading availability...' : 'Select time'}</option>
+                            {timeSlots.map(t => {
+                                const overlap = isSlotOverlapping(t.value);
+                                let isPast = false;
+
+                                if (newDate === todayStr) {
+                                    const [h, m] = t.value.split(':').map(Number);
+                                    if ((h * 60 + m) <= currentMinsLocal) {
+                                        isPast = true;
+                                    }
+                                }
+
+                                // Never disable times that fall within the original session's time window on the original date
+                                let isOriginalSessionWindow = false;
+                                if (newDate === session.session_date && currentTime) {
+                                    const [h, m] = t.value.split(':').map(Number);
+                                    const tMins = h * 60 + m;
+
+                                    const [origH, origM] = currentTime.split(':').map(Number);
+                                    const origStartMins = origH * 60 + origM;
+                                    const origEndMins = origStartMins + (Number(session.duration_hours || 1) * 60);
+
+                                    if (tMins >= origStartMins && tMins < origEndMins) {
+                                        isOriginalSessionWindow = true;
+                                    }
+                                }
+
+                                const disabled = !isOriginalSessionWindow && (overlap || isPast);
+                                return (
+                                    <option key={t.value} value={t.value} disabled={disabled}>
+                                        {t.label} {overlap && !isOriginalSessionWindow ? '(Unavailable: Student Booked)' : isPast && !isOriginalSessionWindow ? '(Past time)' : ''}
+                                    </option>
+                                );
+                            })}
+                        </select>
+                    </label>
+                    <label>Duration (Hours)
+                        <select value={newDuration} onChange={e => setNewDuration(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px' }}>
+                            <option value="">Select hours</option>
+                            {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => (
+                                <option key={h} value={h}>{h}h</option>
+                            ))}
+                        </select>
+                    </label>
                     {err ? <p className="error">{err}</p> : null}
                     <div className="actions">
                         <button type="button" className="secondary" onClick={onClose}>Cancel</button>
-                        <button type="submit">Reschedule</button>
+                        <button type="submit">Send Reschedule Request</button>
                     </div>
                 </form>
             </div>
@@ -292,96 +527,155 @@ function RescheduleModal({ session, onClose, onDone }) {
 }
 
 
-/* ═══════ My Timetable ═══════ */
+/* ═══════ My Timetable (with week navigation) ═══════ */
 export function TeacherTimetablePage() {
     const [sessions, setSessions] = useState([]);
-    const [demos, setDemos] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [weekOffset, setWeekOffset] = useState(0);
+    const [weekStart, setWeekStart] = useState('');
+    const [weekEnd, setWeekEnd] = useState('');
+    const [studentFilter, setStudentFilter] = useState('');
+    const [subjectFilter, setSubjectFilter] = useState('');
 
-    useEffect(() => {
-        Promise.all([
-            apiFetch('/students/sessions/history').then(d => d.items || []).catch(() => []),
-            apiFetch('/teachers/my-demos').then(d => d.items || []).catch(() => [])
-        ]).then(([s, d]) => {
-            setSessions(s);
-            setDemos(d);
-        }).finally(() => setLoading(false));
-    }, []);
+    async function loadWeek(offset) {
+        setLoading(true);
+        try {
+            const d = await apiFetch(`/students/sessions/week?offset=${offset}`);
+            setSessions(d.items || []);
+            setWeekStart(d.weekStart || '');
+            setWeekEnd(d.weekEnd || '');
+        } catch (e) { console.error(e); }
+        setLoading(false);
+    }
+
+    useEffect(() => { loadWeek(weekOffset); }, [weekOffset]);
 
     const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-    // Merge sessions and demos into a unified timetable grouped by day
+    // Unique students and subjects for filters
+    const allStudentNames = useMemo(() => {
+        const names = new Set();
+        sessions.forEach(s => { if (s.students?.student_name) names.add(s.students.student_name); });
+        return Array.from(names).sort();
+    }, [sessions]);
+
+    const allSubjects = useMemo(() => {
+        const subs = new Set();
+        sessions.forEach(s => { if (s.subject) subs.add(s.subject); });
+        return Array.from(subs).sort();
+    }, [sessions]);
+
     const timetable = useMemo(() => {
         const map = {};
         DAYS.forEach(d => { map[d] = []; });
-
-        sessions.forEach(s => {
-            if (s.session_date) {
-                const day = new Date(s.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
-                if (map[day]) map[day].push({ ...s, _type: 'session' });
-            }
-        });
-
-        demos.forEach(d => {
-            if (d.scheduled_at) {
-                const day = new Date(d.scheduled_at).toLocaleDateString('en-US', { weekday: 'long' });
-                if (map[day]) map[day].push({
-                    id: d.id,
-                    _type: 'demo',
-                    students: { student_name: d.leads?.student_name || 'Student' },
-                    subject: d.leads?.subject || '',
-                    started_at: d.scheduled_at,
-                    ends_at: d.ends_at,
-                    status: 'demo'
-                });
-            }
-        });
-
+        sessions
+            .filter(s => !studentFilter || s.students?.student_name === studentFilter)
+            .filter(s => !subjectFilter || s.subject === subjectFilter)
+            .forEach(s => {
+                if (s.session_date) {
+                    const day = new Date(s.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+                    if (map[day]) map[day].push(s);
+                }
+            });
         return map;
-    }, [sessions, demos]);
+    }, [sessions, studentFilter, subjectFilter]);
 
-    if (loading) return <section className="panel"><p>Loading timetable...</p></section>;
+    // Build date labels for each day of the week
+    const dayDates = useMemo(() => {
+        if (!weekStart) return {};
+        const result = {};
+        const start = new Date(weekStart + 'T00:00:00');
+        DAYS.forEach((day, i) => {
+            const d = new Date(start);
+            d.setDate(start.getDate() + i);
+            result[day] = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+        });
+        return result;
+    }, [weekStart]);
+
+    function formatWeekLabel() {
+        if (!weekStart || !weekEnd) return '';
+        const s = new Date(weekStart + 'T00:00:00');
+        const e = new Date(weekEnd + 'T00:00:00');
+        return `${s.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} – ${e.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+    }
+
+    const statusColors = {
+        scheduled: '#6366f1', completed: '#f59e0b', verified: '#15803d', rescheduled: '#ef4444'
+    };
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Timetable</h2>
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                    <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#e0e7ff', display: 'inline-block' }} /> Session
-                </span>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
-                    <span style={{ width: '12px', height: '12px', borderRadius: '3px', background: '#ffedd5', display: 'inline-block' }} /> Demo
-                </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
-                {DAYS.map(day => (
-                    <article key={day} className="card" style={{ padding: '16px' }}>
-                        <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#4338ca' }}>{day}</h4>
-                        {timetable[day].length ? timetable[day].slice(0, 8).map(s => (
-                            <div key={s.id} style={{
-                                padding: '6px 8px', borderRadius: '6px', marginBottom: '6px', fontSize: '12px',
-                                background: s._type === 'demo' ? '#ffedd5' : '#e0e7ff',
-                                borderLeft: `3px solid ${s._type === 'demo' ? '#f97316' : '#4338ca'}`
-                            }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <p style={{ margin: 0, fontWeight: 600 }}>{s.students?.student_name || 'Student'}</p>
-                                    {s._type === 'demo' && (
-                                        <span style={{
-                                            fontSize: '9px', fontWeight: 700, padding: '1px 6px',
-                                            borderRadius: '8px', background: '#f97316', color: 'white'
-                                        }}>DEMO</span>
-                                    )}
-                                </div>
-                                <p className="text-muted" style={{ margin: '2px 0 0' }}>
-                                    {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
-                                    {s.ends_at ? ` - ${new Date(s.ends_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}` : ''}
-                                    {s.subject ? ` · ${s.subject}` : ''}
-                                </p>
-                            </div>
-                        )) : <p className="text-muted" style={{ fontSize: '12px' }}>No sessions</p>}
-                    </article>
+            {/* Single toolbar: week nav + filters + legend */}
+            <div style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
+                {/* Week nav */}
+                <button className="small secondary" onClick={() => setWeekOffset(w => w - 1)} style={{ padding: '5px 10px' }}>◀ Prev</button>
+                <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', minWidth: '150px', textAlign: 'center' }}>{formatWeekLabel()}</span>
+                <button className="small secondary" onClick={() => setWeekOffset(w => w + 1)} style={{ padding: '5px 10px' }}>Next ▶</button>
+                {weekOffset !== 0 && (
+                    <button className="small primary" onClick={() => setWeekOffset(0)} style={{ padding: '5px 10px', fontSize: '11px' }}>Today</button>
+                )}
+
+                <span style={{ color: '#d1d5db', fontSize: '16px' }}>|</span>
+
+                {/* Student filter */}
+                <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', minWidth: '130px' }}>
+                    <option value=''>All Students</option>
+                    {allStudentNames.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+
+                {/* Subject filter */}
+                <select value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', minWidth: '120px' }}>
+                    <option value=''>All Subjects</option>
+                    {allSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+
+                {(studentFilter || subjectFilter) && (
+                    <button className='small secondary' onClick={() => { setStudentFilter(''); setSubjectFilter(''); }} style={{ padding: '5px 10px', fontSize: '11px' }}>✕ Clear</button>
+                )}
+
+                <span style={{ color: '#d1d5db', fontSize: '16px' }}>|</span>
+
+                {/* Legend */}
+                {[['#e0e7ff', 'Scheduled'], ['#cffafe', 'Completed'], ['#dcfce7', 'Verified'], ['#fef9c3', 'Pending']].map(([bg, label]) => (
+                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6b7280' }}>
+                        <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: bg, display: 'inline-block' }} />
+                        {label}
+                    </span>
                 ))}
             </div>
+
+
+            {loading ? <p>Loading timetable...</p> : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '12px' }}>
+                    {DAYS.map(day => (
+                        <article key={day} className="card" style={{ padding: '16px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                                <h4 style={{ margin: 0, fontSize: '14px', color: '#4338ca' }}>{day}</h4>
+                                <span className="text-muted" style={{ fontSize: '11px' }}>{dayDates[day] || ''}</span>
+                            </div>
+                            {timetable[day].length ? timetable[day].map(s => {
+                                const st = getSessionDisplayStatus(s);
+                                return (
+                                    <div key={s.id} style={{
+                                        padding: '6px 8px', borderRadius: '6px', marginBottom: '6px', fontSize: '12px',
+                                        background: st.bg,
+                                        borderLeft: `3px solid ${st.color}`
+                                    }}>
+                                        <p style={{ margin: 0, fontWeight: 600 }}>{s.students?.student_name || 'Student'}</p>
+                                        <p className="text-muted" style={{ margin: '2px 0 0' }}>
+                                            {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : 'TBD'}
+                                            {s.duration_hours ? ` · ${s.duration_hours}h` : ''}
+                                            {s.subject ? ` · ${s.subject}` : ''}
+                                        </p>
+                                        <span style={{ fontSize: '10px', fontWeight: 600, color: st.color, textTransform: 'capitalize' }}>{st.label}</span>
+                                    </div>
+                                );
+                            }) : <p className="text-muted" style={{ fontSize: '12px' }}>No sessions</p>}
+                        </article>
+                    ))}
+                </div>
+            )}
         </section>
     );
 }
@@ -983,118 +1277,200 @@ function AddAvailabilityModal({ isOpen, onClose, onAdd }) {
 /* ═══════ Teacher Reports ═══════ */
 export function TeacherReportsPage() {
     const [sessions, setSessions] = useState([]);
+    const [allAssignedStudents, setAllAssignedStudents] = useState([]);
     const [hours, setHours] = useState({ items: [], total_hours: 0 });
     const [loading, setLoading] = useState(true);
+    const [preset, setPreset] = useState('all');
+    const [dateFrom, setDateFrom] = useState('');
+    const [dateTo, setDateTo] = useState('');
+    const [studentFilter, setStudentFilter] = useState('');
 
     useEffect(() => {
         (async () => {
             try {
-                const [h, s] = await Promise.all([
+                const [h, s, st] = await Promise.all([
                     apiFetch('/teachers/my-hours'),
-                    apiFetch('/students/sessions/history')
+                    apiFetch('/students/sessions/history'),
+                    apiFetch('/teachers/my-students')
                 ]);
                 setHours(h);
                 setSessions(s.items || []);
-            } catch (e) { }
+                setAllAssignedStudents(st.items || []);
+            } catch (e) { console.error(e); }
             setLoading(false);
         })();
     }, []);
 
+    // Helper to get date ranges for presets
+    function getPresetRange(p) {
+        const now = new Date();
+        const today = now.toISOString().slice(0, 10);
+        if (p === 'this_week') {
+            const dayOfWeek = now.getDay();
+            const monday = new Date(now);
+            monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7));
+            const sunday = new Date(monday);
+            sunday.setDate(monday.getDate() + 6);
+            return [monday.toISOString().slice(0, 10), sunday.toISOString().slice(0, 10)];
+        }
+        if (p === 'this_month') {
+            return [today.slice(0, 7) + '-01', today];
+        }
+        if (p === 'last_month') {
+            const d = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const end = new Date(now.getFullYear(), now.getMonth(), 0);
+            return [d.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+        }
+        return [null, null]; // 'all' or 'custom'
+    }
+
+    // Get unique students for the filter dropdown
+    const students = useMemo(() => {
+        return allAssignedStudents.map(s => s.name);
+    }, [allAssignedStudents]);
+
+    // Filtered sessions based on preset / custom range / student
+    const filtered = useMemo(() => {
+        let from = null, to = null;
+        if (preset === 'custom') { from = dateFrom; to = dateTo; }
+        else if (preset !== 'all') { [from, to] = getPresetRange(preset); }
+
+        return sessions.filter(s => {
+            if (from && s.session_date < from) return false;
+            if (to && s.session_date > to) return false;
+            if (studentFilter && (s.students?.student_name || '') !== studentFilter) return false;
+            return true;
+        });
+    }, [sessions, preset, dateFrom, dateTo, studentFilter]);
+
+    // Stats
+    const stats = useMemo(() => {
+        const total = filtered.length;
+        const verified = filtered.filter(s => isSessionVerified(s)).length;
+        const completed = filtered.filter(s => s.status === 'completed' || isSessionVerified(s)).length;
+        const totalHrs = filtered.reduce((sum, s) => sum + Number(s.duration_hours || 0), 0);
+        const avgHrs = total > 0 ? (totalHrs / total).toFixed(1) : '0';
+        const uniqueStudents = new Set(filtered.map(s => s.students?.student_name).filter(Boolean)).size;
+        return { total, verified, completed, totalHrs, avgHrs, uniqueStudents };
+    }, [filtered]);
+
+    // Monthly breakdown from filtered
     const monthlyBreakdown = useMemo(() => {
         const map = {};
-        sessions.forEach(s => {
-            const d = s.session_date || '';
-            const month = d.slice(0, 7); // YYYY-MM
-            if (!map[month]) map[month] = { sessions: 0, hours: 0, completed: 0 };
+        filtered.forEach(s => {
+            const month = (s.session_date || '').slice(0, 7);
+            if (!month) return;
+            if (!map[month]) map[month] = { sessions: 0, hours: 0, verified: 0 };
             map[month].sessions++;
             map[month].hours += Number(s.duration_hours || 0);
-            if (s.status === 'completed' || s.status === 'verified') map[month].completed++;
+            if (isSessionVerified(s)) map[month].verified++;
         });
         return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]));
-    }, [sessions]);
+    }, [filtered]);
+
+    const statusColors = {
+        scheduled: { bg: '#e0e7ff', color: '#4338ca' },
+        in_progress: { bg: '#fef9c3', color: '#a16207' },
+        completed: { bg: '#fef3c7', color: '#d97706' },
+        verified: { bg: '#dcfce7', color: '#15803d' },
+        rescheduled: { bg: '#fee2e2', color: '#dc2626' },
+        cancelled: { bg: '#f3f4f6', color: '#6b7280' }
+    };
+
+    const presets = [
+        { key: 'all', label: 'All Time' },
+        { key: 'this_week', label: 'This Week' },
+        { key: 'this_month', label: 'This Month' },
+        { key: 'last_month', label: 'Last Month' },
+        { key: 'custom', label: 'Custom' }
+    ];
 
     if (loading) return <section className="panel"><p>Loading reports...</p></section>;
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Reports</h2>
 
-            <div className="grid-three" style={{ marginBottom: '16px' }}>
-                <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1d4ed8' }}>{hours.total_hours}h</p>
-                    <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>Total Hours</p>
-                </div>
-                <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>{sessions.length}</p>
-                    <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>Total Sessions</p>
-                </div>
-                <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#10b981' }}>
-                        {sessions.filter(s => s.status === 'completed' || s.status === 'verified').length}
-                    </p>
-                    <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>Completed</p>
+            {/* Filters Bar */}
+            <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'flex-end' }}>
+                    {/* Preset buttons */}
+                    <div>
+                        <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '.3px' }}>Period</label>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            {presets.map(p => (
+                                <button key={p.key}
+                                    className={preset === p.key ? 'small primary' : 'small secondary'}
+                                    onClick={() => setPreset(p.key)}
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                >{p.label}</button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Custom date range */}
+                    {preset === 'custom' && (
+                        <>
+                            <label style={{ fontSize: '13px' }}>
+                                <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>From</span>
+                                <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: '6px 10px', fontSize: '13px' }} />
+                            </label>
+                            <label style={{ fontSize: '13px' }}>
+                                <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>To</span>
+                                <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: '6px 10px', fontSize: '13px' }} />
+                            </label>
+                        </>
+                    )}
+
+                    {/* Student filter */}
+                    <label style={{ fontSize: '13px' }}>
+                        <span style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: '#6b7280', marginBottom: '4px', textTransform: 'uppercase' }}>Student</span>
+                        <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '6px 10px', fontSize: '13px', minWidth: '140px' }}>
+                            <option value="">All Students</option>
+                            {students.map(name => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                    </label>
                 </div>
             </div>
 
-            {/* Monthly Breakdown */}
+            {/* Session Logs Table */}
             <article className="card" style={{ padding: '20px' }}>
-                <h3 style={{ margin: '0 0 12px', fontSize: '15px' }}>Monthly Breakdown</h3>
-                <div className="table-wrap mobile-friendly-table">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Month</th>
-                                <th>Sessions</th>
-                                <th>Hours</th>
-                                <th>Completed</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {monthlyBreakdown.map(([month, data]) => (
-                                <tr key={month}>
-                                    <td data-label="Month">{month}</td>
-                                    <td data-label="Sessions">{data.sessions}</td>
-                                    <td data-label="Hours">{data.hours}h</td>
-                                    <td data-label="Completed">{data.completed}</td>
-                                </tr>
-                            ))}
-                            {!monthlyBreakdown.length ? <tr><td colSpan="4" style={{ textAlign: 'center' }}>No data yet</td></tr> : null}
-                        </tbody>
-                    </table>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px' }}>Session Logs</h3>
+                    <span className="text-muted" style={{ fontSize: '12px' }}>{filtered.filter(s => isSessionVerified(s)).length} verified sessions</span>
                 </div>
-            </article>
-
-            {/* Session History */}
-            <article className="card" style={{ padding: '20px', marginTop: '16px' }}>
-                <h3 style={{ margin: '0 0 12px', fontSize: '15px' }}>Session History</h3>
                 <div className="table-wrap mobile-friendly-table">
                     <table>
                         <thead>
                             <tr>
-                                <th>Date</th>
-                                <th>Student</th>
-                                <th>Subject</th>
-                                <th>Duration</th>
-                                <th>Status</th>
+                                <th>Date</th><th>Time</th><th>Student</th><th>Subject</th><th>Duration</th><th>Status</th>
                             </tr>
                         </thead>
                         <tbody>
-                            {sessions.slice(0, 30).map(s => (
-                                <tr key={s.id}>
-                                    <td data-label="Date">{s.session_date}</td>
-                                    <td data-label="Student">{s.students?.student_name || '—'}</td>
-                                    <td data-label="Subject">{s.subject || '—'}</td>
-                                    <td data-label="Duration">{s.duration_hours ? `${s.duration_hours}h` : '—'}</td>
-                                    <td data-label="Status">
-                                        <span style={{
-                                            padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                                            background: s.status === 'completed' || s.status === 'verified' ? '#dcfce7' : '#f3f4f6',
-                                            color: s.status === 'completed' || s.status === 'verified' ? '#15803d' : '#6b7280'
-                                        }}>{s.status}</span>
-                                    </td>
-                                </tr>
-                            ))}
-                            {!sessions.length ? <tr><td colSpan="5" style={{ textAlign: 'center' }}>No sessions yet</td></tr> : null}
+                            {filtered.filter(s => isSessionVerified(s)).map(s => {
+                                const sc = statusColors['verified'];
+                                return (
+                                    <tr key={s.id}>
+                                        <td data-label="Date">{s.session_date}</td>
+                                        <td data-label="Time">
+                                            {s.started_at
+                                                ? (s.started_at.includes('T')
+                                                    ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })
+                                                    : s.started_at)
+                                                : '—'}
+                                        </td>
+                                        <td data-label="Student">{s.students?.student_name || '—'}</td>
+                                        <td data-label="Subject">{s.subject || '—'}</td>
+                                        <td data-label="Duration">{s.duration_hours ? `${s.duration_hours}h` : '—'}</td>
+                                        <td data-label="Status">
+                                            <span style={{
+                                                padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
+                                                background: sc.bg, color: sc.color, textTransform: 'capitalize'
+                                            }}>Verified</span>
+                                        </td>
+                                    </tr>
+                                );
+                            })}
+                            {!filtered.length ? <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No sessions found for this filter.</td></tr> : null}
                         </tbody>
                     </table>
                 </div>

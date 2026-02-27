@@ -2,6 +2,7 @@ import { ROLES } from './roles.js';
 
 export const APP_PAGES = [
   /* ── Dashboards ── */
+  { path: '/dashboard/tc', title: 'TC Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/dashboard/super-admin', title: 'Super Admin Dashboard', group: 'Dashboards', roles: [ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/dashboard/counselor', title: 'Counselor Dashboard', group: 'Dashboards', roles: [ROLES.COUNSELOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/dashboard/counselor-head', title: 'Counselor Head Dashboard', group: 'Dashboards', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
@@ -23,7 +24,8 @@ export const APP_PAGES = [
   /* ── Academics (Students/Teachers) ── */
   { path: '/students/hub', title: 'Students', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/students/today', title: 'Today Classes', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/sessions/manage', title: 'Sessions Verify', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/sessions/manage', title: 'All Sessions', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/sessions/verifications', title: 'Verifications', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/sessions/verification-queue', title: 'Session Queue', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: false },
   { path: '/sessions/logs', title: 'Session Logs', group: 'Academics', roles: [ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
@@ -32,8 +34,8 @@ export const APP_PAGES = [
   { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Teacher Coordinator ── */
-  { path: '/dashboard/tc', title: 'TC Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/tc/teacher-leads', title: 'Teacher Leads', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/tc/leads', title: 'All Leads', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/tc/teacher-leads', title: 'Leads Pipeline', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   { path: '/tc/performance', title: 'Teacher Performance', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 

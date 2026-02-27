@@ -132,6 +132,407 @@ function SubjectSelect({ value, onChange, options, required }) {
   );
 }
 
+/* ═══════ Student Classes & Timetable Tab ═══════ */
+function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChanged }) {
+  const [sessions, setSessions] = useState(initialSessions || []);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [weekSessions, setWeekSessions] = useState([]);
+  const [weekStart, setWeekStart] = useState('');
+  const [weekEnd, setWeekEnd] = useState('');
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+
+  const [selectedSession, setSelectedSession] = useState(null); // details modal
+  const [rescheduleData, setRescheduleData] = useState(null); // { id, date, time, duration }
+
+  // Bulk Form State
+  const today = new Date().toISOString().slice(0, 10);
+  const [showForm, setShowForm] = useState(false);
+  const [fStart, setFStart] = useState(today);
+  const [fEnd, setFEnd] = useState('');
+  const [fDays, setFDays] = useState([]);
+  const [fTeacher, setFTeacher] = useState('');
+  const [fSubject, setFSubject] = useState('');
+  const [fTime, setFTime] = useState('');
+  const [fEndTime, setFEndTime] = useState('');
+
+  const [teacherAvail, setTeacherAvail] = useState(null);
+  const [availLoading, setAvailLoading] = useState(false);
+
+  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const loadWeek = useCallback(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7) + weekOffset * 7);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+
+    const st = monday.toISOString().slice(0, 10);
+    const en = sunday.toISOString().slice(0, 10);
+    setWeekStart(st);
+    setWeekEnd(en);
+
+    const match = sessions.filter(s => s.session_date >= st && s.session_date <= en);
+    setWeekSessions(match);
+  }, [weekOffset, sessions]);
+
+  useEffect(() => { setSessions(initialSessions); }, [initialSessions]);
+  useEffect(() => { loadWeek(); }, [loadWeek]);
+
+  useEffect(() => {
+    if (!fTeacher || !fStart || !fEnd || fStart > fEnd) {
+      setTeacherAvail(null);
+      return;
+    }
+    setAvailLoading(true);
+    apiFetch(`/teachers/${fTeacher}/availability?start_date=${fStart}&end_date=${fEnd}`)
+      .then(d => { setTeacherAvail(d); setFTime(''); })
+      .catch(e => setError(e.message))
+      .finally(() => setAvailLoading(false));
+  }, [fTeacher, fStart, fEnd]);
+
+  const { validStarts, validEnds } = useMemo(() => {
+    if (!teacherAvail || !fDays.length) return { validStarts: [], validEnds: [] };
+
+    const times = [];
+    for (let h = 6; h <= 22; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === 22 && m > 0) break;
+        times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+
+    const targetDates = [];
+    const startObj = new Date(fStart + 'T00:00:00Z');
+    const endObj = new Date(fEnd + 'T00:00:00Z');
+
+    for (let d = new Date(startObj); d <= endObj; d.setDate(d.getDate() + 1)) {
+      if (fDays.includes(DAY_MAP[d.getUTCDay()])) {
+        targetDates.push({ dateStr: d.toISOString().split('T')[0], dayName: DAY_MAP[d.getUTCDay()] });
+      }
+    }
+
+    if (!targetDates.length) return { validStarts: [], validEnds: [] };
+
+    function checkSlot(start, end) {
+      if (start >= end) return false;
+      return targetDates.every(td => {
+        // Removed preferred slot tracking at user request. All time slots are valid natively unless there is a class/demo clash.
+
+        const classClash = teacherAvail.classes.some(c => {
+          if (c.session_date !== td.dateStr || !c.started_at) return false;
+          const cStart = c.started_at.slice(0, 5);
+          const [ch, cm] = cStart.split(':').map(Number);
+          const cDur = Number(c.duration_hours || 0);
+          const ceH = ch + Math.floor(cDur) + Math.floor((cm + (cDur % 1) * 60) / 60);
+          const ceM = (cm + (cDur % 1) * 60) % 60;
+          const cEnd = `${String(ceH).padStart(2, '0')}:${String(ceM).padStart(2, '0')}`;
+          return (start < cEnd && end > cStart);
+        });
+        if (classClash) return false;
+
+        const demoClash = teacherAvail.demos.some(d => {
+          const dDate = d.scheduled_at.split('T')[0];
+          if (dDate !== td.dateStr) return false;
+          const dStart = new Date(d.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+          const dEnd = d.ends_at ? new Date(d.ends_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) :
+            `${String(Number(dStart.split(':')[0]) + 1).padStart(2, '0')}:${dStart.split(':')[1]}`;
+          return (start < dEnd && end > dStart);
+        });
+        if (demoClash) return false;
+
+        return true;
+      });
+    }
+
+    const validStarts = times.filter((tStart, i) => {
+      if (i === times.length - 1) return false;
+      return checkSlot(tStart, times[i + 1]);
+    });
+
+    let validEnds = [];
+    if (fTime) {
+      const startIndex = times.indexOf(fTime);
+      if (startIndex !== -1) {
+        // Enforce a minimum of 1 hour (4 slots of 15 mins)
+        const minEndIndex = startIndex + 4;
+        for (let i = startIndex + 1; i < times.length; i++) {
+          if (checkSlot(fTime, times[i])) {
+            if (i >= minEndIndex) validEnds.push(times[i]);
+          } else {
+            // Once we hit a blocked slot, we can't extend the duration any further
+            break;
+          }
+        }
+      }
+    }
+
+    return { validStarts, validEnds };
+  }, [teacherAvail, fDays, fStart, fEnd, fTime]);
+
+  function format24to12(timeStr) {
+    if (!timeStr) return '';
+    if (timeStr.includes('T')) {
+      return new Date(timeStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    }
+    const [h, m] = timeStr.split(':');
+    const hr = parseInt(h, 10);
+    const ampm = hr >= 12 ? 'PM' : 'AM';
+    const hd = hr % 12 || 12;
+    return `${hd}:${m} ${ampm}`;
+  }
+
+  function toggleDay(d) {
+    setFDays(prev => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+    setFTime('');
+    setFEndTime('');
+  }
+
+  async function handleBulkSubmit(e) {
+    e.preventDefault();
+    setError(''); setMsg('');
+    if (!fTime) return setError('Please select an available time correctly.');
+    if (fEnd < fStart) return setError('End date must be after start date.');
+    try {
+      let durH = 0;
+      if (fTime && fEndTime) {
+        const [sh, sm] = fTime.split(':').map(Number);
+        const [eh, em] = fEndTime.split(':').map(Number);
+        durH = (eh + em / 60) - (sh + sm / 60);
+      }
+      const res = await apiFetch(`/students/${studentId}/sessions/bulk`, {
+        method: 'POST',
+        body: JSON.stringify({
+          teacher_id: fTeacher,
+          start_date: fStart,
+          end_date: fEnd,
+          days_of_week: fDays,
+          started_at: fTime,
+          duration_hours: durH,
+          subject: fSubject
+        })
+      });
+      setMsg(`Successfully scheduled ${res.count} class(es)!`);
+      setTimeout(() => setMsg(''), 4000);
+      setShowForm(false);
+      onClassesChanged();
+    } catch (err) { setError(err.message); }
+  }
+
+  async function handleRescheduleSave(e) {
+    e.preventDefault();
+    if (!rescheduleData) return;
+    try {
+      await apiFetch(`/students/sessions/${rescheduleData.id}/reschedule`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          session_date: rescheduleData.date,
+          started_at: rescheduleData.time,
+          duration_hours: rescheduleData.duration
+        })
+      });
+      setRescheduleData(null);
+      setSelectedSession(null);
+      setMsg('Session rescheduled successfully!');
+      setTimeout(() => setMsg(''), 4000);
+      onClassesChanged();
+    } catch (err) { alert(err.message); }
+  }
+
+  const byDay = useMemo(() => {
+    const m = {};
+    dayNames.forEach(d => m[d] = []);
+    for (const s of weekSessions) {
+      const dt = new Date(s.session_date + 'T00:00:00Z');
+      const i = (dt.getUTCDay() + 6) % 7;
+      if (m[dayNames[i]]) m[dayNames[i]].push(s);
+    }
+    return m;
+  }, [weekSessions]);
+
+  const subjectOptions = useMemo(() => {
+    if (!fTeacher) return [];
+    const t = teachers.find(x => x.user_id === fTeacher);
+    if (!t) return [];
+    const subs = Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : []);
+    return subs.filter(Boolean);
+  }, [teachers, fTeacher]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3 style={{ margin: 0 }}>Weekly Timetable</h3>
+        <button type="button" onClick={() => setShowForm(!showForm)}>
+          {showForm ? 'Cancel Scheduling' : '+ Add Class'}
+        </button>
+      </div>
+
+      {msg && <div className="status-tag success" style={{ padding: '8px 12px', width: 'fit-content' }}>{msg}</div>}
+      {error && <div className="error" style={{ marginBottom: 0 }}>{error}</div>}
+
+      {showForm && (
+        <article className="card" style={{ border: '1px solid #e2e8f0', background: '#f8fafc' }}>
+          <h4 style={{ marginTop: 0 }}>Schedule New Classes</h4>
+          <form className="form-grid" onSubmit={handleBulkSubmit}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', gridColumn: '1 / -1' }}>
+              <label>Start Date
+                <input type="date" value={fStart} min={today} onChange={e => setFStart(e.target.value)} required />
+              </label>
+              <label>End Date
+                <input type="date" value={fEnd} min={fStart} onChange={e => setFEnd(e.target.value)} required />
+              </label>
+              <label>Teacher
+                <select value={fTeacher} onChange={e => { setFTeacher(e.target.value); setFTime(''); setFEndTime(''); }} required>
+                  <option value="">Select Teacher</option>
+                  {teachers.map(t => <option key={t.id} value={t.user_id}>{t.users?.full_name || t.teacher_code}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <label style={{ gridColumn: '1 / -1' }}>Days of Week
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                {dayNames.map(d => (
+                  <button key={d} type="button"
+                    className={`secondary small ${fDays.includes(d) ? 'primary' : ''}`}
+                    style={fDays.includes(d) ? { background: '#2563eb', color: '#fff', borderColor: '#2563eb' } : {}}
+                    onClick={() => toggleDay(d)}>
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </label>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', gridColumn: '1 / -1' }}>
+              <label>Subject
+                <select value={fSubject} onChange={e => setFSubject(e.target.value)} required disabled={!subjectOptions.length}>
+                  <option value="">Select Subject</option>
+                  {subjectOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </label>
+
+              <label>Start Time
+                <select value={fTime} onChange={e => { setFTime(e.target.value); setFEndTime(''); }} required disabled={!fTeacher || !fDays.length || availLoading}>
+                  <option value="">{availLoading ? 'Checking availability...' : 'Select Start Time'}</option>
+                  {validStarts.map(t => <option key={t} value={t}>{format24to12(t)}</option>)}
+                </select>
+                {fTeacher && fDays.length > 0 && validStarts.length === 0 && !availLoading && (
+                  <small className="error" style={{ display: 'block', marginTop: '4px' }}>No available slots found for all selected days.</small>
+                )}
+              </label>
+
+              <label>End Time
+                <select value={fEndTime} onChange={e => setFEndTime(e.target.value)} required disabled={!fTime || availLoading}>
+                  <option value="">Select End Time</option>
+                  {validEnds.map(t => <option key={t} value={t}>{format24to12(t)}</option>)}
+                </select>
+              </label>
+            </div>
+
+            <button type="submit" style={{ gridColumn: '1 / -1', marginTop: '8px' }} disabled={availLoading || !fEndTime}>Confirm & Schedule</button>
+          </form>
+        </article>
+      )}
+
+      <article className="card">
+        <div className="calendar-controls">
+          <button type="button" className="secondary" onClick={() => setWeekOffset(o => o - 1)}>← Prev</button>
+          <span className="calendar-range">{weekStart} — {weekEnd}</span>
+          <button type="button" className="secondary" onClick={() => setWeekOffset(o => o + 1)}>Next →</button>
+        </div>
+        <div className="calendar-grid">
+          {dayNames.map(day => (
+            <div key={day} className="calendar-day">
+              <div className="calendar-day-header">
+                <strong>{day}</strong>
+              </div>
+              <div className="calendar-day-sessions">
+                {byDay[day]?.length ? byDay[day].map(s => (
+                  <div key={s.id} className="calendar-session-card" onClick={() => setSelectedSession(s)} style={{ cursor: 'pointer' }}>
+                    <div className="calendar-session-time">
+                      {format24to12(s.started_at) || '—'} ({s.duration_hours}h)
+                    </div>
+                    <div className="calendar-session-info">
+                      <strong>{s.subject || 'Class'}</strong>
+                      <span>{s.users?.full_name || 'Teacher'}</span>
+                      <span className={`status-tag small ${s.status === 'scheduled' ? 'warning' : 'success'}`}>{s.status}</span>
+                    </div>
+                  </div>
+                )) : <div className="calendar-empty">Free</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </article>
+
+      {/* Details Modal */}
+      {selectedSession && !rescheduleData && (
+        <div className="modal-overlay" onClick={() => setSelectedSession(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h3>Session Details</h3>
+            <div className="detail-grid" style={{ gridTemplateColumns: '1fr', gap: '12px' }}>
+              <div><span className="eyebrow">Subject</span><p>{selectedSession.subject || '—'}</p></div>
+              <div><span className="eyebrow">Teacher</span><p>{selectedSession.users?.full_name || '—'}</p></div>
+              <div><span className="eyebrow">Date</span><p>{new Date(selectedSession.session_date).toLocaleDateString('en-IN')}</p></div>
+              <div><span className="eyebrow">Time & Duration</span><p>{format24to12(selectedSession.started_at)} ({selectedSession.duration_hours} Hour{selectedSession.duration_hours > 1 ? 's' : ''})</p></div>
+              <div><span className="eyebrow">Status</span>
+                <p>
+                  <span className={`status-tag small ${selectedSession.status === 'scheduled' ? 'warning' : 'success'}`}>
+                    {selectedSession.status}
+                  </span>
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px', justifyContent: 'flex-end' }}>
+              {selectedSession.status === 'scheduled' && (
+                <button type="button" className="secondary" onClick={() => {
+                  setRescheduleData({
+                    id: selectedSession.id,
+                    date: selectedSession.session_date,
+                    time: selectedSession.started_at ? selectedSession.started_at.slice(11, 16) : '',
+                    duration: selectedSession.duration_hours
+                  });
+                }}>Reschedule</button>
+              )}
+              <button type="button" onClick={() => setSelectedSession(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reschedule Modal (Same structure as Manage Page) */}
+      {rescheduleData && (
+        <div className="modal-overlay" onClick={() => setRescheduleData(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <h3>Reschedule Session</h3>
+            <form onSubmit={handleRescheduleSave}>
+              <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
+                <label>Date
+                  <input type="date" value={rescheduleData.date} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value })} required />
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <label>Start Time (24h)
+                    <input type="time" value={rescheduleData.time} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required />
+                  </label>
+                  <label>Duration (Hours)
+                    <input type="number" step="0.25" min="1" value={rescheduleData.duration} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })} required />
+                  </label>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button type="button" className="secondary" onClick={() => setRescheduleData(null)}>Cancel</button>
+                <button type="submit">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══════ Student Detail (inline) ═══════ */
 function StudentDetailPage({ studentId, onBack }) {
   const [student, setStudent] = useState(null);
@@ -211,9 +612,7 @@ function StudentDetailPage({ studentId, onBack }) {
   if (!student) return <section className="panel">{error ? <p className="error">{error}</p> : <p>Loading...</p>}</section>;
   const tabs = [
     { id: 'profile', label: 'Profile' },
-    { id: 'teachers', label: `Teachers (${assignments.length})` },
-    { id: 'sessions', label: `Sessions (${sessions.length})` },
-    { id: 'chat', label: `Messages (${messages.length})` },
+    { id: 'classes', label: `Classes (${sessions.length})` },
     { id: 'lead_data', label: 'Lead Data' }
   ];
 
@@ -245,73 +644,7 @@ function StudentDetailPage({ studentId, onBack }) {
         </div></article>
       </div> : null}
 
-      {tab === 'teachers' ? <div>
-        <article className="card">
-          {assignments.length ? (
-            <div className="assignment-cards">
-              {assignments.map(a => (
-                <div key={a.id} className="assignment-card" style={{ borderLeft: a.status === 'pending' ? '4px solid #f59e0b' : '4px solid #10b981' }}>
-                  <div className="assignment-info">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <strong>{a.users?.full_name || a.teacher_id}</strong>
-                      <span className={`status-tag small ${a.status === 'pending' ? 'warning' : 'success'}`}>{a.status === 'pending' ? 'Pending' : 'Accepted'}</span>
-                    </div>
-                    <span className="status-tag">{a.subject}</span>
-                    {a.schedule_note ? <p className="muted">{a.schedule_note}</p> : null}
-                  </div>
-                  <div style={{ display: 'flex', gap: '6px' }}>
-                    {a.status === 'pending' && <button type="button" className="success small" onClick={() => acceptAssignment(a.id)}>Accept</button>}
-                    <button type="button" className="danger small" onClick={() => removeAssignment(a.id)}>Remove</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : <p className="muted">No teachers assigned.</p>}
-        </article>
-
-        <article className="card">
-          <h3>Assign Teacher Candidate</h3>
-          <p className="muted" style={{ fontSize: '12px', marginBottom: '16px' }}>Assign teachers to propose them to the student. If multiple candidates are proposed for one subject, accepting one will automatically remove the rest.</p>
-          <form className="form-grid" onSubmit={assignTeacher}>
-            <label>Subject<SubjectSelect value={aSubject} onChange={(v, isNew) => { setASubject(v); if (isNew) setSubjectOptions(prev => [...prev, v]); }} options={subjectOptions} required /></label>
-            <label>Day<select value={aDay} onChange={e => setADay(e.target.value)} required><option value="">Select Day</option>{dayOptions.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-            <label>Time<select value={aTime} onChange={e => setATime(e.target.value)} required><option value="">Select Time</option>{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-            <label>Teacher
-              <select value={aTeacher} onChange={e => setATeacher(e.target.value)} required disabled={!aSubject || !aDay || !aTime}>
-                <option value="">Select a matched teacher</option>
-                {(() => {
-                  const filtered = teachers.filter(t => {
-                    if (!aSubject) return true;
-                    const target = aSubject.trim().toLowerCase();
-                    const subjects = Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : []);
-                    return subjects.some(s => (s || '').trim().toLowerCase() === target);
-                  });
-                  if (filtered.length === 0 && aSubject) return <option disabled>No teachers found for this subject</option>;
-                  return filtered.map(t => {
-                    let slots = [];
-                    try { slots = typeof t.teacher_availability === 'string' ? JSON.parse(t.teacher_availability) : (t.teacher_availability || []); } catch (e) { }
-                    const isAvailable = slots.some(slot => slot.day_of_week === aDay);
-                    return (
-                      <option key={t.id} value={t.user_id}>
-                        {t.users?.full_name || t.teacher_code} {isAvailable ? '(Available)' : '⚠️ (Schedule Conflict)'}
-                      </option>
-                    );
-                  });
-                })()}
-              </select>
-            </label>
-
-            <button type="submit" disabled={!aTeacher} style={{ gridColumn: '1 / -1' }}>Assign as Candidate</button>
-          </form>
-        </article>
-      </div> : null}
-
-      {tab === 'sessions' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Date</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th></tr></thead><tbody>{sessions.map(s => <tr key={s.id}><td data-label="Date">{s.session_date}</td><td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td><td data-label="Subject">{s.subject || '—'}</td><td data-label="Hrs">{s.duration_hours}h</td><td data-label="Status"><span className={`status-tag ${s.session_verifications?.[0]?.status === 'approved' ? 'success' : ''}`}>{s.session_verifications?.[0]?.status || 'pending'}</span></td></tr>)}{!sessions.length ? <tr><td colSpan="5">No sessions.</td></tr> : null}</tbody></table></div></article> : null}
-
-      {tab === 'chat' ? <article className="card chat-container">
-        <div className="chat-messages">{!messages.length ? <div className="chat-empty"><p>No messages yet.</p></div> : null}{messages.map(m => <div key={m.id} className={`chat-bubble ${m.direction}`}><div className="chat-bubble-content"><p>{m.content}</p><div className="chat-meta"><span className={`delivery-status ${m.delivery_status}`}>{m.delivery_status === 'delivered' ? '✓✓' : m.delivery_status === 'sent' ? '✓' : m.delivery_status === 'failed' ? '✗' : '⏳'}</span><span className="chat-time">{new Date(m.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}</span></div></div></div>)}</div>
-        <form className="chat-compose" onSubmit={sendMessage}><input value={msgText} onChange={e => setMsgText(e.target.value)} placeholder="Type a message..." required /><button type="submit">Send</button></form>
-      </article> : null}
+      {tab === 'classes' ? <StudentClassesTab studentId={studentId} initialSessions={sessions} teachers={teachers} onClassesChanged={load} /> : null}
 
       {tab === 'lead_data' ? <div>
         <article className="card" style={{ marginBottom: '16px' }}>
@@ -639,65 +972,425 @@ export function WeeklyCalendarPage() {
   );
 }
 
-/* ═══════ Sessions Verify (with Filters) ═══════ */
+/* ═══════ All Sessions (no verification tab — that's now separate) ═══════ */
 export function SessionsManagePage() {
-  const [activeTab, setActiveTab] = useState('queue');
-  const [queue, setQueue] = useState([]);
-  const [logs, setLogs] = useState([]);
+  const [allSessions, setAllSessions] = useState([]);
   const [error, setError] = useState('');
-  // Logs filters
+
+  // Filters
+  const [datePreset, setDatePreset] = useState('All');
+  const [fStart, setFStart] = useState('');
+  const [fEnd, setFEnd] = useState('');
   const [fTeacher, setFTeacher] = useState('');
   const [fStudent, setFStudent] = useState('');
   const [fStatus, setFStatus] = useState('');
-  // Queue filters
-  const [qTeacher, setQTeacher] = useState('');
-  const [qStudent, setQStudent] = useState('');
 
-  const loadAll = useCallback(async () => {
-    try { const [q, l] = await Promise.all([apiFetch('/sessions/verification-queue'), apiFetch('/sessions/logs')]); setQueue(q.items || []); setLogs(l.items || []); } catch (e) { setError(e.message); }
+  // Reschedule Modal
+  const [rescheduleData, setRescheduleData] = useState(null);
+
+  // Master lists
+  const [allTeachers, setAllTeachers] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
+
+  const loadMasterData = useCallback(async () => {
+    try {
+      const [tRes, sRes] = await Promise.all([apiFetch('/teachers/pool'), apiFetch('/students')]);
+      setAllTeachers(tRes.items || []);
+      setAllStudents(sRes.items || []);
+    } catch (e) { console.error('Error loading master data', e); }
   }, []);
-  useEffect(() => { loadAll(); }, [loadAll]);
 
-  async function verify(id, approved) { try { await apiFetch(`/sessions/${id}/verify`, { method: 'POST', body: JSON.stringify({ approved }) }); await loadAll(); } catch (e) { setError(e.message); } }
+  const loadAllSessions = useCallback(async () => {
+    try {
+      let url = '/sessions/all?';
+      let start = fStart;
+      let end = fEnd;
 
-  const makeOpts = (list, key, nameKey) => {
-    const m = new Map();
-    list.forEach(i => { if (i[nameKey]) m.set(i[key], i[nameKey]); else if (i.users?.full_name && key === 'teacher_id') m.set(i.teacher_id, i.users.full_name); else if (i.students?.student_name && key === 'student_id') m.set(i.student_id, i.students.student_name); });
-    return [...m.entries()].map(([value, label]) => ({ value, label }));
-  };
+      const today = new Date();
+      if (datePreset === 'Today') {
+        const tStr = today.toISOString().split('T')[0];
+        start = tStr; end = tStr;
+      } else if (datePreset === 'Last Week') {
+        const lwStart = new Date(today); lwStart.setDate(today.getDate() - 7);
+        const lwEnd = new Date(today); lwEnd.setDate(today.getDate() - 1);
+        start = lwStart.toISOString().split('T')[0];
+        end = lwEnd.toISOString().split('T')[0];
+      } else if (datePreset === 'Next Week') {
+        const nwStart = new Date(today); nwStart.setDate(today.getDate() + 1);
+        const nwEnd = new Date(today); nwEnd.setDate(today.getDate() + 7);
+        start = nwStart.toISOString().split('T')[0];
+        end = nwEnd.toISOString().split('T')[0];
+      } else if (datePreset === 'All') {
+        start = ''; end = '';
+      }
 
-  const logsTeacherOpts = useMemo(() => makeOpts(logs, 'teacher_id'), [logs]);
-  const logsStudentOpts = useMemo(() => makeOpts(logs, 'student_id'), [logs]);
-  const filteredLogs = useMemo(() => { let items = logs; if (fTeacher) items = items.filter(s => s.teacher_id === fTeacher); if (fStudent) items = items.filter(s => s.student_id === fStudent); if (fStatus) items = items.filter(s => s.verification_status === fStatus); return items; }, [logs, fTeacher, fStudent, fStatus]);
+      if (start) url += `start_date=${start}&`;
+      if (end) url += `end_date=${end}&`;
+      if (fTeacher) url += `teacher_id=${fTeacher}&`;
+      if (fStudent) url += `student_id=${fStudent}&`;
+      if (fStatus) url += `status=${fStatus}&`;
+      const res = await apiFetch(url);
+      setAllSessions(res.items || []);
+    } catch (e) { setError(e.message); }
+  }, [datePreset, fStart, fEnd, fTeacher, fStudent, fStatus]);
 
-  const queueTeacherOpts = useMemo(() => makeOpts(queue, 'teacher_id'), [queue]);
-  const queueStudentOpts = useMemo(() => makeOpts(queue, 'student_id'), [queue]);
-  const filteredQueue = useMemo(() => { let items = queue; if (qTeacher) items = items.filter(s => s.teacher_id === qTeacher); if (qStudent) items = items.filter(s => s.student_id === qStudent); return items; }, [queue, qTeacher, qStudent]);
+  useEffect(() => { loadMasterData(); }, [loadMasterData]);
+  useEffect(() => { loadAllSessions(); }, [loadAllSessions]);
+
+  async function submitReschedule(e) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/sessions/${rescheduleData.id}/reschedule`, {
+        method: 'PUT',
+        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: rescheduleData.duration })
+      });
+      setRescheduleData(null);
+      await loadAllSessions();
+    } catch (e) { setError(e.message); }
+  }
+
+  function formatTime12(timeStr) {
+    if (!timeStr) return '—';
+    if (timeStr.includes('T')) {
+      return new Date(timeStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    }
+    const [h, m] = timeStr.split(':');
+    const hr = parseInt(h, 10);
+    const ampm = hr >= 12 ? 'PM' : 'AM';
+    const dHr = hr % 12 || 12;
+    return `${dHr}:${m} ${ampm}`;
+  }
+
+  const allTeacherOpts = useMemo(() => allTeachers.map(t => ({ value: t.user_id, label: t.users?.full_name || t.user_id })), [allTeachers]);
+  const allStudentOpts = useMemo(() => allStudents.map(s => ({ value: s.id, label: s.student_name || s.id })), [allStudents]);
+  const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
-      <div className="tabs-row">
-        <button type="button" className={activeTab === 'queue' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('queue')}>Verification ({queue.length})</button>
-        <button type="button" className={activeTab === 'logs' ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab('logs')}>Session Logs</button>
+      <article className="card">
+        <div className="filter-bar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', alignItems: 'end' }}>
+          <SearchSelect label="Date Range" value={datePreset} onChange={setDatePreset} options={[
+            { value: 'All', label: 'All Time' },
+            { value: 'Today', label: 'Today' },
+            { value: 'Last Week', label: 'Last Week' },
+            { value: 'Next Week', label: 'Next Week' },
+            { value: 'Custom', label: 'Custom Range' }
+          ]} placeholder="Select Range" />
+
+          {datePreset === 'Custom' && (
+            <>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>Start Date</label>
+                <input type="date" value={fStart} onChange={e => setFStart(e.target.value)} style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%', boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151' }}>End Date</label>
+                <input type="date" value={fEnd} onChange={e => setFEnd(e.target.value)} style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%', boxSizing: 'border-box' }} />
+              </div>
+            </>
+          )}
+          <SearchSelect label="Teacher" value={fTeacher} onChange={setFTeacher} options={allTeacherOpts} placeholder="All Teachers" />
+          <SearchSelect label="Student" value={fStudent} onChange={setFStudent} options={allStudentOpts} placeholder="All Students" />
+          <SearchSelect label="Status" value={fStatus} onChange={setFStatus} options={[
+            { value: 'scheduled', label: 'Upcoming / Scheduled' },
+            { value: 'completed', label: 'Taken / Completed' },
+            { value: 'pending', label: 'Pending Verification' }
+          ]} placeholder="All Status" />
+        </div>
+
+        <div className="table-wrap mobile-friendly-table" style={{ marginTop: '16px' }}>
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th><th>Day</th><th>Time</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allSessions.map(s => {
+                const dayName = s.session_date ? DAY_MAP[new Date(s.session_date).getUTCDay()] : '—';
+                const isUpcoming = s.status === 'scheduled';
+                return (
+                  <tr key={s.id}>
+                    <td data-label="Date">{s.session_date}</td>
+                    <td data-label="Day">{dayName}</td>
+                    <td data-label="Time">{formatTime12(s.started_at)}</td>
+                    <td data-label="Student">{s.students?.student_name || s.student_id}</td>
+                    <td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td>
+                    <td data-label="Subject">{s.subject || '—'}</td>
+                    <td data-label="Hrs">{s.duration_hours}h</td>
+                    <td data-label="Status">
+                      <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
+                      {s.status === 'completed' && <span className={`status-tag small ${s.verification_status === 'approved' ? 'success' : 'muted'}`} style={{ marginLeft: 4 }}>{s.verification_status}</span>}
+                    </td>
+                    <td className="actions" data-label="Actions">
+                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({ id: s.id, date: s.session_date, time: s.started_at, duration: s.duration_hours })}>Reschedule</button>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!allSessions.length ? <tr><td colSpan="9">No sessions match filters.</td></tr> : null}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      {rescheduleData && (
+        <div className="modal-overlay">
+          <div className="modal card" style={{ maxWidth: '400px' }}>
+            <h3>Reschedule Session</h3>
+            <form className="form-grid" onSubmit={submitReschedule}>
+              <label>Date
+                <input type="date" value={rescheduleData.date} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value })} required />
+              </label>
+              <label>Start Time (24h)
+                <input type="time" value={rescheduleData.time || ''} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required />
+              </label>
+              <label>Duration (Hours)
+                <input type="number" step="0.25" min="1" value={rescheduleData.duration || ''} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })} required />
+              </label>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px', gridColumn: '1 / -1' }}>
+                <button type="button" className="secondary" onClick={() => setRescheduleData(null)}>Cancel</button>
+                <button type="submit">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ═══════ Verifications (separate page — only teacher-submitted approvals) ═══════ */
+function ApprovalTable({ items, fTeacher, fStudent, onVerify }) {
+  const [durationOverrides, setDurationOverrides] = useState({});
+
+  const filtered = items.filter(s => {
+    if (fTeacher && s.teacher_id !== fTeacher) return false;
+    if (fStudent && s.student_id !== fStudent) return false;
+    return true;
+  });
+
+  return (
+    <div className="table-wrap mobile-friendly-table" style={{ marginTop: '12px' }}>
+      <table>
+        <thead>
+          <tr><th>Requested At</th><th>Date</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Note / Reason</th><th>Duration (Override)</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          {filtered.map((item) => {
+            const pendingV = Array.isArray(item.session_verifications)
+              ? item.session_verifications.find(v => v.status === 'pending' && v.type === 'approval')
+              : item.session_verifications;
+            const requestedAt = pendingV?.created_at
+              ? new Date(pendingV.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
+              : '—';
+            return (
+              <tr key={item.id}>
+                <td data-label="Requested At">{requestedAt}</td>
+                <td data-label="Date">{item.session_date || '-'}</td>
+                <td data-label="Student">{item.students?.student_name || item.student_id}</td>
+                <td data-label="Teacher">{item.users?.full_name || item.teacher_id}</td>
+                <td data-label="Subject">{item.subject || '—'}</td>
+                <td data-label="Note" style={{ maxWidth: '200px', fontSize: '13px' }}>{pendingV?.reason ? <span style={{ color: '#4b5563', fontStyle: 'italic' }}>"{pendingV.reason}"</span> : '—'}</td>
+                <td data-label="Duration">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                    <input
+                      type="number"
+                      step="0.25"
+                      min="0.25"
+                      style={{ width: '70px', padding: '4px', fontSize: '13px', borderRadius: '4px', border: '1px solid #d1d5db' }}
+                      value={durationOverrides[item.id] !== undefined ? durationOverrides[item.id] : (item.duration_hours || 1)}
+                      onChange={(e) => setDurationOverrides(prev => ({ ...prev, [item.id]: e.target.value }))}
+                    />
+                    <span style={{ fontSize: '12px', color: '#6b7280' }}>hrs</span>
+                  </div>
+                </td>
+                <td className="actions" data-label="Actions">
+                  <button type="button" onClick={() => {
+                    const finalDuration = durationOverrides[item.id] !== undefined ? Number(durationOverrides[item.id]) : Number(item.duration_hours || 1);
+                    onVerify(item.id, true, 'approval', finalDuration);
+                  }}>Approve</button>
+                  <button type="button" className="danger" onClick={() => onVerify(item.id, false, 'approval')}>Reject</button>
+                </td>
+              </tr>
+            );
+          })}
+          {!filtered.length ? (
+            <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No pending session approvals.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function RescheduleTable({ items, fTeacher, fStudent, onVerify }) {
+  const filtered = items.filter(item => {
+    const s = item.academic_sessions || {};
+    if (fTeacher && s.teacher_id !== fTeacher) return false;
+    if (fStudent && s.student_id !== fStudent) return false;
+    return true;
+  });
+
+  return (
+    <div className="table-wrap mobile-friendly-table" style={{ marginTop: '12px' }}>
+      <table>
+        <thead>
+          <tr>
+            <th>Requested At</th><th>Current Date</th><th>Student</th><th>Teacher</th><th>Reason</th><th>New Date</th><th>New Time</th><th>Duration</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((item) => {
+            const session = item.academic_sessions || {};
+            const requestedAt = item.created_at
+              ? new Date(item.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
+              : '—';
+            return (
+              <tr key={item.id}>
+                <td data-label="Requested At">{requestedAt}</td>
+                <td data-label="Current Date">{session.session_date || '-'}</td>
+                <td data-label="Student">{session.students?.student_name || session.student_id || '—'}</td>
+                <td data-label="Teacher">{session.users?.full_name || session.teacher_id || '—'}</td>
+                <td data-label="Reason" style={{ maxWidth: '200px' }}>{item.reason || '—'}</td>
+                <td data-label="New Date">
+                  {item.new_date ? (
+                    <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{item.new_date}</span>
+                  ) : <span className="text-muted">Same</span>}
+                </td>
+                <td data-label="New Time">
+                  {item.new_time ? (
+                    <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{item.new_time}</span>
+                  ) : <span className="text-muted">Same</span>}
+                </td>
+                <td data-label="Duration">
+                  {item.new_duration ? (
+                    <span style={{ fontWeight: 600, color: '#1d4ed8' }}>{item.new_duration}h</span>
+                  ) : <span className="text-muted">Same ({session.duration_hours}h)</span>}
+                </td>
+                <td className="actions" data-label="Actions">
+                  <button type="button" onClick={() => onVerify(session.id, true, 'reschedule')}>Approve</button>
+                  <button type="button" className="danger" onClick={() => onVerify(session.id, false, 'reschedule')}>Reject</button>
+                </td>
+              </tr>
+            );
+          })}
+          {!filtered.length ? (
+            <tr><td colSpan="8" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No pending reschedule requests.</td></tr>
+          ) : null}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function VerificationsPage() {
+  const [approvalItems, setApprovalItems] = useState([]);
+  const [rescheduleItems, setRescheduleItems] = useState([]);
+  const [activeTab, setActiveTab] = useState('approvals');
+  const [error, setError] = useState('');
+  const [msg, setMsg] = useState('');
+  const [fTeacher, setFTeacher] = useState('');
+  const [fStudent, setFStudent] = useState('');
+
+  const loadAll = useCallback(async () => {
+    setError('');
+    try {
+      const [approvals, reschedules] = await Promise.all([
+        apiFetch('/sessions/verification-queue'),
+        apiFetch('/sessions/reschedule-queue')
+      ]);
+      setApprovalItems(approvals.items || []);
+      setRescheduleItems(reschedules.items || []);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  useEffect(() => { loadAll(); }, [loadAll]);
+
+  async function verify(sessionId, approved, type, overrideDuration) {
+    const action = approved ? 'approve' : 'reject';
+    const reqName = type === 'approval' ? 'session completion and deduct student hours' : 'reschedule request';
+    if (!window.confirm(`Are you sure you want to ${action} this ${reqName}?`)) return;
+
+    setError('');
+    try {
+      const payload = { approved, type };
+      if (typeof overrideDuration === 'number') {
+        payload.override_duration = overrideDuration;
+      }
+
+      await apiFetch(`/sessions/${sessionId}/verify`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+      });
+      setMsg(approved ? 'Request approved!' : 'Request rejected.');
+      setTimeout(() => setMsg(''), 4000);
+      await loadAll();
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  const teacherOpts = useMemo(() => {
+    const m = new Map();
+    approvalItems.forEach(s => { if (s.users?.full_name) m.set(s.teacher_id, s.users.full_name); });
+    rescheduleItems.forEach(item => {
+      const s = item.academic_sessions || {};
+      if (s.users?.full_name) m.set(s.teacher_id, s.users.full_name);
+    });
+    return [...m.entries()].map(([value, label]) => ({ value, label }));
+  }, [approvalItems, rescheduleItems]);
+
+  const studentOpts = useMemo(() => {
+    const m = new Map();
+    approvalItems.forEach(s => { if (s.students?.student_name) m.set(s.student_id, s.students.student_name); });
+    rescheduleItems.forEach(item => {
+      const s = item.academic_sessions || {};
+      if (s.students?.student_name) m.set(s.student_id, s.students.student_name);
+    });
+    return [...m.entries()].map(([value, label]) => ({ value, label }));
+  }, [approvalItems, rescheduleItems]);
+
+  const tabs = [
+    { key: 'approvals', label: `Session Approvals (${approvalItems.length})` },
+    { key: 'reschedules', label: `Reschedule Requests (${rescheduleItems.length})` }
+  ];
+
+  return (
+    <section className="panel">
+      <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Verifications</h2>
+      {error ? <p className="error">{error}</p> : null}
+      {msg ? <p style={{ color: '#15803d', fontWeight: 500 }}>{msg}</p> : null}
+
+      <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '2px solid #e5e7eb', paddingBottom: '0' }}>
+        {tabs.map(t => (
+          <button key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: '10px 20px', fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+              border: 'none', background: 'none',
+              borderBottom: activeTab === t.key ? '3px solid #4338ca' : '3px solid transparent',
+              color: activeTab === t.key ? '#4338ca' : '#6b7280',
+              marginBottom: '-2px', transition: 'all 0.2s'
+            }}
+          >{t.label}</button>
+        ))}
       </div>
 
-      {activeTab === 'queue' ? <article className="card">
+      <article className="card">
         <div className="filter-bar">
-          <SearchSelect label="Teacher" value={qTeacher} onChange={setQTeacher} options={queueTeacherOpts} placeholder="All Teachers" />
-          <SearchSelect label="Student" value={qStudent} onChange={setQStudent} options={queueStudentOpts} placeholder="All Students" />
+          <SearchSelect label="Teacher" value={fTeacher} onChange={setFTeacher} options={teacherOpts} placeholder="All Teachers" />
+          <SearchSelect label="Student" value={fStudent} onChange={setFStudent} options={studentOpts} placeholder="All Students" />
         </div>
-        <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Date</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Actions</th></tr></thead><tbody>{filteredQueue.map(s => <tr key={s.id}><td data-label="Date">{s.session_date}</td><td data-label="Student">{s.students?.student_name || s.student_id}</td><td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td><td data-label="Subject">{s.subject || '—'}</td><td data-label="Hrs">{s.duration_hours}h</td><td className="actions" data-label="Actions"><button type="button" onClick={() => verify(s.id, true)}>Approve</button><button type="button" className="danger" onClick={() => verify(s.id, false)}>Reject</button></td></tr>)}{!filteredQueue.length ? <tr><td colSpan="6">No pending sessions match filters.</td></tr> : null}</tbody></table></div>
-      </article> : null}
-
-      {activeTab === 'logs' ? <article className="card">
-        <div className="filter-bar">
-          <SearchSelect label="Teacher" value={fTeacher} onChange={setFTeacher} options={logsTeacherOpts} placeholder="All Teachers" />
-          <SearchSelect label="Student" value={fStudent} onChange={setFStudent} options={logsStudentOpts} placeholder="All Students" />
-          <SearchSelect label="Status" value={fStatus} onChange={setFStatus} options={[{ value: 'approved', label: 'Approved' }, { value: 'rejected', label: 'Rejected' }, { value: 'pending', label: 'Pending' }]} placeholder="All Status" />
-        </div>
-        <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Date</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th></tr></thead><tbody>{filteredLogs.map(s => <tr key={s.id}><td data-label="Date">{s.session_date}</td><td data-label="Student">{s.students?.student_name || s.student_id}</td><td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td><td data-label="Subject">{s.subject || '—'}</td><td data-label="Hrs">{s.duration_hours}h</td><td data-label="Status"><span className={`status-tag ${s.verification_status === 'approved' ? 'success' : ''}`}>{s.verification_status || 'pending'}</span></td></tr>)}{!filteredLogs.length ? <tr><td colSpan="6">No sessions match filters.</td></tr> : null}</tbody></table></div>
-      </article> : null}
+        {activeTab === 'approvals' ? (
+          <ApprovalTable items={approvalItems} fTeacher={fTeacher} fStudent={fStudent} onVerify={verify} />
+        ) : (
+          <RescheduleTable items={rescheduleItems} fTeacher={fTeacher} fStudent={fStudent} onVerify={verify} />
+        )}
+      </article>
     </section>
   );
 }
@@ -753,6 +1446,9 @@ export function TopUpsPage() {
 /* ═══════ Teacher Pool ═══════ */
 function formatTime12(t) {
   if (!t) return '';
+  if (t.includes('T')) {
+    return new Date(t).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+  }
   const [h, m] = t.split(':');
   const hour = parseInt(h, 10);
   const ampm = hour >= 12 ? 'PM' : 'AM';
@@ -804,7 +1500,7 @@ export function TeacherPoolPage() {
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const fullDayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const hours = Array.from({ length: 14 }, (_, i) => i + 7);
+  const hours = Array.from({ length: 17 }, (_, i) => i + 6); // 6 AM to 10 PM (22)
 
   return (
     <section className="panel">
@@ -875,7 +1571,7 @@ export function TeacherPoolPage() {
 
       {view === 'map' ? <article className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <p className="muted" style={{ fontSize: 13 }}>Availability for <strong>{dayLabels[selectedMapDay]}</strong> (Green = Available, Orange = Demo Booked)</p>
+          <p className="muted" style={{ fontSize: 13 }}>Availability for <strong>{dayLabels[selectedMapDay]}</strong> (Green = Available, Orange = Demo, Red = Scheduled)</p>
           <div className="day-tabs">
             {dayLabels.map((d, i) => <button key={d} type="button" className={`day-tab-btn ${selectedMapDay === i ? 'active' : ''}`} onClick={() => setSelectedMapDay(i)}>{d}</button>)}
           </div>
@@ -888,22 +1584,15 @@ export function TeacherPoolPage() {
                 {hours.map(h => <th key={h} colSpan={4} className="avail-map-th" style={{ textAlign: 'center', borderLeft: '1px solid #e5e7eb', fontSize: '10px', padding: '4px 0' }}>{h > 12 ? h - 12 : h}{h >= 12 ? 'p' : 'a'}</th>)}
               </tr>
               <tr>
-                <th style={{ position: 'sticky', left: 0, zIndex: 10, background: 'white' }}></th>
+                <th style={{ position: 'sticky', left: 0, zIndex: 10, background: 'white', height: '12px' }}></th>
                 {hours.map(h => (
                   <Fragment key={h}>
                     {['00', '15', '30', '45'].map(m => (
                       <th key={m} style={{
-                        fontSize: '9px',
-                        padding: '2px 0',
-                        width: '8px',
-                        height: '40px',
-                        verticalAlign: 'bottom',
-                        borderLeft: m === '00' ? '1px solid #e5e7eb' : '1px solid #f9fafb',
-                        color: '#9ca3af',
-                        fontWeight: 400
-                      }}>
-                        <div style={{ transform: 'rotate(-90deg)', transformOrigin: 'center bottom', width: '12px', height: '12px', marginLeft: '-2px', marginBottom: '4px' }}>{m}</div>
-                      </th>
+                        padding: 0,
+                        width: 'auto',
+                        borderLeft: m === '00' ? '1px solid #e5e7eb' : 'none',
+                      }} />
                     ))}
                   </Fragment>
                 ))}
@@ -928,7 +1617,7 @@ export function TeacherPoolPage() {
                       const [eh, em] = s.end_time.split(':').map(Number);
                       const startMins = sh * 60 + sm;
                       const endMins = eh * 60 + em;
-                      return startMins <= cellStart && endMins >= cellEnd;
+                      return startMins <= cellStart && endMins > cellStart;
                     });
 
                     // Check if a demo is booked in this cell
@@ -939,23 +1628,45 @@ export function TeacherPoolPage() {
                       if (dDay !== fullDayLabels[selectedMapDay]) return false;
                       const dStartMins = dDate.getHours() * 60 + dDate.getMinutes();
                       const dEndMins = d.ends_at ? new Date(d.ends_at).getHours() * 60 + new Date(d.ends_at).getMinutes() : dStartMins + 60;
-                      return dStartMins <= cellStart && dEndMins >= cellEnd;
+                      return dStartMins <= cellStart && dEndMins > cellStart;
                     });
 
-                    const cellClass = isDemo ? 'avail-cell avail-demo' : isAvail ? 'avail-cell avail-yes' : 'avail-cell';
-                    const title = isDemo
-                      ? `${h}:${m.toString().padStart(2, '0')} - Demo Booked`
-                      : `${h}:${m.toString().padStart(2, '0')} - ${isAvail ? 'Available' : 'Unavailable'}`;
+                    // Check if a regular class is scheduled
+                    const isScheduled = (t.assigned_classes || []).some(a => {
+                      if (a.day !== fullDayLabels[selectedMapDay]) return false;
+                      if (!a.time) return false;
+                      const [sh, sm] = a.time.split(':').map(Number);
+                      const startMins = sh * 60 + sm;
+                      const endMins = startMins + 60; // Assuming 1 hour per regular class
+                      return startMins <= cellStart && endMins > cellStart;
+                    });
+
+                    const cellClass = isScheduled ? 'avail-cell avail-no' : (isDemo ? 'avail-cell avail-demo' : (isAvail ? 'avail-cell avail-yes' : 'avail-cell'));
+
+                    const timeWindow = `${h > 12 ? h - 12 : h === 0 ? 12 : h}:${m.toString().padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'} - ${(() => {
+                      const nextMins = cellStart + 15;
+                      const nH = Math.floor(nextMins / 60);
+                      const nM = nextMins % 60;
+                      return `${nH > 12 ? nH - 12 : nH === 0 ? 12 : nH}:${nM.toString().padStart(2, '0')} ${nH >= 12 ? 'PM' : 'AM'}`;
+                    })()}`;
+
+                    const title = isScheduled
+                      ? `${timeWindow} (Scheduled Class)`
+                      : isDemo
+                        ? `${timeWindow} (Demo Booked)`
+                        : `${timeWindow} (${isAvail ? 'Available' : 'Unavailable'})`;
 
                     return (
                       <td
                         key={`${h}-${m}`}
                         className={cellClass}
                         style={{
-                          borderLeft: m === 0 ? '1px solid #e5e7eb' : '1px solid #f3f4f6',
+                          borderLeft: 'none',
+                          borderRight: 'none',
                           height: '30px',
                           padding: 0,
-                          ...(isDemo ? { background: '#fb923c' } : {})
+                          background: isScheduled ? '#ef4444' : (isDemo ? '#fb923c' : (isAvail ? '#22c55e' : 'transparent')),
+                          boxShadow: m === 0 ? '-1px 0 0 #e5e7eb' : 'none'
                         }}
                         title={title}
                       />

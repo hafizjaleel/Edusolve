@@ -27,6 +27,7 @@ import {
   WeeklyCalendarPage,
   TodayClassesPage,
   SessionsManagePage,
+  VerificationsPage,
   TopUpsPage,
   TeacherPoolPage,
   AutomationPage
@@ -37,7 +38,7 @@ import { CounselorReportsPage } from './features/counselors/CounselorReportsPage
 import { CounselorRequestsPage } from './features/requests/CounselorRequestsPage.jsx';
 import { VerificationQueuePage, SessionLogsPage } from './features/sessions/SessionPages.jsx';
 import { TeacherProfilePage } from './features/teachers/TeacherPages.jsx';
-import { TCDashboardPage, TeacherLeadsPage, TCTeacherPoolPage, TeacherPerformancePage } from './features/teachers/TeacherCoordinatorPages.jsx';
+import { TCDashboardPage, TeacherLeadsPage, TCAllLeadsPage, TCTeacherPoolPage, TeacherPerformancePage } from './features/teachers/TeacherCoordinatorPages.jsx';
 import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherReportsPage, TeacherInvoicesPage } from './features/teachers/TeacherDashboardPages.jsx';
 import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPayrollPage, HRPaymentRequestsPage } from './features/hr/HRPages.jsx';
 import { getSession, logout } from './lib/auth.js';
@@ -154,6 +155,7 @@ export default function App() {
 
     /* Sessions (AC merged page) */
     if (page.path === '/sessions/manage') return <SessionsManagePage />;
+    if (page.path === '/sessions/verifications') return <VerificationsPage />;
 
     /* Sessions (non-AC standalone pages) */
     if (page.path === '/sessions/verification-queue') return <VerificationQueuePage />;
@@ -182,6 +184,7 @@ export default function App() {
 
     /* Teacher Coordinator */
     if (page.path === '/dashboard/tc') return <TCDashboardPage />;
+    if (page.path === '/tc/leads') return <TCAllLeadsPage onNavigate={onNavigate} />;
     if (page.path === '/tc/teacher-leads') return <TeacherLeadsPage onNavigate={onNavigate} />;
 
     if (page.path === '/tc/teacher-pool') return <TeacherPoolPage />;
