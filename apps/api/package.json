@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "start": "node src/main.js",
     "dev": "node -r dotenv/config --watch src/main.js",
     "seed:users": "node -r dotenv/config scripts/create_users.js"
   },

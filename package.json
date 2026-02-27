@@ -8,6 +8,9 @@
   "scripts": {
     "dev:web": "npm run dev --workspace @ehms/web",
     "dev:api": "npm run dev --workspace @ehms/api",
-    "build:web": "npm run build --workspace @ehms/web"
+    "build": "echo 'No build step required for API'",
+    "build:web": "npm run build --workspace @ehms/web",
+    "start:api": "npm run start --workspace @ehms/api",
+    "start:web": "npm run start --workspace @ehms/web"
   }
 }
