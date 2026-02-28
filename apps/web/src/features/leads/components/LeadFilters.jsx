@@ -37,14 +37,16 @@ export function LeadFilters({ onFilterChange, counselors = [], children }) {
                 </select>
             </div>
 
-            <div className="filter-group">
-                <select value={counselorId} onChange={e => setCounselorId(e.target.value)}>
-                    <option value="">All Counselors</option>
-                    {counselors.map(c => (
-                        <option key={c.id} value={c.id}>{c.full_name || c.email}</option>
-                    ))}
-                </select>
-            </div>
+            {counselors && counselors.length > 0 && (
+                <div className="filter-group">
+                    <select value={counselorId} onChange={e => setCounselorId(e.target.value)}>
+                        <option value="">All Counselors</option>
+                        {counselors.map(c => (
+                            <option key={c.id} value={c.id}>{c.full_name || c.email}</option>
+                        ))}
+                    </select>
+                </div>
+            )}
             {children}
         </div>
     );

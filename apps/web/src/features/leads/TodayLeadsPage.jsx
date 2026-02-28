@@ -6,7 +6,7 @@ function StatusBadge({ status }) {
         new: '#6366f1',
         demo_scheduled: '#f59e0b',
         demo_done: '#3b82f6',
-        payment_pending: '#ef4444',
+        payment_pending: '#ec4899',
         payment_verification: '#f97316',
         joined: '#10b981',
         dropped: '#6b7280'
@@ -27,7 +27,7 @@ function StatusBadge({ status }) {
     );
 }
 
-export function TodayLeadsPage({ onOpenDetails, role }) {
+export function TodayLeadsPage({ onOpenDetails, onViewInPipeline, role }) {
     const isCounselor = role === 'counselor';
     const isHead = role === 'counselor_head';
     const scope = isCounselor ? 'mine' : 'all';
@@ -254,15 +254,27 @@ export function TodayLeadsPage({ onOpenDetails, role }) {
                             ) : null}
 
                             {/* Footer: Time + View */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', gap: '6px' }}>
                                 <span className="text-muted" style={{ fontSize: '12px' }}>
                                     {lead.created_at
                                         ? new Date(lead.created_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })
                                         : ''}
                                 </span>
-                                <button className="small primary" onClick={() => onOpenDetails(lead.id)}>
-                                    View Details →
-                                </button>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                    {isCounselor && onViewInPipeline && (
+                                        <button
+                                            className="small secondary"
+                                            title="View in Pipeline"
+                                            onClick={() => onViewInPipeline(lead.id, lead.status)}
+                                            style={{ fontSize: '11px' }}
+                                        >
+                                            📋 Pipeline
+                                        </button>
+                                    )}
+                                    <button className="small primary" onClick={() => onOpenDetails(lead.id)}>
+                                        View Details →
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     );
