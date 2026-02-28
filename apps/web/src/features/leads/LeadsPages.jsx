@@ -1309,8 +1309,19 @@ export function ConvertedLeadsPage() {
           apiFetch('/leads?scope=joined'),
           apiFetch('/leads/academic-coordinators')
         ]);
-        setLeads(leadsRes.items || []);
+        const fetchedLeads = leadsRes.items || [];
+        setLeads(fetchedLeads);
         setAcs(acsRes.items || []);
+
+        // Prepopulate assigned map from backend `students` relation
+        const initialAssignedMap = {};
+        for (const lead of fetchedLeads) {
+          if (lead.students?.users) {
+            initialAssignedMap[lead.id] = lead.students.users.full_name || lead.students.users.email;
+          }
+        }
+        setAssignedMap(initialAssignedMap);
+
       } catch (err) {
         setError(err.message);
       } finally {

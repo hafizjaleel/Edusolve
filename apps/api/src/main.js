@@ -25,7 +25,12 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host}`);
 
   if (req.method === 'OPTIONS') {
-    return sendJson(res, 204, {});
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, x-user-role, x-user-id',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS'
+    });
+    return res.end();
   }
 
   if (await handleAuth(req, res)) return;

@@ -28,6 +28,7 @@ export const APP_PAGES = [
   { path: '/sessions/verifications', title: 'Verifications', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/sessions/verification-queue', title: 'Session Queue', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: false },
   { path: '/sessions/logs', title: 'Session Logs', group: 'Academics', roles: [ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/teachers/all', title: 'Teacher Directory', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN, ROLES.TEACHER_COORDINATOR], showInNav: true },
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/topups/manage', title: 'Top-Ups', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/automation/hub', title: 'Automation', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },

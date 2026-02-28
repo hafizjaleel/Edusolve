@@ -456,7 +456,7 @@ function LeadCard({ lead, onStatusChange, onReject, onView, onConvert }) {
                     ) : null}
 
                     {/* Actions */}
-                    {lead.status !== 'rejected' && lead.status !== 'approved' ? (
+                    {lead.status !== 'rejected' && lead.status !== 'approved' && lead.status !== 'closed' ? (
                         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                             {nextStatus ? (
                                 <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
@@ -471,6 +471,16 @@ function LeadCard({ lead, onStatusChange, onReject, onView, onConvert }) {
                             <button className="small danger" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
                                 onClick={() => onReject(lead)}>
                                 <Icon d={ICONS.x} size={12} /> Reject
+                            </button>
+                        </div>
+                    ) : null}
+
+                    {/* Closed Actions */}
+                    {lead.status === 'closed' ? (
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center', flex: 1 }}
+                                onClick={() => onView(lead)}>
+                                <Icon d={ICONS.eye} size={14} /> View
                             </button>
                         </div>
                     ) : null}
