@@ -253,6 +253,85 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── PUT /students/:id ──────────────────────────────────
+    if (req.method === 'PUT' && parts.length === 2 && parts[0] === 'students') {
+      if (!isAC(actor)) {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator can edit student details' });
+        return true;
+      }
+      const studentId = parts[1];
+      const payload = await readJson(req);
+
+      const allowedFields = [
+        'student_name', 'parent_name', 'contact_number',
+        'alternative_number', 'parent_phone', 'messaging_number',
+        'class_level', 'package_name'
+      ];
+      const updateFields = {};
+      for (const key of allowedFields) {
+        if (payload[key] !== undefined) {
+          updateFields[key] = payload[key];
+        }
+      }
+
+      if (Object.keys(updateFields).length === 0) {
+        sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
+        return true;
+      }
+
+      // Validate messaging_number value
+      if (updateFields.messaging_number && !['contact', 'alternative', 'parent'].includes(updateFields.messaging_number)) {
+        sendJson(res, 400, { ok: false, error: 'messaging_number must be one of: contact, alternative, parent' });
+        return true;
+      }
+
+      updateFields.updated_at = nowIso();
+
+      const { data, error } = await adminClient
+        .from('students')
+        .update(updateFields)
+        .eq('id', studentId)
+        .is('deleted_at', null)
+        .select('*')
+        .single();
+      if (error) throw new Error(error.message);
+      if (!data) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, student: data });
+      return true;
+    }
+
+    // ─── PATCH /students/:id/status ─────────────────────────
+    if (req.method === 'PATCH' && parts.length === 3 && parts[0] === 'students' && parts[2] === 'status') {
+      if (!isAC(actor)) {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator can change student status' });
+        return true;
+      }
+      const studentId = parts[1];
+      const payload = await readJson(req);
+      const validStatuses = ['active', 'vacation', 'inactive'];
+      if (!payload.status || !validStatuses.includes(payload.status)) {
+        sendJson(res, 400, { ok: false, error: `status must be one of: ${validStatuses.join(', ')}` });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('students')
+        .update({ status: payload.status, updated_at: nowIso() })
+        .eq('id', studentId)
+        .is('deleted_at', null)
+        .select('id, status')
+        .single();
+      if (error) throw new Error(error.message);
+      if (!data) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, student: data });
+      return true;
+    }
+
     // ─── GET /students/:student_id/availability ─────────────
     if (req.method === 'GET' && parts.length === 3 && parts[0] === 'students' && parts[2] === 'availability') {
       const studentId = parts[1];

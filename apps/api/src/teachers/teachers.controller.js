@@ -55,7 +55,7 @@ export async function handleTeachers(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/teachers/pool') {
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
         .eq('is_in_pool', true)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
@@ -129,7 +129,7 @@ export async function handleTeachers(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
         .eq('user_id', actor.userId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -253,7 +253,7 @@ export async function handleTeachers(req, res, url) {
       const teacherId = parts[1];
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
         .eq('id', teacherId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -288,7 +288,7 @@ export async function handleTeachers(req, res, url) {
           'experience_type', 'place', 'city', 'communication_level',
           'account_holder_name', 'account_number', 'ifsc_code',
           'gpay_holder_name', 'gpay_number', 'upi_id',
-          'gender', 'dob', 'address', 'pincode'
+          'gender', 'dob', 'address', 'pincode', 'meeting_link'
         ];
 
         const updates = {};
@@ -404,6 +404,64 @@ export async function handleTeachers(req, res, url) {
     }
 
 
+    // ── PUT /teachers/me/profile — teacher self-edit allowed fields ──
+    if (req.method === 'PUT' && url.pathname === '/teachers/me/profile') {
+      if (actor.role !== 'teacher') {
+        sendJson(res, 403, { ok: false, error: 'teacher role required' });
+        return true;
+      }
+      const { data: profile, error: pErr } = await adminClient
+        .from('teacher_profiles')
+        .select('id, user_id')
+        .eq('user_id', actor.userId)
+        .maybeSingle();
+      if (pErr) throw new Error(pErr.message);
+      if (!profile) {
+        sendJson(res, 404, { ok: false, error: 'teacher profile not found' });
+        return true;
+      }
+
+      const payload = await readJson(req);
+      const selfAllowed = ['gender', 'dob', 'address', 'pincode', 'city', 'place', 'meeting_link'];
+      const updates = {};
+      for (const k of selfAllowed) {
+        if (payload[k] !== undefined) updates[k] = payload[k];
+      }
+
+      if (Object.keys(updates).length > 0) {
+        updates.updated_at = nowIso();
+        const { error: updateError } = await adminClient
+          .from('teacher_profiles')
+          .update(updates)
+          .eq('id', profile.id);
+        if (updateError) throw new Error(updateError.message);
+      }
+
+      // Update full_name in users table if provided
+      if (payload.full_name) {
+        const { error: nameErr } = await adminClient
+          .from('users')
+          .update({ full_name: payload.full_name })
+          .eq('id', profile.user_id);
+        if (nameErr) throw new Error(nameErr.message);
+      }
+
+      if (Object.keys(updates).length === 0 && !payload.full_name) {
+        sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
+        return true;
+      }
+
+      // Return updated profile
+      const { data: updated, error: fetchErr } = await adminClient
+        .from('teacher_profiles')
+        .select('*, users(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .eq('id', profile.id)
+        .single();
+      if (fetchErr) throw new Error(fetchErr.message);
+
+      sendJson(res, 200, { ok: true, teacher: updated });
+      return true;
+    }
 
     // ── PUT /teachers/availability — replace all availability slots ──
     if (req.method === 'PUT' && url.pathname === '/teachers/availability') {
