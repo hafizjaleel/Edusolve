@@ -10,13 +10,13 @@ export const APP_PAGES = [
 
   /* ── Leads ── */
   { path: '/leads/today', title: 'Today Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.COUNSELOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/leads/all', title: 'All Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/leads/mine', title: 'My Leads', group: 'Sales', roles: [ROLES.COUNSELOR], showInNav: true },
+  { path: '/leads/all', title: 'All Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN, ROLES.COUNSELOR], showInNav: true },
+  { path: '/leads/mine', title: 'Lead Pipeline', group: 'Sales', roles: [ROLES.COUNSELOR], showInNav: true },
   { path: '/leads/details', title: 'Lead Details', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: false },
   { path: '/leads/demo-management', title: 'Demo Management', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/team/counselors', title: 'Counselors (Team)', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD], showInNav: true },
   { path: '/counselors/reports', title: 'Sales Reports', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/requests', title: 'Requests', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD], showInNav: true },
+  { path: '/requests', title: 'Tickets', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD], showInNav: true },
   { path: '/leads/payment-requests', title: 'Payment Requests', group: 'Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/leads/overdue', title: 'Overdue Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/leads/converted', title: 'Converted Leads', group: 'Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },

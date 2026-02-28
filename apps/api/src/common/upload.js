@@ -1,9 +1,11 @@
 
 import busboy from 'busboy';
 import { Upload } from '@aws-sdk/lib-storage';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3, R2_BUCKET } from './s3.js';
 import { randomUUID } from 'crypto';
-import { sendJson } from './http.js';
+import { sendJson, readJson } from './http.js';
 
 export function handleUpload(req, res) {
     if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
@@ -56,4 +58,39 @@ export function handleUpload(req, res) {
     });
 
     req.pipe(bb);
+}
+
+export async function generatePresignedUrl(req, res) {
+    if (req.method !== 'POST') return sendJson(res, 405, { error: 'Method not allowed' });
+
+    try {
+        const body = await readJson(req);
+        if (!body.filename || !body.contentType) {
+            return sendJson(res, 400, { error: 'filename and contentType are required' });
+        }
+
+        const key = `uploads/${randomUUID()}-${body.filename}`;
+
+        const command = new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: key,
+            ContentType: body.contentType
+        });
+
+        // URL expires in 1 hour (3600 seconds)
+        const presignedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
+        const publicUrl = process.env.R2_PUBLIC_URL
+            ? `${process.env.R2_PUBLIC_URL}/${key}`
+            : key;
+
+        sendJson(res, 200, {
+            uploadUrl: presignedUrl,
+            publicUrl: publicUrl,
+            key: key
+        });
+    } catch (e) {
+        console.error('Presigned URL error:', e);
+        sendJson(res, 500, { error: e.message });
+    }
 }

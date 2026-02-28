@@ -9,20 +9,14 @@ const authService = new AuthService();
 export async function handleRequests(req, res, url) {
     if (!req.url.startsWith('/requests')) return false;
 
-    // Auth check
-    const token = getBearerToken(req);
-    if (!token) {
+    // Uniform auth check based on headers (matching leads/finance/etc.)
+    const userId = req.headers['x-user-id'] || 'dev-user';
+    const role = req.headers['x-user-role'];
+
+    if (!role) {
         sendJson(res, 401, { error: 'Unauthorized' });
         return true;
     }
-
-    const auth = await authService.me(token);
-    if (!auth.ok) {
-        sendJson(res, 401, { error: 'Invalid token' });
-        return true;
-    }
-
-    const { id: userId, role } = auth.user;
 
     try {
         // GET /requests

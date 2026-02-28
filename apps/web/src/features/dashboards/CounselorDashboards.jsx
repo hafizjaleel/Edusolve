@@ -21,6 +21,7 @@ export function CounselorDashboardPage() {
     const total = items.length;
     const active = items.filter((lead) => lead.status !== 'dropped' && lead.status !== 'joined').length;
     const newLeads = items.filter((lead) => lead.status === 'new').length;
+    const contacted = items.filter((lead) => lead.status === 'contacted').length;
     const demoScheduled = items.filter((lead) => lead.status === 'demo_scheduled').length;
     const demoDone = items.filter((lead) => lead.status === 'demo_done').length;
     const paymentPending = items.filter((lead) => lead.status === 'payment_pending').length;
@@ -37,7 +38,7 @@ export function CounselorDashboardPage() {
 
     const conversionRate = total > 0 ? Math.round((joined / total) * 100) : 0;
 
-    return { total, active, newLeads, demoScheduled, demoDone, paymentPending, paymentVerification, joined, dropped, todayLeads, conversionRate };
+    return { total, active, newLeads, contacted, demoScheduled, demoDone, paymentPending, paymentVerification, joined, dropped, todayLeads, conversionRate };
   }, [items]);
 
   // Recent 5 leads
@@ -48,7 +49,7 @@ export function CounselorDashboardPage() {
   return (
     <section className="panel">
       <div className="grid-four">
-        <StatCard label="My Leads" value={metrics.total} />
+        <StatCard label="Lead Pipeline" value={metrics.total} />
         <StatCard label="Active Pipeline" value={metrics.active} />
         <StatCard label="Today's Leads" value={metrics.todayLeads} tone="info" />
         <StatCard label="Conversion Rate" value={`${metrics.conversionRate}%`} tone="success" />
@@ -60,9 +61,10 @@ export function CounselorDashboardPage() {
           <h3 style={{ margin: '0 0 16px', fontSize: '15px' }}>Pipeline Breakdown</h3>
           {[
             { label: 'New', count: metrics.newLeads, color: '#6366f1' },
+            { label: 'Contacted', count: metrics.contacted, color: '#8b5cf6' },
             { label: 'Demo Scheduled', count: metrics.demoScheduled, color: '#f59e0b' },
             { label: 'Demo Done', count: metrics.demoDone, color: '#3b82f6' },
-            { label: 'Payment Pending', count: metrics.paymentPending, color: '#ef4444' },
+            { label: 'Payment Pending', count: metrics.paymentPending, color: '#ec4899' },
             { label: 'Payment Verification', count: metrics.paymentVerification, color: '#f97316' },
           ].map(item => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>

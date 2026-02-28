@@ -51,17 +51,28 @@ export function AcademicCoordinatorDashboardPage() {
   }, [weekSessions]);
   const maxHours = Math.max(...teacherStats.map(t => t.hours), 1);
 
+  const subjectStats = useMemo(() => {
+    const map = {};
+    weekSessions.forEach(sess => {
+      const subj = sess.subject || 'Unknown';
+      if (!map[subj]) map[subj] = { name: subj, count: 0 };
+      map[subj].count += 1;
+    });
+    return Object.values(map).sort((a, b) => b.count - a.count).slice(0, 5);
+  }, [weekSessions]);
+  const maxSubj = Math.max(...subjectStats.map(s => s.count), 1);
+
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
       <div className="grid-four">
-        <article className="card stat-card"><p className="eyebrow">Students</p><h3>{s.students}</h3></article>
-        <article className="card stat-card"><p className="eyebrow">Today</p><h3>{s.today}</h3></article>
-        <article className="card stat-card"><p className="eyebrow">Queue</p><h3>{s.queue}</h3></article>
-        <article className="card stat-card success"><p className="eyebrow">Top-Ups</p><h3>{s.topups}</h3></article>
+        <article className="card stat-card"><p className="eyebrow">Total Students</p><h3>{s.students}</h3></article>
+        <article className="card stat-card"><p className="eyebrow">Sessions Today</p><h3>{s.today}</h3></article>
+        <article className="card stat-card"><p className="eyebrow">Verification Queue</p><h3>{s.queue}</h3></article>
+        <article className="card stat-card warning"><p className="eyebrow">Pending Top-Ups</p><h3>{s.topups}</h3></article>
       </div>
 
-      <div className="grid-two">
+      <div className="grid-three">
         <article className="card">
           <h3>Sessions Last 7 Days</h3>
           <div className="chart-container">
@@ -90,6 +101,22 @@ export function AcademicCoordinatorDashboardPage() {
                     <div className="teacher-stat-bar" style={{ width: `${(t.hours / maxHours) * 100}%` }}></div>
                   </div>
                   <div className="teacher-stat-val">{t.hours}h</div>
+                </div>
+              ))}
+            </div>
+          }
+        </article>
+        <article className="card">
+          <h3>Top Subjects (This Week)</h3>
+          {!subjectStats.length ? <p className="muted" style={{ marginTop: 20 }}>No data yet.</p> :
+            <div className="top-teachers-list">
+              {subjectStats.map((s, i) => (
+                <div key={i} className="teacher-stat-row">
+                  <div className="teacher-stat-info" title={s.name}>{s.name}</div>
+                  <div className="teacher-stat-bar-bg">
+                    <div className="teacher-stat-bar" style={{ width: `${(s.count / maxSubj) * 100}%`, backgroundColor: '#3b82f6' }}></div>
+                  </div>
+                  <div className="teacher-stat-val">{s.count}</div>
                 </div>
               ))}
             </div>
@@ -167,6 +194,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   const [fEndTime, setFEndTime] = useState('');
 
   const [teacherAvail, setTeacherAvail] = useState(null);
+  const [studentAvail, setStudentAvail] = useState(null);
   const [availLoading, setAvailLoading] = useState(false);
 
   const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -225,17 +253,20 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   useEffect(() => {
     if (!fTeacher || !fStart || !fEnd || fStart > fEnd) {
       setTeacherAvail(null);
+      setStudentAvail(null);
       return;
     }
     setAvailLoading(true);
-    apiFetch(`/teachers/${fTeacher}/availability?start_date=${fStart}&end_date=${fEnd}`)
-      .then(d => { setTeacherAvail(d); setFTime(''); })
-      .catch(e => setError(e.message))
-      .finally(() => setAvailLoading(false));
-  }, [fTeacher, fStart, fEnd]);
+    const fetchTeacher = apiFetch(`/teachers/${fTeacher}/availability?start_date=${fStart}&end_date=${fEnd}`)
+      .then(d => setTeacherAvail(d)).catch(() => setTeacherAvail(null));
+    const fetchStudent = apiFetch(`/students/${studentId}/availability?start_date=${fStart}&end_date=${fEnd}`)
+      .then(d => setStudentAvail(d)).catch(() => setStudentAvail(null));
 
-  const { validStarts, validEnds } = useMemo(() => {
-    if (!teacherAvail || !fDays.length) return { validStarts: [], validEnds: [] };
+    Promise.all([fetchTeacher, fetchStudent]).finally(() => { setAvailLoading(false); setFTime(''); });
+  }, [fTeacher, fStart, fEnd, studentId]);
+
+  const { allStarts, slotChecks } = useMemo(() => {
+    if (!teacherAvail || !studentAvail || !fDays.length) return { allStarts: [], slotChecks: {} };
 
     const times = [];
     for (let h = 6; h <= 22; h++) {
@@ -251,18 +282,17 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
 
     for (let d = new Date(startObj); d <= endObj; d.setDate(d.getDate() + 1)) {
       if (fDays.includes(DAY_MAP[d.getUTCDay()])) {
-        targetDates.push({ dateStr: d.toISOString().split('T')[0], dayName: DAY_MAP[d.getUTCDay()] });
+        targetDates.push({ dateStr: d.toISOString().split('T')[0] });
       }
     }
 
-    if (!targetDates.length) return { validStarts: [], validEnds: [] };
+    if (!targetDates.length) return { allStarts: [], slotChecks: {} };
 
-    function checkSlot(start, end) {
-      if (start >= end) return false;
-      return targetDates.every(td => {
-        // Removed preferred slot tracking at user request. All time slots are valid natively unless there is a class/demo clash.
-
-        const classClash = teacherAvail.classes.some(c => {
+    function checkOverlapType(start, end) {
+      if (start >= end) return 'invalid';
+      for (const td of targetDates) {
+        // Teacher class clash
+        const tClash = teacherAvail.classes.some(c => {
           if (c.session_date !== td.dateStr || !c.started_at) return false;
           const cStart = c.started_at.slice(0, 5);
           const [ch, cm] = cStart.split(':').map(Number);
@@ -272,9 +302,10 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
           const cEnd = `${String(ceH).padStart(2, '0')}:${String(ceM).padStart(2, '0')}`;
           return (start < cEnd && end > cStart);
         });
-        if (classClash) return false;
+        if (tClash) return 'teacher';
 
-        const demoClash = teacherAvail.demos.some(d => {
+        // Teacher demo clash
+        const dClash = teacherAvail.demos.some(d => {
           const dDate = d.scheduled_at.split('T')[0];
           if (dDate !== td.dateStr) return false;
           const dStart = new Date(d.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
@@ -282,36 +313,96 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
             `${String(Number(dStart.split(':')[0]) + 1).padStart(2, '0')}:${dStart.split(':')[1]}`;
           return (start < dEnd && end > dStart);
         });
-        if (demoClash) return false;
+        if (dClash) return 'teacher';
 
-        return true;
+        // Student class clash
+        const sClash = studentAvail.classes.some(c => {
+          if (c.session_date !== td.dateStr || !c.started_at) return false;
+          const cStart = c.started_at.slice(0, 5);
+          const [ch, cm] = cStart.split(':').map(Number);
+          const cDur = Number(c.duration_hours || 0);
+          const ceH = ch + Math.floor(cDur) + Math.floor((cm + (cDur % 1) * 60) / 60);
+          const ceM = (cm + (cDur % 1) * 60) % 60;
+          const cEnd = `${String(ceH).padStart(2, '0')}:${String(ceM).padStart(2, '0')}`;
+          return (start < cEnd && end > cStart);
+        });
+        if (sClash) return 'student';
+      }
+      return false; // free
+    }
+
+    const checks = {};
+    // Check every starting time (slot against the very next slot = 15 mins assumed base)
+    for (let i = 0; i < times.length - 1; i++) {
+      checks[times[i]] = checkOverlapType(times[i], times[i + 1]);
+    }
+    checks[times[times.length - 1]] = 'invalid';
+
+    return { allStarts: times.slice(0, -1), slotChecks: checks };
+  }, [teacherAvail, studentAvail, fDays, fStart, fEnd]);
+
+  const validEnds = useMemo(() => {
+    if (!fTime || !teacherAvail || !studentAvail || !fDays.length) return [];
+
+    // Find the fTime in the base times
+    const times = [];
+    for (let h = 6; h <= 22; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === 22 && m > 0) break;
+        times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+      }
+    }
+    times.push("22:00"); // Add terminal end if needed, actually loop above handles break at 22:00. Let's fix above perfectly.
+
+    const targetDates = [];
+    for (let d = new Date(fStart + 'T00:00:00Z'); d <= new Date(fEnd + 'T00:00:00Z'); d.setDate(d.getDate() + 1)) {
+      if (fDays.includes(DAY_MAP[d.getUTCDay()])) targetDates.push({ dateStr: d.toISOString().split('T')[0] });
+    }
+
+    function checkSlot(start, end) {
+      return targetDates.every(td => {
+        const classClash = teacherAvail.classes.some(c => {
+          if (c.session_date !== td.dateStr || !c.started_at) return false;
+          const cStart = c.started_at.slice(0, 5);
+          const [ch, cm] = cStart.split(':').map(Number);
+          const cDur = Number(c.duration_hours || 0);
+          const ceH = ch + Math.floor(cDur) + Math.floor((cm + (cDur % 1) * 60) / 60);
+          const ceM = (cm + (cDur % 1) * 60) % 60;
+          return (start < `${String(ceH).padStart(2, '0')}:${String(ceM).padStart(2, '0')}` && end > cStart);
+        });
+        const demoClash = teacherAvail.demos.some(d => {
+          const dDate = d.scheduled_at.split('T')[0];
+          if (dDate !== td.dateStr) return false;
+          const dStart = new Date(d.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+          let dh = Number(dStart.split(':')[0]);
+          return (start < `${String(dh + 1).padStart(2, '0')}:${dStart.split(':')[1]}` && end > dStart);
+        });
+        const studClash = studentAvail.classes.some(c => {
+          if (c.session_date !== td.dateStr || !c.started_at) return false;
+          const cStart = c.started_at.slice(0, 5);
+          const [ch, cm] = cStart.split(':').map(Number);
+          const cDur = Number(c.duration_hours || 0);
+          const ceH = ch + Math.floor(cDur) + Math.floor((cm + (cDur % 1) * 60) / 60);
+          return (start < `${String(ceH).padStart(2, '0')}:${String((cm + (cDur % 1) * 60) % 60).padStart(2, '0')}` && end > cStart);
+        });
+        return !classClash && !demoClash && !studClash;
       });
     }
 
-    const validStarts = times.filter((tStart, i) => {
-      if (i === times.length - 1) return false;
-      return checkSlot(tStart, times[i + 1]);
-    });
-
-    let validEnds = [];
-    if (fTime) {
-      const startIndex = times.indexOf(fTime);
-      if (startIndex !== -1) {
-        // Enforce a minimum of 1 hour (4 slots of 15 mins)
-        const minEndIndex = startIndex + 4;
-        for (let i = startIndex + 1; i < times.length; i++) {
-          if (checkSlot(fTime, times[i])) {
-            if (i >= minEndIndex) validEnds.push(times[i]);
-          } else {
-            // Once we hit a blocked slot, we can't extend the duration any further
-            break;
-          }
+    const valid = [];
+    const startIndex = times.indexOf(fTime);
+    if (startIndex !== -1) {
+      const minEndIndex = startIndex + 4; // minimum 1 hour (4 slots)
+      for (let i = startIndex + 1; i < times.length; i++) {
+        if (checkSlot(fTime, times[i])) {
+          if (i >= minEndIndex) valid.push(times[i]);
+        } else {
+          break; // Can't span past an overlap
         }
       }
     }
-
-    return { validStarts, validEnds };
-  }, [teacherAvail, fDays, fStart, fEnd, fTime]);
+    return valid;
+  }, [fTime, fDays, fStart, fEnd, teacherAvail, studentAvail]);
 
   function format24to12(timeStr) {
     if (!timeStr) return '';
@@ -579,9 +670,14 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
               <label>Start Time
                 <select value={fTime} onChange={e => { setFTime(e.target.value); setFEndTime(''); }} required disabled={!fTeacher || !fDays.length || availLoading}>
                   <option value="">{availLoading ? 'Checking availability...' : 'Select Start Time'}</option>
-                  {validStarts.map(t => <option key={t} value={t}>{format24to12(t)}</option>)}
+                  {allStarts.map(t => {
+                    const overlap = slotChecks[t];
+                    const disabled = !!overlap;
+                    const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : '';
+                    return <option key={t} value={t} disabled={disabled}>{format24to12(t)}{suffix}</option>;
+                  })}
                 </select>
-                {fTeacher && fDays.length > 0 && validStarts.length === 0 && !availLoading && (
+                {fTeacher && fDays.length > 0 && allStarts.every(t => slotChecks[t]) && !availLoading && (
                   <small className="error" style={{ display: 'block', marginTop: '4px' }}>No available slots found for all selected days.</small>
                 )}
               </label>
@@ -830,6 +926,7 @@ function StudentDetailPage({ studentId, onBack }) {
   const [messages, setMessages] = useState([]);
   const [demoSessions, setDemoSessions] = useState([]);
   const [paymentRequests, setPaymentRequests] = useState([]);
+  const [verifiedSessions, setVerifiedSessions] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [error, setError] = useState('');
   const [tab, setTab] = useState('profile');
@@ -867,6 +964,10 @@ function StudentDetailPage({ studentId, onBack }) {
       setMessages(d.messages || []);
       setDemoSessions(d.demoSessions || []);
       setPaymentRequests(d.paymentRequests || []);
+
+      const vRes = await apiFetch(`/students/${studentId}/sessions/verified`);
+      setVerifiedSessions(vRes.items || []);
+
       const p = await apiFetch('/teachers/pool');
       setTeachers(p.items || []);
       const subjs = await apiFetch('/subjects');
@@ -910,7 +1011,8 @@ function StudentDetailPage({ studentId, onBack }) {
       parent_phone: student.parent_phone || '',
       class_level: student.class_level || '',
       package_name: student.package_name || '',
-      messaging_number: student.messaging_number || 'contact'
+      messaging_number: student.messaging_number || 'contact',
+      status: student.status || 'active'
     });
     setShowEdit(true);
   }
@@ -933,10 +1035,20 @@ function StudentDetailPage({ studentId, onBack }) {
   const activeSubjects = (assignments || []).filter(a => a.is_active).map(a => a.subject).filter(Boolean);
   const uniqueSubjects = [...new Set(activeSubjects)];
 
+  const teacherSessionCounts = useMemo(() => {
+    const counts = {};
+    sessions.forEach(s => {
+      const name = s.users?.full_name || s.teacher_id;
+      counts[name] = (counts[name] || 0) + 1;
+    });
+    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  }, [sessions]);
+
   if (!student) return <section className="panel">{error ? <p className="error">{error}</p> : <p>Loading...</p>}</section>;
   const tabs = [
     { id: 'profile', label: 'Profile' },
     { id: 'classes', label: `Classes (${sessions.length})` },
+    { id: 'session_logs', label: 'Session Logs' },
     { id: 'lead_data', label: 'Lead Data' }
   ];
 
@@ -970,15 +1082,27 @@ function StudentDetailPage({ studentId, onBack }) {
             <div><span className="eyebrow">Joined</span><p>{student.joined_at ? new Date(student.joined_at).toLocaleDateString('en-IN') : '—'}</p></div>
           </div>
         </article>
-        <article className="card"><h3>Hours</h3><div className="grid-two" style={{ gap: 12 }}>
-          <div className="stat-card card" style={{ textAlign: 'center' }}><p className="eyebrow">Total</p><h3>{student.total_hours}</h3></div>
-          <div className={`stat-card card ${Number(student.remaining_hours) <= 5 ? 'danger' : 'success'}`} style={{ textAlign: 'center' }}><p className="eyebrow">Left</p><h3>{student.remaining_hours}</h3></div>
-        </div></article>
+        <article className="card">
+          <h3>Hours</h3>
+          <div className="grid-two" style={{ gap: 12, marginBottom: '20px' }}>
+            <div className="stat-card card" style={{ textAlign: 'center' }}><p className="eyebrow">Total</p><h3>{student.total_hours}</h3></div>
+            <div className={`stat-card card ${Number(student.remaining_hours) <= 5 ? 'danger' : 'success'}`} style={{ textAlign: 'center' }}><p className="eyebrow">Left</p><h3>{student.remaining_hours}</h3></div>
+          </div>
+          <h4 style={{ margin: '0 0 12px 0' }}>Teachers & Sessions</h4>
+          <div className="detail-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+            {teacherSessionCounts.length ? teacherSessionCounts.map(([name, count]) => (
+              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="eyebrow" style={{ display: 'block' }}>{name}</span>
+                <span className="status-tag secondary small">{count} session{count !== 1 ? 's' : ''}</span>
+              </div>
+            )) : <p className="muted" style={{ gridColumn: '1/-1' }}>No sessions scheduled yet.</p>}
+          </div>
+        </article>
 
         {/* Edit Details Modal */}
         {showEdit && (
           <div className="modal-overlay" onClick={() => setShowEdit(false)}>
-            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px' }}>
               <h3>Edit Student Details</h3>
               <form onSubmit={saveEdit}>
                 <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
@@ -1001,7 +1125,7 @@ function StudentDetailPage({ studentId, onBack }) {
                       <input value={editForm.parent_phone} onChange={e => setEditForm({ ...editForm, parent_phone: e.target.value })} />
                     </label>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                     <label>Class / Level
                       <input value={editForm.class_level} onChange={e => setEditForm({ ...editForm, class_level: e.target.value })} />
                     </label>
@@ -1013,6 +1137,13 @@ function StudentDetailPage({ studentId, onBack }) {
                         <option value="contact">Contact Number</option>
                         <option value="alternative">Alternative Number</option>
                         <option value="parent">Parent Phone</option>
+                      </select>
+                    </label>
+                    <label>Status
+                      <select value={editForm.status} onChange={e => setEditForm({ ...editForm, status: e.target.value })}>
+                        <option value="active">Active</option>
+                        <option value="vacation">Vacation</option>
+                        <option value="inactive">Inactive</option>
                       </select>
                     </label>
                   </div>
@@ -1028,6 +1159,39 @@ function StudentDetailPage({ studentId, onBack }) {
       </div> : null}
 
       {tab === 'classes' ? <StudentClassesTab studentId={studentId} initialSessions={sessions} teachers={teachers} onClassesChanged={load} /> : null}
+
+      {tab === 'session_logs' ? (
+        <article className="card">
+          <h3>Verified Session Logs</h3>
+          <div className="table-wrap mobile-friendly-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Teacher</th>
+                  <th>Subject</th>
+                  <th>Hours</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {verifiedSessions.map(vs => (
+                  <tr key={vs.id}>
+                    <td data-label="Date">{vs.session_date} {vs.started_at ? vs.started_at.slice(11, 16) : ''}</td>
+                    <td data-label="Teacher">{vs.users?.full_name || vs.teacher_id}</td>
+                    <td data-label="Subject">{vs.subject || '—'}</td>
+                    <td data-label="Hours">{vs.duration_hours}h</td>
+                    <td data-label="Status">
+                      <span className="status-tag primary">Verified</span>
+                    </td>
+                  </tr>
+                ))}
+                {!verifiedSessions.length && <tr><td colSpan="5">No verified sessions found.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      ) : null}
 
       {tab === 'lead_data' ? <div>
         <article className="card" style={{ marginBottom: '16px' }}>
@@ -1117,30 +1281,20 @@ function StudentDetailPage({ studentId, onBack }) {
 
 /* ═══════ Student Onboarding Form (multi-schedule, multi-assignment) ═══════ */
 function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }) {
-  const [f, setF] = useState({ name: '', parent: '', studentNumber: '', parentNumber: '', classLevel: '', package: '', totalHours: '', notifPref: 'whatsapp' });
-  const [assigns, setAssigns] = useState([{ teacherId: '', subject: '', scheduleNote: '', day: '', time: '' }]);
+  const [f, setF] = useState({
+    student_name: '',
+    parent_name: '',
+    contact_number: '',
+    alternative_number: '',
+    parent_phone: '',
+    class_level: '',
+    package_name: '',
+    messaging_number: 'contact',
+    status: 'active'
+  });
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
-  const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-
-  const timeOptions = useMemo(() => {
-    const times = [];
-    for (let h = 6; h <= 22; h++) {
-      for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) break; // Ends exactly at 10:00 PM
-        const ampm = h >= 12 ? 'PM' : 'AM';
-        const hour12 = h > 12 ? h - 12 : (h === 0 ? 12 : h);
-        const mins = m.toString().padStart(2, '0');
-        times.push(`${hour12}:${mins} ${ampm}`);
-      }
-    }
-    return times;
-  }, []);
-
-  function updateAssign(idx, k, v) { setAssigns(prev => prev.map((a, i) => i === idx ? { ...a, [k]: v } : a)); }
-  function addAssign() { setAssigns(prev => [...prev, { teacherId: '', subject: '', scheduleNote: '', day: '', time: '' }]); }
-  function removeAssign(idx) { setAssigns(prev => prev.filter((_, i) => i !== idx)); }
 
   async function submit(e) {
     e.preventDefault(); setError(''); setMsg('');
@@ -1151,62 +1305,50 @@ function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }
   return (
     <article className="card">
       <h3>Onboard New Student</h3>
-      <form className="form-grid" onSubmit={submit}>
-        <div className="onboard-row grid-4">
-          <label>Student Name <input value={f.name} onChange={e => set('name', e.target.value)} required /></label>
-          <label>Parent Name <input value={f.parent} onChange={e => set('parent', e.target.value)} /></label>
-          <label>Student Number <input value={f.studentNumber} onChange={e => set('studentNumber', e.target.value)} placeholder="+91..." /></label>
-          <label>Parent Number <input value={f.parentNumber} onChange={e => set('parentNumber', e.target.value)} placeholder="+91..." /></label>
-        </div>
-        <div className="onboard-row grid-4">
-          <label>Class / Level <input value={f.classLevel} onChange={e => set('classLevel', e.target.value)} /></label>
-          <label>Package <input value={f.package} onChange={e => set('package', e.target.value)} /></label>
-          <label>Total Hours <input type="number" value={f.totalHours} onChange={e => set('totalHours', e.target.value)} /></label>
-          <label>Notify On
-            <select value={f.notifPref} onChange={e => set('notifPref', e.target.value)}>
-              <option value="student_number">Student No.</option>
-              <option value="parent_number">Parent No.</option>
-              <option value="both">Both</option>
-            </select>
-          </label>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '14px 0 4px' }}>
-          <h4 style={{ margin: 0 }}>Schedules & Assignments</h4>
-          <button type="button" className="secondary small" onClick={addAssign}>+ Add</button>
-        </div>
-        {assigns.map((a, i) => (
-          <div key={i} className="onboard-assign-row">
-            <label>Subject<SubjectSelect value={a.subject} onChange={(v, isNew) => { updateAssign(i, 'subject', v); if (isNew && onNewSubjectAdded) onNewSubjectAdded(v); }} options={subjects} required /></label>
-            <label>Day<select value={a.day} onChange={e => updateAssign(i, 'day', e.target.value)} required><option value="">Day</option>{dayNames.map(d => <option key={d} value={d}>{d}</option>)}</select></label>
-            <label>Time<select value={a.time} onChange={e => updateAssign(i, 'time', e.target.value)} required><option value="">Time</option>{timeOptions.map(t => <option key={t} value={t}>{t}</option>)}</select></label>
-            <label>Teacher
-              <select value={a.teacherId} onChange={e => updateAssign(i, 'teacherId', e.target.value)} required disabled={!a.subject || !a.day || !a.time}>
-                <option value="">Select Candidate</option>
-                {(() => {
-                  const filtered = teachers.filter(t => {
-                    if (!a.subject) return true;
-                    const target = a.subject.trim().toLowerCase();
-                    const tSubjects = Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : []);
-                    return tSubjects.some(s => (s || '').trim().toLowerCase() === target);
-                  });
-                  if (filtered.length === 0 && a.subject) return <option disabled>No teachers found for this subject</option>;
-                  return filtered.map(t => {
-                    let slots = [];
-                    try { slots = typeof t.teacher_availability === 'string' ? JSON.parse(t.teacher_availability) : (t.teacher_availability || []); } catch (e) { }
-                    const isAvailable = slots.some(slot => slot.day_of_week === a.day);
-                    return (
-                      <option key={t.id} value={t.user_id}>
-                        {t.users?.full_name || t.teacher_code} {isAvailable ? '(Available)' : '⚠️ (Schedule Conflict)'}
-                      </option>
-                    );
-                  });
-                })()}
+      <form onSubmit={submit}>
+        <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+            <label>Student Name
+              <input value={f.student_name} onChange={e => set('student_name', e.target.value)} required />
+            </label>
+            <label>Parent Name
+              <input value={f.parent_name} onChange={e => set('parent_name', e.target.value)} />
+            </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+            <label>Contact Number
+              <input value={f.contact_number} onChange={e => set('contact_number', e.target.value)} />
+            </label>
+            <label>Alternative No.
+              <input value={f.alternative_number} onChange={e => set('alternative_number', e.target.value)} />
+            </label>
+            <label>Parent Phone
+              <input value={f.parent_phone} onChange={e => set('parent_phone', e.target.value)} />
+            </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+            <label>Class / Level
+              <input value={f.class_level} onChange={e => set('class_level', e.target.value)} />
+            </label>
+            <label>Package
+              <input value={f.package_name} onChange={e => set('package_name', e.target.value)} />
+            </label>
+            <label>Messaging Number
+              <select value={f.messaging_number} onChange={e => set('messaging_number', e.target.value)}>
+                <option value="contact">Contact Number</option>
+                <option value="alternative">Alternative Number</option>
+                <option value="parent">Parent Phone</option>
               </select>
             </label>
-            <label>Note <input value={a.scheduleNote} onChange={e => updateAssign(i, 'scheduleNote', e.target.value)} placeholder="e.g. Mon/Wed" /></label>
-            {assigns.length > 1 ? <button type="button" className="danger small" onClick={() => removeAssign(i)} style={{ alignSelf: 'end', marginBottom: 4 }}>✕</button> : null}
+            <label>Status
+              <select value={f.status} onChange={e => set('status', e.target.value)}>
+                <option value="active">Active</option>
+                <option value="vacation">Vacation</option>
+                <option value="inactive">Inactive</option>
+              </select>
+            </label>
           </div>
-        ))}
+        </div>
         <button type="submit" style={{ marginTop: 8 }}>Onboard Student</button>
         {msg ? <p>{msg}</p> : null}
         {error ? <p className="error">{error}</p> : null}
@@ -1224,14 +1366,10 @@ export function StudentsHubPage({ role }) {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const [minHours, setMinHours] = useState('');
+  const [maxHours, setMaxHours] = useState('');
   const isAC = role === 'academic_coordinator';
-
-  const tabs = useMemo(() => {
-    const t = [{ id: 'students', label: 'Student List' }];
-    if (isAC) t.push({ id: 'onboard', label: 'Onboard Student' });
-    return t;
-  }, [isAC]);
-  const [activeTab, setActiveTab] = useState(tabs[0].id);
 
   const loadData = useCallback(async () => {
     setError('');
@@ -1249,9 +1387,16 @@ export function StudentsHubPage({ role }) {
   }, [isAC, teachers.length]);
   useEffect(() => { loadData(); }, [loadData]);
 
+  const uniqueClasses = useMemo(() => {
+    return [...new Set(students.map(s => s.class_level).filter(Boolean))].sort();
+  }, [students]);
+
   const filtered = useMemo(() => {
     let items = students;
     if (statusFilter) items = items.filter(s => s.status === statusFilter);
+    if (classFilter) items = items.filter(s => s.class_level === classFilter);
+    if (minHours !== '') items = items.filter(s => Number(s.remaining_hours) >= Number(minHours));
+    if (maxHours !== '') items = items.filter(s => Number(s.remaining_hours) <= Number(maxHours));
     if (search.trim()) {
       const q = search.trim().toLowerCase();
       items = items.filter(s =>
@@ -1260,7 +1405,7 @@ export function StudentsHubPage({ role }) {
       );
     }
     return items;
-  }, [students, statusFilter, search]);
+  }, [students, statusFilter, classFilter, minHours, maxHours, search]);
 
   async function quickStatusChange(studentId, newStatus, e) {
     e.stopPropagation();
@@ -1280,57 +1425,50 @@ export function StudentsHubPage({ role }) {
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
-      <div className="tabs-row">{tabs.map(t => <button key={t.id} type="button" className={activeTab === t.id ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab(t.id)}>{t.label}</button>)}</div>
       <article className="card">
-        {activeTab === 'students' ? <>
-          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'end' }}>
+          <label style={{ flex: '1.5', margin: 0 }}>Search
             <input
-              type="text" placeholder="Search by name or code..." value={search}
+              type="text" placeholder="Search name or code..." value={search}
               onChange={e => setSearch(e.target.value)}
-              style={{ flex: '1 1 220px', minWidth: '180px' }}
+              style={{ marginTop: '4px' }}
             />
-            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ minWidth: '140px' }}>
+          </label>
+          <label style={{ flex: '1', margin: 0 }}>Status
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ marginTop: '4px' }}>
               <option value="">All Statuses</option>
               <option value="active">Active</option>
               <option value="vacation">Vacation</option>
               <option value="inactive">Inactive</option>
             </select>
-          </div>
-          <div className="table-wrap mobile-friendly-table"><table><thead><tr>
-            <th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th><th>Teachers</th>
-          </tr></thead><tbody>
-              {filtered.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}>
-                <td data-label="ID">{s.student_code || '—'}</td>
-                <td data-label="Name">{s.student_name}</td>
-                <td data-label="Class">{s.class_level || '—'}</td>
-                <td data-label="Status">{isAC ? (
-                  <select
-                    value={s.status}
-                    onClick={e => e.stopPropagation()}
-                    onChange={e => quickStatusChange(s.id, e.target.value, e)}
-                    className={`status-select ${statusColor[s.status] || ''}`}
-                    style={{
-                      fontSize: '0.85em', padding: '4px 6px', borderRadius: '6px', fontWeight: 600,
-                      background: s.status === 'active' ? '#dcfce7' : s.status === 'vacation' ? '#fef9c3' : '#f1f5f9',
-                      color: s.status === 'active' ? '#166534' : s.status === 'vacation' ? '#854d0e' : '#475569',
-                      border: '1px solid ' + (s.status === 'active' ? '#bbf7d0' : s.status === 'vacation' ? '#fde68a' : '#cbd5e1'),
-                      cursor: 'pointer'
-                    }}
-                  >
-                    <option value="active">Active</option>
-                    <option value="vacation">Vacation</option>
-                    <option value="inactive">Inactive</option>
-                  </select>
-                ) : (
-                  <span className={`status-tag ${statusColor[s.status] || ''}`}>{s.status}</span>
-                )}</td>
-                <td data-label="Hours Left"><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td>
-                <td data-label="Teachers">{(s.student_teacher_assignments || []).filter(a => a.is_active).map(a => <span key={a.id} className="status-tag small" style={{ marginRight: 4 }}>{a.users?.full_name || '?'}·{a.subject}</span>)}{!(s.student_teacher_assignments || []).filter(a => a.is_active).length ? <span className="muted">None</span> : null}</td>
-              </tr>)}
-              {!filtered.length ? <tr><td colSpan="6">No students match filters.</td></tr> : null}
-            </tbody></table></div>
-        </> : null}
-        {activeTab === 'onboard' ? <StudentOnboardingForm teachers={teachers} subjects={subjectsList} onDone={loadData} onNewSubjectAdded={(newSubj) => setSubjectsList(prev => [...prev, newSubj])} /> : null}
+          </label>
+          <label style={{ flex: '1', margin: 0 }}>Class / Level
+            <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ marginTop: '4px' }}>
+              <option value="">All Classes</option>
+              {uniqueClasses.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </label>
+          <label style={{ flex: '1.5', margin: 0 }}>Hours Left
+            <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+              <input type="number" placeholder="Min" value={minHours} onChange={e => setMinHours(e.target.value)} style={{ width: '50%' }} />
+              <input type="number" placeholder="Max" value={maxHours} onChange={e => setMaxHours(e.target.value)} style={{ width: '50%' }} />
+            </div>
+          </label>
+        </div>
+        <div className="table-wrap mobile-friendly-table"><table><thead><tr>
+          <th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th>
+        </tr></thead><tbody>
+            {filtered.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}>
+              <td data-label="ID" style={{ padding: '16px 12px' }}>{s.student_code || '—'}</td>
+              <td data-label="Name" style={{ padding: '16px 12px', fontWeight: '600', color: '#0f172a' }}>{s.student_name}</td>
+              <td data-label="Class" style={{ padding: '16px 12px' }}>{s.class_level || '—'}</td>
+              <td data-label="Status" style={{ padding: '16px 12px' }}>
+                <span className={`status-tag ${statusColor[s.status] || ''}`}>{s.status}</span>
+              </td>
+              <td data-label="Hours Left" style={{ padding: '16px 12px' }}><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td>
+            </tr>)}
+            {!filtered.length ? <tr><td colSpan="5">No students match filters.</td></tr> : null}
+          </tbody></table></div>
       </article>
     </section>
   );
@@ -1524,18 +1662,24 @@ export function TodayClassesPage() {
                       <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
                     </td>
                     <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
-                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({
-                        id: s.id, student_id: s.student_id || '', teacher_id: s.teacher_id || '',
-                        date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1
-                      })}>Reschedule</button>}
-                      {s.status !== 'completed' && (
-                        <button type="button" title="Edit" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
-                          onClick={() => setEditData({ id: s.id, teacher_id: s.teacher_id || '', student_id: s.student_id || '', subject: s.subject || '', date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1, status: s.status || 'scheduled' })}>✏️</button>
-                      )}
-                      {s.status !== 'completed' && (
-                        <button type="button" title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
-                          onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
-                      )}
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ width: '85px' }}>
+                          {isUpcoming && <button type="button" className="small secondary" style={{ width: '100%', padding: '4px 8px' }} onClick={() => setRescheduleData({
+                            id: s.id, student_id: s.student_id || '', teacher_id: s.teacher_id || '',
+                            date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1
+                          })}>Reschedule</button>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px', width: '64px' }}>
+                          {s.status !== 'completed' && (
+                            <button type="button" title="Edit" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px', width: '28px' }}
+                              onClick={() => setEditData({ id: s.id, teacher_id: s.teacher_id || '', student_id: s.student_id || '', subject: s.subject || '', date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1, status: s.status || 'scheduled' })}>✏️</button>
+                          )}
+                          {s.status !== 'completed' && (
+                            <button type="button" title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px', width: '28px' }}
+                              onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
+                          )}
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2019,35 +2163,41 @@ export function SessionsManagePage() {
                       {s.status === 'completed' && <span className={`status-tag small ${s.verification_status === 'approved' ? 'success' : 'muted'}`} style={{ marginLeft: 4 }}>{s.verification_status}</span>}
                     </td>
                     <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
-                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({
-                        id: s.id,
-                        student_id: s.student_id || '',
-                        teacher_id: s.teacher_id || '',
-                        date: s.session_date || '',
-                        time: s.started_at ? s.started_at.slice(11, 16) : '',
-                        duration: s.duration_hours || 1
-                      })}>Reschedule</button>}
-                      {s.status !== 'completed' && (
-                        <button
-                          type="button" title="Edit session"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
-                          onClick={() => setEditData({
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                        <div style={{ width: '85px' }}>
+                          {isUpcoming && <button type="button" className="small secondary" style={{ width: '100%', padding: '4px 8px' }} onClick={() => setRescheduleData({
                             id: s.id,
-                            teacher_id: s.teacher_id || '',
                             student_id: s.student_id || '',
-                            subject: s.subject || '',
+                            teacher_id: s.teacher_id || '',
                             date: s.session_date || '',
                             time: s.started_at ? s.started_at.slice(11, 16) : '',
-                            duration: s.duration_hours || 1,
-                            status: s.status || 'scheduled'
-                          })}>✏️</button>
-                      )}
-                      {s.status !== 'completed' && (
-                        <button
-                          type="button" title="Delete session"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
-                          onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
-                      )}
+                            duration: s.duration_hours || 1
+                          })}>Reschedule</button>}
+                        </div>
+                        <div style={{ display: 'flex', gap: '4px', width: '64px' }}>
+                          {s.status !== 'completed' && (
+                            <button
+                              type="button" title="Edit session"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px', width: '28px' }}
+                              onClick={() => setEditData({
+                                id: s.id,
+                                teacher_id: s.teacher_id || '',
+                                student_id: s.student_id || '',
+                                subject: s.subject || '',
+                                date: s.session_date || '',
+                                time: s.started_at ? s.started_at.slice(11, 16) : '',
+                                duration: s.duration_hours || 1,
+                                status: s.status || 'scheduled'
+                              })}>✏️</button>
+                          )}
+                          {s.status !== 'completed' && (
+                            <button
+                              type="button" title="Delete session"
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px', width: '28px' }}
+                              onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
+                          )}
+                        </div>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -2396,7 +2546,6 @@ export function VerificationsPage() {
 
   return (
     <section className="panel">
-      <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Verifications</h2>
       {error ? <p className="error">{error}</p> : null}
       {msg ? <p style={{ color: '#15803d', fontWeight: 500 }}>{msg}</p> : null}
 

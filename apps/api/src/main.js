@@ -8,7 +8,7 @@ import { handleLeads } from './leads/leads.controller.js';
 import { handleSessions } from './sessions/sessions.controller.js';
 import { handleStudents } from './students/students.controller.js';
 import { handleTeachers } from './teachers/teachers.controller.js';
-import { handleUpload } from './common/upload.js';
+import { handleUpload, generatePresignedUrl } from './common/upload.js';
 import { handleCounselors } from './counselors/counselors.controller.js';
 import { handleRequests } from './requests/requests.controller.js';
 import { handleTeacherLeads } from './teacher-leads/teacher-leads.controller.js';
@@ -36,6 +36,18 @@ const server = http.createServer(async (req, res) => {
     const user = await authService.me(token);
     if (!user.ok) return sendJson(res, 401, { error: 'Invalid token' });
     return handleUpload(req, res);
+  }
+
+  if (req.method === 'POST' && url.pathname === '/upload/presigned-url') {
+    const token = getBearerToken(req);
+    console.log('[DEBUG UPLOAD] Parsed token:', token ? `${token.slice(0, 15)}...` : 'NONE');
+    if (!token) return sendJson(res, 401, { error: 'Unauthorized' });
+
+    const user = await authService.me(token);
+    console.log('[DEBUG UPLOAD] authService result:', user);
+
+    if (!user.ok) return sendJson(res, 401, { error: 'Invalid token' });
+    return generatePresignedUrl(req, res);
   }
 
   if (await handleDashboard(req, res)) return;

@@ -178,6 +178,26 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── GET /students/:id/sessions/verified ────────────────
+    if (req.method === 'GET' && parts.length === 4 && parts[0] === 'students' && parts[2] === 'sessions' && parts[3] === 'verified') {
+      if (!canViewStudents(actor)) {
+        sendJson(res, 403, { ok: false, error: 'session access is not allowed' });
+        return true;
+      }
+      const studentId = parts[1];
+      const { data, error } = await adminClient
+        .from('academic_sessions')
+        .select('*, users!academic_sessions_teacher_id_fkey(id,full_name)')
+        .eq('student_id', studentId)
+        .eq('status', 'completed')
+        .order('session_date', { ascending: false })
+        .order('started_at', { ascending: false });
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
     // ─── GET /students/:id ──────────────────────────────────
     if (req.method === 'GET' && parts.length === 2 && parts[0] === 'students') {
       if (!canViewStudents(actor)) {

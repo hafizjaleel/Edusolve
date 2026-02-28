@@ -61,6 +61,8 @@ export default function App() {
   const [selectedLeadId, setSelectedLeadId] = useState('');
   const [leadDetailsTab, setLeadDetailsTab] = useState('profile');
   const [selectedTeacherProfileId, setSelectedTeacherProfileId] = useState('');
+  const [pipelineLeadId, setPipelineLeadId] = useState('');
+  const [paymentRequestLeadId, setPaymentRequestLeadId] = useState('');
 
   useEffect(() => {
     const session = getSession();
@@ -112,6 +114,7 @@ export default function App() {
     setActivePath('');
     setSelectedLeadId('');
     setSelectedTeacherProfileId('');
+    setPaymentRequestLeadId('');
     window.location.hash = '';
   }
 
@@ -126,6 +129,16 @@ export default function App() {
     onNavigate('/teachers/profile');
   }
 
+  function navigateToPipeline(leadId) {
+    setPipelineLeadId(leadId);
+    onNavigate('/leads/mine');
+  }
+
+  function navigateToPaymentRequests(leadId) {
+    setPaymentRequestLeadId(leadId);
+    onNavigate('/leads/payment-requests');
+  }
+
   function renderPage() {
     if (!page) return null;
 
@@ -135,13 +148,13 @@ export default function App() {
     if (page.path === '/dashboard/academic-coordinator') return <AcademicCoordinatorDashboardPage />;
 
     /* Leads */
-    if (page.path === '/leads/all') return <AllLeadsPage onOpenDetails={openLeadDetails} selectedLeadId={selectedLeadId} />;
-    if (page.path === '/leads/today') return <TodayLeadsPage onOpenDetails={openLeadDetails} role={role} />;
-    if (page.path === '/leads/mine') return <MyLeadsPage onOpenDetails={openLeadDetails} />;
+    if (page.path === '/leads/all') return <AllLeadsPage onOpenDetails={openLeadDetails} onViewInPipeline={navigateToPipeline} selectedLeadId={selectedLeadId} role={role} />;
+    if (page.path === '/leads/today') return <TodayLeadsPage onOpenDetails={openLeadDetails} onViewInPipeline={navigateToPipeline} role={role} />;
+    if (page.path === '/leads/mine') return <MyLeadsPage onOpenDetails={openLeadDetails} initialLeadId={pipelineLeadId} onPipelineReady={() => setPipelineLeadId('')} onVerifyPayment={navigateToPaymentRequests} />;
     if (page.path === '/leads/details') return <LeadDetailsPage leadId={selectedLeadId} initialTab={leadDetailsTab} />;
     if (page.path === '/leads/demo-management') return <DemoManagementPage leadId={selectedLeadId} onOpenDetails={openLeadDetails} />;
     if (page.path === '/leads/converted') return <ConvertedLeadsPage />;
-    if (page.path === '/leads/payment-requests') return <PaymentRequestsPage />;
+    if (page.path === '/leads/payment-requests') return <PaymentRequestsPage initialLeadId={paymentRequestLeadId} />;
     if (page.path === '/leads/overdue') return <OverdueLeadsPage />;
 
     /* Students */
