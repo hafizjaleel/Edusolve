@@ -85,6 +85,23 @@ export class LeadsService {
     return data || [];
   }
 
+  async getTeacherDemos(teacherId, date) {
+    const adminClient = getSupabaseAdminClient();
+    if (!adminClient) return [];
+    const startOfDay = new Date(`${date}T00:00:00+05:30`).toISOString();
+    const endOfDay = new Date(`${date}T23:59:59+05:30`).toISOString();
+    const { data, error } = await adminClient
+      .from('leads')
+      .select('id, student_name, demo_scheduled_at, demo_ends_at, status')
+      .eq('demo_teacher_id', teacherId)
+      .eq('status', 'demo_scheduled')
+      .gte('demo_scheduled_at', startOfDay)
+      .lte('demo_scheduled_at', endOfDay)
+      .is('deleted_at', null);
+    if (error) throw new Error(error.message);
+    return data || [];
+  }
+
   async list({ scope, actor }) {
     const adminClient = getSupabaseAdminClient();
 
@@ -116,7 +133,45 @@ export class LeadsService {
     if (resolvedScope === 'mine') {
       query = query.eq('counselor_id', actor.userId);
     } else if (resolvedScope === 'joined') {
-      query = query.eq('status', 'joined');
+      // Fetch leads without any ambiguous joins
+      const { data: joinedLeads, error: joinedError } = await adminClient
+        .from('leads')
+        .select('*')
+        .is('deleted_at', null)
+        .eq('status', 'joined')
+        .order('updated_at', { ascending: false });
+      if (joinedError) throw new Error(joinedError.message);
+
+      // Resolve counselor + ac_user names from users table
+      const userIds = [...new Set(
+        (joinedLeads || []).flatMap(l => [l.counselor_id, l.ac_user_id].filter(Boolean))
+      )];
+      let userMap = {};
+      if (userIds.length) {
+        const { data: users } = await adminClient
+          .from('users')
+          .select('id, full_name, email')
+          .in('id', userIds);
+        (users || []).forEach(u => { userMap[u.id] = { id: u.id, full_name: u.full_name, email: u.email }; });
+      }
+
+      // Resolve student codes via joined_student_id
+      const studentIds = (joinedLeads || []).map(l => l.joined_student_id).filter(Boolean);
+      let studentMap = {};
+      if (studentIds.length) {
+        const { data: students } = await adminClient
+          .from('students')
+          .select('id, student_code')
+          .in('id', studentIds);
+        (students || []).forEach(s => { studentMap[s.id] = s.student_code; });
+      }
+
+      return (joinedLeads || []).map(l => ({
+        ...l,
+        counselor: l.counselor_id ? (userMap[l.counselor_id] || null) : null,
+        ac_user: l.ac_user_id ? (userMap[l.ac_user_id] || null) : null,
+        student_code: l.joined_student_id ? (studentMap[l.joined_student_id] || null) : null,
+      }));
     }
 
     const { data, error } = await query;
@@ -207,11 +262,14 @@ export class LeadsService {
 
   async create(payload, actor) {
     const adminClient = getSupabaseAdminClient();
-    if (!isCounselorHead(actor) && !isSuperAdmin(actor)) {
-      return { error: 'only counselor head or super admin can create leads' };
+    if (!isCounselor(actor) && !isCounselorHead(actor) && !isSuperAdmin(actor)) {
+      return { error: 'only counselor, counselor head or super admin can create leads' };
     }
 
-    const counselorId = payload.counselor_id || null;
+    let counselorId = payload.counselor_id || null;
+    if (isCounselor(actor)) {
+      counselorId = actor.userId; // Force auto-assign to the counselor creating it
+    }
 
     if (!adminClient) {
       const created = {
@@ -497,7 +555,7 @@ export class LeadsService {
       const lead = memoryLeads.find((item) => item.id === id && !item.deleted_at);
       if (!lead) return null;
       if (!canAccessLead(actor, lead)) return { error: 'not allowed for this lead' };
-      lead.status = 'payment_pending';
+      lead.status = 'payment_verification';
       lead.updated_at = nowIso();
       return {
         id: randomUUID(),
@@ -539,7 +597,7 @@ export class LeadsService {
 
     const { data: updated, error: updateError } = await adminClient
       .from('leads')
-      .update({ status: 'payment_pending', owner_stage: 'finance', updated_at: nowIso() })
+      .update({ status: 'payment_verification', owner_stage: 'finance', updated_at: nowIso() })
       .eq('id', id)
       .select('*')
       .single();
@@ -548,7 +606,7 @@ export class LeadsService {
     await adminClient.from('lead_status_history').insert({
       lead_id: id,
       from_status: current.status,
-      to_status: 'payment_pending',
+      to_status: 'payment_verification',
       changed_by: actor.userId,
       reason: 'payment request submitted'
     });
@@ -758,16 +816,27 @@ export class LeadsService {
     const { data: { users }, error } = await adminClient.auth.admin.listUsers();
     if (error) throw new Error(error.message);
 
-    return (users || [])
-      .filter(u => {
-        const role = u.app_metadata?.role || u.user_metadata?.role;
-        return role === 'counselor';
-      })
-      .map(u => ({
-        id: u.id,
-        email: u.email,
-        full_name: u.user_metadata?.name || u.user_metadata?.full_name || u.email
-      }));
+    const counselorAuthUsers = (users || []).filter(u => {
+      const role = u.app_metadata?.role || u.user_metadata?.role;
+      return role === 'counselor';
+    });
+
+    // Enrich with full_name from users DB table
+    const ids = counselorAuthUsers.map(u => u.id);
+    let dbNameMap = {};
+    if (ids.length) {
+      const { data: dbUsers } = await adminClient
+        .from('users')
+        .select('id, full_name')
+        .in('id', ids);
+      (dbUsers || []).forEach(u => { if (u.full_name) dbNameMap[u.id] = u.full_name; });
+    }
+
+    return counselorAuthUsers.map(u => ({
+      id: u.id,
+      email: u.email,
+      full_name: dbNameMap[u.id] || u.user_metadata?.name || u.user_metadata?.full_name || u.email
+    }));
   }
 
   async convertToStudent(leadId, acUserId, actor) {

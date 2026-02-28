@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
+import { getSession } from '../../lib/auth.js';
 import { AddLeadModal } from './components/AddLeadModal.jsx';
 
 import { LeadFilters } from './components/LeadFilters.jsx';
@@ -30,14 +31,14 @@ const ICONS = {
   chevronDown: 'M6 9l6 6 6-6',
   chevronUp: 'M18 15l-6-6-6 6'
 };
-
-const STATUS_STEPS = ['new', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification', 'joined'];
+const STATUS_STEPS = ['new', 'contacted', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification', 'joined'];
 
 const STATUS_COLORS = {
   new: '#6366f1',
+  contacted: '#8b5cf6',
   demo_scheduled: '#f59e0b',
   demo_done: '#3b82f6',
-  payment_pending: '#ef4444',
+  payment_pending: '#ec4899',
   payment_verification: '#f97316',
   joined: '#10b981',
   dropped: '#6b7280'
@@ -45,6 +46,7 @@ const STATUS_COLORS = {
 
 const STATUS_LABELS = {
   new: 'New',
+  contacted: 'Contacted',
   demo_scheduled: 'Demo Scheduled',
   demo_done: 'Demo Done',
   payment_pending: 'Payment Pending',
@@ -204,9 +206,10 @@ function LeadsTable({ items, onSelect, onDelete, showDelete = true, selectedIds 
 function StatusBadge({ status }) {
   const colors = {
     new: 'blue',
+    contacted: 'purple',
     demo_scheduled: 'orange',
     demo_done: 'purple',
-    payment_pending: 'yellow',
+    payment_pending: 'pink',
     payment_verification: 'cyan',
     joined: 'green',
     dropped: 'red'
@@ -214,7 +217,9 @@ function StatusBadge({ status }) {
   return <span className={`status-badge ${colors[status] || 'neutral'}`}>{status?.replace('_', ' ') || 'unknown'}</span>;
 }
 
-export function AllLeadsPage({ onOpenDetails, selectedLeadId }) {
+export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }) {
+  const session = getSession();
+  const user = session?.user;
   const { items, loading, error, refresh } = useLeads('all');
   const [selectedIds, setSelectedIds] = useState([]);
   const [counselors, setCounselors] = useState([]);
@@ -222,7 +227,7 @@ export function AllLeadsPage({ onOpenDetails, selectedLeadId }) {
   const [filters, setFilters] = useState({ search: '', status: '', counselorId: '' });
   const [assignCounselorId, setAssignCounselorId] = useState('');
   const [assigning, setAssigning] = useState(false);
-  const [leadTab, setLeadTab] = useState('new'); // 'new', 'assigned', 'all'
+  const [leadTab, setLeadTab] = useState(user?.role === 'counselor' ? 'all' : 'new'); // 'new', 'assigned', 'all'
 
   useEffect(() => {
     apiFetch('/counselors').then(data => setCounselors(data.items || [])).catch(() => { });
@@ -288,21 +293,22 @@ export function AllLeadsPage({ onOpenDetails, selectedLeadId }) {
   return (
     <section className="panel">
       {/* New / Assigned / All Tabs */}
-      <div className="tabs" style={{ marginBottom: '16px' }}>
-        {[
-          { id: 'new', label: 'New', count: newCount },
-          { id: 'assigned', label: 'Assigned', count: assignedCount },
-          { id: 'all', label: 'All', count: items.length },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            className={`tab-btn ${leadTab === tab.id ? 'active' : ''}`}
-            onClick={() => { setLeadTab(tab.id); setSelectedIds([]); }}
-          >
-            {tab.label} ({tab.count})
-          </button>
-        ))}
-      </div>
+      {user?.role !== 'counselor' ? (
+        <div className="tabs" style={{ marginBottom: '16px' }}>
+          {[
+            { id: 'new', label: 'New', count: newCount },
+            { id: 'assigned', label: 'Assigned', count: assignedCount }
+          ].map(tab => (
+            <button
+              key={tab.id}
+              className={`tab-btn ${leadTab === tab.id ? 'active' : ''}`}
+              onClick={() => { setLeadTab(tab.id); setSelectedIds([]); }}
+            >
+              {tab.label} ({tab.count})
+            </button>
+          ))}
+        </div>
+      ) : null}
 
       <LeadFilters onFilterChange={setFilters} counselors={counselors}>
         <button onClick={() => setShowAddModal(true)} className="primary" style={{ whiteSpace: 'nowrap' }}>+ Add Lead</button>
@@ -331,7 +337,9 @@ export function AllLeadsPage({ onOpenDetails, selectedLeadId }) {
                 <th>Class</th>
                 <th>Type</th>
                 <th>Status</th>
-                <th>Assigned To</th>
+                {user?.role !== 'counselor' ? (
+                  <th>Assigned To</th>
+                ) : null}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -360,8 +368,21 @@ export function AllLeadsPage({ onOpenDetails, selectedLeadId }) {
                   <td>{lead.class_level || '-'}</td>
                   <td>{lead.lead_type || '-'}</td>
                   <td><StatusBadge status={lead.status} /></td>
-                  <td>{counselorMap[lead.counselor_id] || <span className="text-dim">Unassigned</span>}</td>
-                  <td className="actions">
+                  {user?.role !== 'counselor' ? (
+                    <td>{counselorMap[lead.counselor_id] || <span className="text-dim">Unassigned</span>}</td>
+                  ) : null}
+                  <td className="actions" style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap' }}>
+                    {user?.role === 'counselor' && onViewInPipeline && (
+                      <button
+                        type="button"
+                        className="secondary small"
+                        title="View in Pipeline"
+                        onClick={() => onViewInPipeline(lead.id, lead.status)}
+                        style={{ fontSize: '11px', padding: '3px 7px' }}
+                      >
+                        📋
+                      </button>
+                    )}
                     <button type="button" className="secondary small" onClick={() => onOpenDetails(lead.id)}>View</button>
                   </td>
                 </tr>
@@ -426,36 +447,73 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
   const [saving, setSaving] = useState(false);
   const [teachers, setTeachers] = useState([]);
   const [loadingTeachers, setLoadingTeachers] = useState(false);
+  const [conflictSlots, setConflictSlots] = useState([]); // list of {start, end, studentName}
+  const [checkingConflict, setCheckingConflict] = useState(false);
 
-  // Generate 15-min time slots
+  // Generate 15-min time slots 06:00–22:00
   const timeSlots = useMemo(() => {
     const slots = [];
-    for (let h = 8; h <= 20; h++) {
+    for (let h = 6; h <= 22; h++) {
       for (let m = 0; m < 60; m += 15) {
-        const hour = h < 10 ? `0${h}` : h;
-        const min = m === 0 ? '00' : m;
+        if (h === 22 && m > 0) break;
+        const hour = String(h).padStart(2, '0');
+        const min = String(m).padStart(2, '0');
         slots.push(`${hour}:${min}`);
       }
     }
     return slots;
   }, []);
 
+  // IST "now" helpers
+  const nowIST = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const todayIST = () => nowIST().toISOString().split('T')[0];
 
+  // Slots disabled because they are in the past (only when date = today)
+  const isPastSlot = (slot) => {
+    if (date !== todayIST()) return false;
+    const [h, m] = slot.split(':').map(Number);
+    const now = nowIST();
+    return h < now.getHours() || (h === now.getHours() && m <= now.getMinutes());
+  };
 
-  useEffect(() => {
-    async function fetchTeachers() {
-      setLoadingTeachers(true);
-      try {
-        const res = await apiFetch('/teachers/pool');
-        setTeachers(res.items || []);
-      } catch (err) {
-        alert('Failed to fetch teachers: ' + err.message);
-      } finally {
-        setLoadingTeachers(false);
-      }
+  // Slots that overlap with existing bookings
+  const isConflictSlot = (slot) => {
+    if (!conflictSlots.length) return null;
+    const [h, m] = slot.split(':').map(Number);
+    const slotMins = h * 60 + m;
+    for (const c of conflictSlots) {
+      const cStart = c.startH * 60 + c.startM;
+      const cEnd = c.endH * 60 + c.endM;
+      if (slotMins >= cStart && slotMins < cEnd) return c.studentName;
     }
-    fetchTeachers();
-  }, []);
+    return null;
+  };
+
+
+
+  // Fetch teacher's existing demos when teacher or date changes
+  useEffect(() => {
+    if (!selectedTeacherId || !date) { setConflictSlots([]); return; }
+    setCheckingConflict(true);
+    apiFetch(`/leads/teacher-demos?teacher_id=${selectedTeacherId}&date=${date}`)
+      .then(res => {
+        const bookings = (res.items || []).filter(b => b.id !== lead.id); // exclude current lead
+        setConflictSlots(bookings.map(b => {
+          const s = new Date(b.demo_scheduled_at);
+          const e = new Date(b.demo_ends_at);
+          // Convert UTC to IST
+          const ist = (d) => new Date(d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+          const sIST = ist(s); const eIST = ist(e);
+          return {
+            startH: sIST.getHours(), startM: sIST.getMinutes(),
+            endH: eIST.getHours(), endM: eIST.getMinutes(),
+            studentName: b.student_name || 'another lead'
+          };
+        }));
+      })
+      .catch(() => setConflictSlots([]))
+      .finally(() => setCheckingConflict(false));
+  }, [selectedTeacherId, date]);
 
   const teacherOptions = useMemo(() => {
     return teachers.map(t => ({
@@ -464,11 +522,35 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
     }));
   }, [teachers]);
 
+  useEffect(() => {
+    setLoadingTeachers(true);
+    apiFetch('/teachers/pool')
+      .then(res => setTeachers(res.items || []))
+      .catch(err => alert('Failed to fetch teachers: ' + err.message))
+      .finally(() => setLoadingTeachers(false));
+  }, []);
+
+  const hasConflict = useMemo(() => {
+    if (!startTime || !endTime || !conflictSlots.length) return null;
+    const [sh, sm] = startTime.split(':').map(Number);
+    const [eh, em] = endTime.split(':').map(Number);
+    const selStart = sh * 60 + sm;
+    const selEnd = eh * 60 + em;
+    for (const c of conflictSlots) {
+      const cStart = c.startH * 60 + c.startM;
+      const cEnd = c.endH * 60 + c.endM;
+      if (selStart < cEnd && selEnd > cStart)
+        return `${c.studentName} (${String(c.startH).padStart(2, '0')}:${String(c.startM).padStart(2, '0')}–${String(c.endH).padStart(2, '0')}:${String(c.endM).padStart(2, '0')})`;
+    }
+    return null;
+  }, [startTime, endTime, conflictSlots]);
   async function handleSave() {
     if (!date || !startTime || !endTime) return alert('Please select date and time range');
     if (!subject) return alert('Subject is mandatory for demo');
     if (!selectedTeacherId) return alert('Please select a teacher');
     if (startTime >= endTime) return alert('End time must be after start time');
+    if (isPastSlot(startTime)) return alert('Cannot schedule in the past. Please select a future time.');
+    if (hasConflict) return alert(`Time conflict! Teacher already has a demo with ${hasConflict}.`);
 
     setSaving(true);
     try {
@@ -526,23 +608,52 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
             Date
             <input type="date" value={date} onChange={e => setDate(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }} min={new Date().toISOString().split('T')[0]} />
           </label>
+          {checkingConflict && <p style={{ margin: 0, fontSize: '12px', color: '#6b7280' }}>Checking teacher availability...</p>}
+          {!checkingConflict && conflictSlots.length > 0 && (
+            <div style={{ background: '#fef3c7', border: '1px solid #f59e0b', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', color: '#92400e' }}>
+              ⚠️ Teacher already has {conflictSlots.length} demo{conflictSlots.length > 1 ? 's' : ''} on this date. Conflicting slots are marked below.
+            </div>
+          )}
           <div style={{ display: 'flex', gap: '12px' }}>
             <label style={{ flex: 1 }}>
               From
               <select value={startTime} onChange={e => setStartTime(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
                 <option value="">Start Time</option>
-                {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                {timeSlots.map(t => {
+                  const past = isPastSlot(t);
+                  const conflict = isConflictSlot(t);
+                  return (
+                    <option key={t} value={t} disabled={past || !!conflict}
+                      style={{ color: conflict ? '#dc2626' : past ? '#9ca3af' : undefined }}>
+                      {t}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </label>
             <label style={{ flex: 1 }}>
               To
               <select value={endTime} onChange={e => setEndTime(e.target.value)} style={{ width: '100%', padding: '8px', marginTop: '4px' }}>
                 <option value="">End Time</option>
-                {timeSlots.map(t => <option key={t} value={t}>{t}</option>)}
+                {timeSlots.map(t => {
+                  const past = isPastSlot(t);
+                  const conflict = isConflictSlot(t);
+                  return (
+                    <option key={t} value={t} disabled={past || !!conflict}
+                      style={{ color: conflict ? '#dc2626' : past ? '#9ca3af' : undefined }}>
+                      {t}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </label>
           </div>
-          <button className="primary" onClick={handleSave} disabled={saving || loadingTeachers} style={{ marginTop: '8px' }}>
+          {hasConflict && (
+            <div style={{ background: '#fee2e2', border: '1px solid #dc2626', borderRadius: '6px', padding: '8px 10px', fontSize: '12px', color: '#dc2626' }}>
+              ❌ Conflict: Teacher is already booked with {hasConflict}
+            </div>
+          )}
+          <button className="primary" onClick={handleSave} disabled={saving || loadingTeachers || !!hasConflict} style={{ marginTop: '8px' }}>
             {saving ? 'Scheduling...' : 'Schedule Demo'}
           </button>
         </div>
@@ -561,9 +672,10 @@ function getNextStatus(current) {
 
 function getNextLabel(nextStatus) {
   const labels = {
+    contacted: '📞 Mark Contacted',
     demo_scheduled: '📅 Schedule Demo',
     demo_done: '✅ Mark Demo Done',
-    payment_pending: '💰 Payment Requested',
+    payment_pending: '💬 Mark Payment Pending',
     payment_verification: '⏳ Verify Payment',
     joined: '🎉 Mark Joined',
   };
@@ -580,7 +692,7 @@ function formatPhone(num) {
 }
 
 /* ─── Student Lead Card ─── */
-function StudentLeadCard({ lead, onStatusChange, onDrop, onView }) {
+function StudentLeadCard({ lead, onStatusChange, onDrop, onView, onVerifyPayment }) {
   const [expanded, setExpanded] = useState(false);
   const phone = formatPhone(lead.contact_number);
   const nextStatus = getNextStatus(lead.status);
@@ -685,24 +797,25 @@ function StudentLeadCard({ lead, onStatusChange, onDrop, onView }) {
               {lead.status === 'demo_done' ? (
                 <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
                   onClick={() => onStatusChange(lead.id, 'payment_pending')}>
-                  💰 Request Payment
+                  💰 Requested payment
                 </button>
               ) : null}
               {lead.status === 'payment_pending' ? (
                 <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                  onClick={async () => {
-                    await onStatusChange(lead.id, 'payment_verification');
-                    onView(lead.id, 'finance');
-                  }}>
+                  onClick={() => onVerifyPayment && onVerifyPayment(lead.id)}>
                   ⏳ Verify Payment
                 </button>
-              ) : null}
-              {nextStatus && lead.status !== 'demo_done' && lead.status !== 'payment_pending' ? (
+              ) : nextStatus && lead.status !== 'demo_done' && lead.status !== 'payment_verification' ? (
                 <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
                   onClick={() => onStatusChange(lead.id, nextStatus)}>
                   {getNextLabel(nextStatus)}
                 </button>
               ) : null}
+              {lead.status === 'payment_verification' && (
+                <span style={{ flex: 1, fontSize: '12px', textAlign: 'center', padding: '6px', background: '#f3f4f6', borderRadius: '4px', color: '#6b7280' }}>
+                  Verification in process
+                </span>
+              )}
               <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
                 onClick={() => onView(lead.id)}>
                 <Icon d={ICONS.eye} size={14} /> View
@@ -733,11 +846,12 @@ function StudentLeadCard({ lead, onStatusChange, onDrop, onView }) {
   );
 }
 
-export function MyLeadsPage({ onOpenDetails }) {
+export function MyLeadsPage({ onOpenDetails, initialLeadId = '', onPipelineReady, onVerifyPayment }) {
   const { items, loading, error, refresh } = useLeads('mine');
   const [activeTab, setActiveTab] = useState('new');
+  const [highlightedLeadId, setHighlightedLeadId] = useState('');
 
-  const STATUS_STEPS = ['new', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification', 'joined'];
+  const STATUS_STEPS = ['new', 'contacted', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification', 'joined'];
 
   /* Helper functions removed as they are now top-level */
 
@@ -768,13 +882,13 @@ export function MyLeadsPage({ onOpenDetails }) {
 
   const TABS = [
     { id: 'new', label: 'New' },
+    { id: 'contacted', label: 'Contacted' },
     { id: 'demo_scheduled', label: 'Demo Scheduled' },
     { id: 'demo_done', label: 'Demo Done' },
     { id: 'payment_pending', label: 'Payment Pending' },
     { id: 'payment_verification', label: 'Payment Verification' },
     { id: 'joined', label: 'Joined' },
-    { id: 'dropped', label: 'Dropped' },
-    { id: 'all', label: 'All' }
+    { id: 'dropped', label: 'Dropped' }
   ];
 
 
@@ -783,6 +897,24 @@ export function MyLeadsPage({ onOpenDetails }) {
   /* statusColors map removed - use global STATUS_COLORS */
 
   const [leadForDemo, setLeadForDemo] = useState(null);
+
+  // Auto-switch to the correct tab and scroll to the lead when coming from pipeline nav
+  useEffect(() => {
+    if (!initialLeadId || loading || !items.length) return;
+    const target = items.find(i => i.id === initialLeadId);
+    if (!target) return;
+    // Switch to the lead's status tab
+    setActiveTab(target.status || 'all');
+    setHighlightedLeadId(initialLeadId);
+    // Scroll to the card after render
+    setTimeout(() => {
+      const el = document.getElementById(`pipeline-lead-${initialLeadId}`);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // Clear highlight after 3 seconds
+      setTimeout(() => setHighlightedLeadId(''), 3000);
+    }, 100);
+    if (onPipelineReady) onPipelineReady();
+  }, [initialLeadId, loading, items]);
 
   const onStatusChangeAction = async (leadId, newStatus) => {
     if (newStatus === 'demo_scheduled') {
@@ -826,13 +958,25 @@ export function MyLeadsPage({ onOpenDetails }) {
 
       <div className="today-leads-grid">
         {filteredItems.map(lead => (
-          <StudentLeadCard
+          <div
+            id={`pipeline-lead-${lead.id}`}
             key={lead.id}
-            lead={lead}
-            onStatusChange={onStatusChangeAction}
-            onDrop={handleDrop}
-            onView={onOpenDetails}
-          />
+            style={highlightedLeadId === lead.id ? {
+              outline: '2px solid #f59e0b',
+              boxShadow: '0 0 0 4px #fef3c7',
+              borderRadius: '10px',
+              transition: 'all 0.3s'
+            } : {}}
+          >
+            <StudentLeadCard
+              key={lead.id}
+              lead={lead}
+              onStatusChange={onStatusChangeAction}
+              onDrop={handleDrop}
+              onView={onOpenDetails}
+              onVerifyPayment={onVerifyPayment}
+            />
+          </div>
         ))}
       </div>
     </section>
@@ -966,6 +1110,13 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
 
   async function updateStatus(newStatus) {
     if (!leadId) return;
+
+    // Restricted statuses that cannot be manually set from this general UI
+    const restricted = ['demo_scheduled', 'payment_verification', 'joined'];
+    if (restricted.includes(newStatus)) {
+      return alert(`Cannot manually change status to ${newStatus.replace('_', ' ')} from here.`);
+    }
+
     try {
       const data = await apiFetch(`/leads/${leadId}`, {
         method: 'PATCH',
@@ -983,28 +1134,32 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
     const file = e.target.files[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append('file', file);
-
     try {
-      const res = await fetch('/upload/screenshot', {
+      const presignData = await apiFetch(`/upload/presigned-url`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: formData
+        body: JSON.stringify({
+          filename: file.name,
+          contentType: file.type
+        })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setPaymentScreenshot(data.url);
+
+      const uploadRes = await fetch(presignData.uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type
+        },
+        body: file
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
+
+      setPaymentScreenshot(presignData.publicUrl);
     } catch (err) {
       alert('Upload failed: ' + err.message);
     }
   }
 
-  const STATUS_STEPS_BASE = ['new', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification'];
-  const finalStep = lead?.status === 'dropped' ? 'dropped' : 'joined';
-  const STATUS_STEPS = [...STATUS_STEPS_BASE, finalStep];
+  const STATUS_STEPS = ['new', 'contacted', 'demo_scheduled', 'demo_done', 'payment_pending', 'payment_verification', 'joined', 'dropped'];
 
   return (
     <section className="panel">
@@ -1031,17 +1186,27 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
             return (
               <div
                 key={step}
-                onClick={() => updateStatus(step)}
+                onClick={() => {
+                  const restricted = ['demo_scheduled', 'payment_verification', 'joined', 'dropped'];
+                  // allow selecting 'dropped' but not anything else that isn't handled here natively
+                  if (restricted.includes(step) && step !== 'dropped') return;
+                  if (lead?.status === 'payment_verification' || lead?.status === 'joined' || lead?.status === 'dropped') return;
+
+                  if (step === 'dropped' && !window.confirm('Are you sure you want to mark this lead as dropped?')) return;
+
+                  updateStatus(step);
+                }}
                 style={{
                   padding: '8px 16px',
                   borderRadius: '20px',
-                  background: isActive ? '#4f46e5' : isPassed ? '#e0e7ff' : '#f3f4f6',
+                  background: isActive ? (step === 'dropped' ? '#ef4444' : '#4f46e5') : isPassed ? '#e0e7ff' : '#f3f4f6',
                   color: isActive ? 'white' : isPassed ? '#4f46e5' : '#6b7280',
                   fontWeight: 500,
                   fontSize: '13px',
-                  cursor: 'pointer',
+                  cursor: (['demo_scheduled', 'payment_verification', 'joined'].includes(step) || ['payment_verification', 'joined', 'dropped'].includes(lead?.status)) ? 'not-allowed' : 'pointer',
                   whiteSpace: 'nowrap',
-                  border: isActive ? '1px solid #4f46e5' : '1px solid transparent'
+                  border: isActive ? `1px solid ${step === 'dropped' ? '#ef4444' : '#4f46e5'}` : '1px solid transparent',
+                  opacity: (['demo_scheduled', 'payment_verification', 'joined'].includes(step) && !isActive) ? 0.6 : 1
                 }}
               >
                 {step.replace('_', ' ')}
@@ -1057,12 +1222,6 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
           onClick={() => setActiveTab('profile')}
         >
           Profile
-        </button>
-        <button
-          className={`tab-btn ${activeTab === 'finance' ? 'active' : ''}`}
-          onClick={() => setActiveTab('finance')}
-        >
-          Finance
         </button>
         <button
           className={`tab-btn ${activeTab === 'timeline' ? 'active' : ''}`}
@@ -1210,41 +1369,7 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
         </>
       ) : null}
 
-      {activeTab === 'finance' ? (
-        <form className="card form-grid" onSubmit={submitPaymentRequest}>
-          <h3>Payment Request</h3>
-          <p>Submit a payment verification request to the finance team.</p>
-          <label>
-            Total Amount (₹)
-            <input type="number" min="1" step="0.01" value={paymentTotalAmount} onChange={(e) => setPaymentTotalAmount(e.target.value)} required placeholder="e.g. 15000" />
-          </label>
-          <label>
-            Hours
-            <input type="number" min="1" step="0.5" value={paymentHours} onChange={(e) => setPaymentHours(e.target.value)} required placeholder="e.g. 24" />
-          </label>
-          <label>
-            Paid Amount (₹)
-            <input type="number" min="1" step="0.01" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} required placeholder="e.g. 5000" />
-          </label>
-          <label>
-            Screenshot (Upload)
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileUpload}
-            />
-          </label>
-          {paymentScreenshot ? (
-            <div style={{ marginTop: '8px' }}>
-              <p style={{ fontSize: '12px', color: 'green' }}>✓ Screenshot uploaded</p>
-              <a href={paymentScreenshot} target="_blank" rel="noreferrer" style={{ fontSize: '12px' }}>View Upload</a>
-            </div>
-          ) : null}
-          <button type="submit">Submit for Finance Verification</button>
-          {paymentMessage ? <p>{paymentMessage}</p> : null}
-          {error ? <p className="error">{error}</p> : null}
-        </form>
-      ) : null}
+
 
       {activeTab === 'timeline' ? (
         <article className="card">
@@ -1300,6 +1425,7 @@ export function ConvertedLeadsPage() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAcId, setBulkAcId] = useState('');
   const [bulkAssigning, setBulkAssigning] = useState(false);
+  const [tab, setTab] = useState('unassigned'); // 'unassigned' | 'all'
 
   useEffect(() => {
     async function load() {
@@ -1374,11 +1500,12 @@ export function ConvertedLeadsPage() {
   }
 
   const filtered = leads.filter(l => {
-    if (!search) return true;
-    const s = search.toLowerCase();
-    return l.student_name?.toLowerCase().includes(s) ||
-      l.contact_number?.includes(s) ||
-      l.subject?.toLowerCase().includes(s);
+    const matchesSearch = !search ||
+      l.student_name?.toLowerCase().includes(search.toLowerCase()) ||
+      l.contact_number?.includes(search);
+    const isAssigned = !!(l.ac_user?.full_name || l.ac_user?.email || assignedMap[l.id]);
+    const matchesTab = tab === 'all' || !isAssigned;
+    return matchesSearch && matchesTab;
   });
 
   // Only unassigned leads are selectable
@@ -1402,18 +1529,28 @@ export function ConvertedLeadsPage() {
   return (
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '20px' }}>Converted Leads</h2>
-          <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>
-            {leads.length} joined lead{leads.length !== 1 ? 's' : ''} — assign to Academic Coordinators
-          </p>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button
+            className={tab === 'unassigned' ? 'primary' : 'secondary'}
+            style={{ fontSize: '13px' }}
+            onClick={() => setTab('unassigned')}
+          >
+            Unassigned ({leads.filter(l => !(l.ac_user?.full_name || assignedMap[l.id])).length})
+          </button>
+          <button
+            className={tab === 'all' ? 'primary' : 'secondary'}
+            style={{ fontSize: '13px' }}
+            onClick={() => setTab('all')}
+          >
+            All ({leads.length})
+          </button>
         </div>
         <input
           type="text"
-          placeholder="Search by name, phone, subject…"
+          placeholder="Search by name or phone…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ width: '260px', padding: '8px 12px' }}
+          style={{ width: '220px', padding: '8px 12px' }}
         />
       </div>
 
@@ -1429,13 +1566,13 @@ export function ConvertedLeadsPage() {
                   <th style={{ width: '40px' }}>
                     <input type="checkbox" checked={allSelected} onChange={toggleAll} />
                   </th>
+                  <th>Student ID</th>
                   <th>Name</th>
                   <th>Contact</th>
                   <th>Class</th>
-                  <th>Subject</th>
-                  <th>Type</th>
+                  <th>Closed By</th>
                   <th>Joined Date</th>
-                  <th>Status</th>
+                  <th>AC Coordinator</th>
                 </tr>
               </thead>
               <tbody>
@@ -1447,31 +1584,33 @@ export function ConvertedLeadsPage() {
                         <input
                           type="checkbox"
                           checked={selectedIds.includes(lead.id)}
-                          disabled={!!alreadyAssigned}
+                          disabled={!!(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id])}
                           onChange={() => toggleOne(lead.id)}
                         />
+                      </td>
+                      <td style={{ fontSize: '12px', color: '#4338ca', fontWeight: 600 }}>
+                        {lead.student_code || '—'}
                       </td>
                       <td style={{ fontWeight: 500 }}>{lead.student_name}</td>
                       <td>{lead.contact_number || '—'}</td>
                       <td>{lead.class_level || '—'}</td>
-                      <td>{lead.subject || '—'}</td>
-                      <td>{lead.lead_type || '—'}</td>
+                      <td style={{ fontSize: '12px' }}>{lead.counselor?.full_name || lead.counselor?.email || '—'}</td>
                       <td>{lead.updated_at ? new Date(lead.updated_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
                       <td>
-                        {alreadyAssigned ? (
+                        {(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]) ? (
                           <span style={{
                             display: 'inline-flex', alignItems: 'center', gap: '4px',
                             padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
                             fontWeight: 600, background: '#dcfce7', color: '#15803d'
                           }}>
-                            ✅ {alreadyAssigned}
+                            ✅ {lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]}
                           </span>
                         ) : (
                           <span style={{
                             padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
-                            fontWeight: 600, background: '#fef3c7', color: '#92400e'
+                            fontWeight: 600, background: '#f3f4f6', color: '#6b7280'
                           }}>
-                            Pending
+                            Unassigned
                           </span>
                         )}
                       </td>
@@ -1479,7 +1618,7 @@ export function ConvertedLeadsPage() {
                   );
                 })}
                 {!filtered.length && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>No joined leads found.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>No leads found.</td></tr>
                 )}
               </tbody>
             </table>
@@ -1529,24 +1668,18 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
   const [scheduledAt, setScheduledAt] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
-  const [activeTab, setActiveTab] = useState('demo_scheduled');
+  const [activeTab, setActiveTab] = useState('demo_done');
 
   useEffect(() => {
     apiFetch('/teachers/pool').then(d => setTeachers(d.items || [])).catch(() => { });
   }, []);
 
-  // Filter leads for demo statuses + new (for scheduling)
   const demoLeads = useMemo(() => {
-    if (activeTab === 'all') return items.filter(i => ['new', 'demo_scheduled', 'demo_done'].includes(i.status));
-    return items.filter(i => i.status === activeTab);
-  }, [items, activeTab]);
+    return items.filter(i => ['demo_scheduled', 'demo_done'].includes(i.status));
+  }, [items]);
 
   const scheduledCount = items.filter(i => i.status === 'demo_scheduled').length;
   const doneCount = items.filter(i => i.status === 'demo_done').length;
-  const newCount = items.filter(i => i.status === 'new').length;
-
-  // Leads eligible for scheduling (status = new)
-  const newLeads = items.filter(i => i.status === 'new');
 
   async function handleScheduleDemo(e) {
     e.preventDefault();
@@ -1555,9 +1688,13 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
     setErr('');
     setMsg('');
     try {
-      await apiFetch(`/leads/${targetId}/demo-request`, {
-        method: 'POST',
-        body: JSON.stringify({ scheduled_at: scheduledAt || null, teacher_id: selectedTeacherId || null })
+      await apiFetch(`/leads/${targetId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          status: 'demo_scheduled',
+          demo_scheduled_at: scheduledAt ? new Date(scheduledAt).toISOString() : null,
+          demo_teacher_id: selectedTeacherId || null
+        })
       });
       setMsg('Demo scheduled!');
       setShowScheduleModal(false);
@@ -1582,18 +1719,6 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
     }
   }
 
-  async function handleMoveToPending(id) {
-    try {
-      await apiFetch(`/leads/${id}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ status: 'payment_pending', reason: 'Demo done, moved to payment pending' })
-      });
-      refresh();
-    } catch (err) {
-      alert(err.message);
-    }
-  }
-
   function formatPhone(num) {
     if (!num) return null;
     let clean = num.replace(/[^0-9+]/g, '');
@@ -1603,9 +1728,10 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
 
   const statusColors = {
     new: '#6366f1',
+    contacted: '#8b5cf6',
     demo_scheduled: '#f59e0b',
     demo_done: '#3b82f6',
-    payment_pending: '#ef4444',
+    payment_pending: '#ec4899',
     payment_verification: '#f97316',
   };
 
@@ -1615,29 +1741,12 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
         <div>
           <h2 style={{ margin: 0, fontSize: '20px' }}>Demo Management</h2>
           <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>
-            {scheduledCount} scheduled · {doneCount} done · {newCount} new (ready to schedule)
+            {scheduledCount} upcoming · {doneCount} demos taken
           </p>
         </div>
-        <button className="primary" onClick={() => setShowScheduleModal(true)}>+ Schedule Demo</button>
       </div>
 
-      {/* Tabs */}
-      <div className="tabs-row" style={{ marginBottom: '16px', flexWrap: 'wrap' }}>
-        {[
-          { id: 'demo_scheduled', label: 'Scheduled', count: scheduledCount },
-          { id: 'demo_done', label: 'Done', count: doneCount },
-          { id: 'new', label: 'New (Unscheduled)', count: newCount },
-          { id: 'all', label: 'All', count: scheduledCount + doneCount + newCount },
-        ].map(tab => (
-          <button
-            key={tab.id}
-            className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => setActiveTab(tab.id)}
-          >
-            {tab.label} ({tab.count})
-          </button>
-        ))}
-      </div>
+
 
       {loading ? <p>Loading demos...</p> : null}
       {error ? <p className="error">{error}</p> : null}
@@ -1650,176 +1759,181 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
         </div>
       ) : null}
 
-      <div className="today-leads-grid">
-        {demoLeads.map(lead => {
-          const phone = formatPhone(lead.contact_number);
-          return (
-            <div key={lead.id} className="card today-lead-card" style={{
-              padding: '16px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              borderLeft: `4px solid ${statusColors[lead.status] || '#6b7280'}`,
-            }}>
-              {/* Header */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
-                <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 600 }}>{lead.student_name}</h3>
-                <span style={{
-                  padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
-                  background: `${statusColors[lead.status] || '#6b7280'}18`,
-                  color: statusColors[lead.status] || '#6b7280',
-                  textTransform: 'capitalize', whiteSpace: 'nowrap'
-                }}>
-                  {(lead.status || '').replace(/_/g, ' ')}
-                </span>
-              </div>
-
-              {/* Details */}
-              <div className="today-lead-details">
-                <div>
-                  <span className="text-muted">Phone</span>
-                  <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{lead.contact_number || '—'}</p>
-                </div>
-                <div>
-                  <span className="text-muted">Subject</span>
-                  <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{lead.subject || '—'}</p>
-                </div>
-                <div>
-                  <span className="text-muted">Class</span>
-                  <p style={{ margin: '2px 0 0', fontWeight: 500 }}>{lead.class_level || '—'}</p>
-                </div>
-                <div>
-                  <span className="text-muted">Created</span>
-                  <p style={{ margin: '2px 0 0', fontWeight: 500, fontSize: '12px' }}>
-                    {lead.created_at ? new Date(lead.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short' }) : '—'}
-                  </p>
-                </div>
-              </div>
-
-              {/* Contact Buttons */}
-              {phone ? (
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <a href={`tel:+${phone}`} className="today-lead-action-btn call-btn">📞 Call</a>
-                  <a href={`https://wa.me/${phone}`} target="_blank" rel="noopener noreferrer" className="today-lead-action-btn wa-btn">💬 WhatsApp</a>
-                </div>
-              ) : null}
-
-              {/* Status Actions */}
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {lead.status === 'new' ? (
-                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                    onClick={() => { setSelectedLeadId(lead.id); setShowScheduleModal(true); }}>
-                    📅 Schedule Demo
-                  </button>
-                ) : null}
-                {lead.status === 'demo_scheduled' ? (
-                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                    onClick={() => handleMarkDone(lead.id)}>
-                    ✅ Mark Demo Done
-                  </button>
-                ) : null}
-                {lead.status === 'demo_done' ? (
-                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                    onClick={() => handleMoveToPending(lead.id)}>
-                    💰 Move to Payment Pending
-                  </button>
-                ) : null}
-                {lead.status === 'payment_pending' ? (
-                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                    onClick={async () => {
-                      await apiFetch(`/leads/${lead.id}`, {
-                        method: 'PATCH',
-                        body: JSON.stringify({ status: 'payment_verification', reason: 'Moved to verification' })
-                      });
-                      if (onOpenDetails) onOpenDetails(lead.id, 'finance');
-                    }}>
-                    ⏳ Verify Payment
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap mobile-friendly-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Demo Date</th>
+                <th>Student</th>
+                <th>Subject</th>
+                <th>Teacher</th>
+                <th>Status</th>
+                <th style={{ textAlign: 'center' }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {demoLeads.map(lead => {
+                const isScheduled = lead.status === 'demo_scheduled';
+                return (
+                  <tr key={lead.id}>
+                    <td data-label="Demo Date">
+                      <span style={{ fontWeight: 500 }}>
+                        {lead.demo_scheduled_at ? new Date(lead.demo_scheduled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true }).replace(/ AM| PM/g, m => m.toLowerCase()) : '—'}
+                      </span>
+                    </td>
+                    <td data-label="Student">
+                      {lead.student_name}
+                      <div className="text-muted" style={{ fontSize: '12px', marginTop: '4px' }}>{lead.contact_number}</div>
+                    </td>
+                    <td data-label="Subject">{lead.subject || '—'}</td>
+                    <td data-label="Teacher">
+                      {(() => {
+                        const matched = teachers.find(t => t.user_id === lead.demo_teacher_id || t.id === lead.demo_teacher_id);
+                        const name = matched?.users?.full_name || lead.teacher_profiles?.users?.full_name;
+                        if (name) return name;
+                        if (lead.demo_teacher_id) return `ID: ${lead.demo_teacher_id.slice(0, 8)}`;
+                        return <span className="text-muted">Not Assigned</span>;
+                      })()}
+                    </td>
+                    <td data-label="Status">
+                      <span style={{
+                        padding: '4px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600,
+                        background: isScheduled ? '#f59e0b18' : '#3b82f618',
+                        color: isScheduled ? '#f59e0b' : '#3b82f6',
+                        textTransform: 'capitalize', whiteSpace: 'nowrap'
+                      }}>
+                        {isScheduled ? 'Scheduled' : 'Demo Done'}
+                      </span>
+                    </td>
+                    <td data-label="Actions" style={{ textAlign: 'center' }}>
+                      {isScheduled ? (
+                        <button className="small primary" style={{ fontSize: '11px', padding: '4px 10px' }}
+                          onClick={() => handleMarkDone(lead.id)}>
+                          ✅ Mark Done
+                        </button>
+                      ) : (
+                        <span className="text-muted" style={{ fontSize: '12px' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Schedule Demo Modal */}
-      {showScheduleModal ? (
-        <div className="modal-overlay">
-          <div className="modal card" style={{ maxWidth: '420px' }}>
-            <h3>Schedule Demo</h3>
-            <form className="form-grid" onSubmit={handleScheduleDemo}>
-              <label>
-                Lead
-                <select value={selectedLeadId} onChange={e => setSelectedLeadId(e.target.value)} required>
-                  <option value="">Select a lead...</option>
-                  {newLeads.map(l => (
-                    <option key={l.id} value={l.id}>{l.student_name} — {l.subject || 'No subject'}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Teacher
-                <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)} required>
-                  <option value="">Select a teacher...</option>
-                  {teachers.map(t => (
-                    <option key={t.id} value={t.id}>{t.full_name || t.email} {t.subject ? `(${t.subject})` : ''}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Schedule Date & Time (optional)
-                <input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} />
-              </label>
-              {err ? <p className="error">{err}</p> : null}
-              <div className="actions">
-                <button type="button" className="secondary" onClick={() => { setShowScheduleModal(false); setErr(''); }}>Cancel</button>
-                <button type="submit">Schedule Demo</button>
-              </div>
-            </form>
+      {
+        showScheduleModal ? (
+          <div className="modal-overlay">
+            <div className="modal card" style={{ maxWidth: '420px' }}>
+              <h3>Schedule Demo</h3>
+              <form className="form-grid" onSubmit={handleScheduleDemo}>
+                <label>
+                  Lead
+                  <select value={selectedLeadId} onChange={e => setSelectedLeadId(e.target.value)} required>
+                    <option value="">Select a lead...</option>
+                    {newLeads.map(l => (
+                      <option key={l.id} value={l.id}>{l.student_name} — {l.subject || 'No subject'}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Teacher
+                  <select value={selectedTeacherId} onChange={e => setSelectedTeacherId(e.target.value)} required>
+                    <option value="">Select a teacher...</option>
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.user_id}>{t.users?.full_name || 'Unknown'} ({t.teacher_code})</option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Schedule Date & Time (optional)
+                  <input type="datetime-local" value={scheduledAt} onChange={e => setScheduledAt(e.target.value)} />
+                </label>
+                {err ? <p className="error">{err}</p> : null}
+                <div className="actions">
+                  <button type="button" className="secondary" onClick={() => { setShowScheduleModal(false); setErr(''); }}>Cancel</button>
+                  <button type="submit">Schedule Demo</button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      ) : null}
-    </section>
+        ) : null
+      }
+    </section >
   );
 }
 
 /* ═══════ Payment Requests Page ═══════ */
-export function PaymentRequestsPage() {
+export function PaymentRequestsPage({ initialLeadId, onReady }) {
   const [requests, setRequests] = useState([]);
   const [leads, setLeads] = useState([]);
+  const [counselors, setCounselors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [counselorFilter, setCounselorFilter] = useState('all');
   const [showNewModal, setShowNewModal] = useState(false);
+  const [role, setRole] = useState('');
+
+  useEffect(() => {
+    if (initialLeadId && leads.length > 0) {
+      setShowNewModal(true);
+      if (onReady) onReady();
+    }
+  }, [initialLeadId, leads, onReady]);
 
   async function loadData() {
     setLoading(true);
     try {
-      const [prRes, leadsRes] = await Promise.all([
+      const session = getSession();
+      const userRole = session?.user?.role || '';
+      setRole(userRole);
+
+      const promises = [
         apiFetch('/leads/payment-requests'),
-        apiFetch('/leads?scope=my').catch(() => ({ items: [] }))
-      ]);
+        apiFetch('/leads?scope=my').catch(() => ({ items: [] })),
+        apiFetch('/leads/counselors').catch(() => ({ items: [] }))
+      ];
+      const [prRes, leadsRes, counselorsRes] = await Promise.all(promises);
       setRequests(prRes.items || []);
       setLeads((leadsRes.items || []).filter(l => !l.deleted_at));
+      setCounselors(counselorsRes?.items || []);
     } catch (e) { alert(e.message); }
     setLoading(false);
   }
 
   useEffect(() => { loadData(); }, []);
 
+  const isCounselorHead = role === 'counselor_head' || role === 'super_admin';
+
+  // Build counselor name map from the counselors list
+  const counselorMap = useMemo(() => {
+    const m = {};
+    counselors.forEach(c => { m[c.id] = c.full_name || c.email || 'Unknown'; });
+    return m;
+  }, [counselors]);
+
   const filtered = useMemo(() => {
     let list = requests;
     if (statusFilter !== 'all') list = list.filter(r => r.status === statusFilter);
+    if (isCounselorHead && counselorFilter !== 'all') {
+      list = list.filter(r => r.leads?.counselor_id === counselorFilter);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(r =>
         (r.leads?.student_name || '').toLowerCase().includes(q) ||
         (r.leads?.contact_number || '').includes(q) ||
-        String(r.amount).includes(q)
+        String(r.amount).includes(q) ||
+        (counselorMap[r.leads?.counselor_id] || '').toLowerCase().includes(q)
       );
     }
     return list;
-  }, [requests, statusFilter, search]);
+  }, [requests, statusFilter, counselorFilter, search, counselorMap, isCounselorHead]);
 
   const statusBadge = (status) => {
     const map = {
@@ -1838,7 +1952,7 @@ export function PaymentRequestsPage() {
   };
 
   const counts = useMemo(() => {
-    const c = { all: requests.length, pending: 0, approved: 0, verified: 0, rejected: 0 };
+    const c = { all: requests.length, pending: 0, verified: 0, rejected: 0 };
     requests.forEach(r => { if (c[r.status] !== undefined) c[r.status]++; });
     return c;
   }, [requests]);
@@ -1847,20 +1961,39 @@ export function PaymentRequestsPage() {
 
   return (
     <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <h2 style={{ margin: 0, fontSize: '20px' }}>Payment Requests</h2>
-        <button className="primary" onClick={() => setShowNewModal(true)} style={{ fontSize: '13px' }}>
-          + New Request
-        </button>
+      {/* Filters row - single line */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+        <input
+          type="text"
+          placeholder="Search by student, phone, amount…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ width: '220px', flexShrink: 0, padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+        />
+        {isCounselorHead && counselors.length > 0 && (
+          <select
+            value={counselorFilter}
+            onChange={e => setCounselorFilter(e.target.value)}
+            style={{ width: '180px', flexShrink: 0, padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+          >
+            <option value="all">All Counselors</option>
+            {counselors.map(c => (
+              <option key={c.id} value={c.id}>{c.full_name || c.email}</option>
+            ))}
+          </select>
+        )}
+        {!isCounselorHead && (
+          <button className="primary" style={{ marginLeft: 'auto', fontSize: '13px', flexShrink: 0 }} onClick={() => setShowNewModal(true)}>+ New Request</button>
+        )}
       </div>
 
       {/* Stats Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', marginBottom: '16px' }}>
         {[
-          { key: 'all', label: 'Total', value: counts.all, bg: '#f3f4f6', color: '#111' },
-          { key: 'pending', label: 'Pending', value: counts.pending, bg: '#fef3c7', color: '#92400e' },
-          { key: 'approved', label: 'Approved', value: counts.approved, bg: '#dcfce7', color: '#15803d' },
-          { key: 'rejected', label: 'Rejected', value: counts.rejected, bg: '#fee2e2', color: '#dc2626' }
+          { key: 'all', label: 'Total', value: counts.all, color: '#111' },
+          { key: 'pending', label: 'Pending', value: counts.pending, color: '#92400e' },
+          { key: 'verified', label: 'Verified', value: counts.verified, color: '#15803d' },
+          { key: 'rejected', label: 'Rejected', value: counts.rejected, color: '#dc2626' }
         ].map(s => (
           <div key={s.key} className="card"
             onClick={() => setStatusFilter(s.key)}
@@ -1875,17 +2008,6 @@ export function PaymentRequestsPage() {
         ))}
       </div>
 
-      {/* Search */}
-      <div style={{ marginBottom: '12px' }}>
-        <input
-          type="text"
-          placeholder="Search by student name, phone, or amount…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ width: '100%', maxWidth: '360px', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
-        />
-      </div>
-
       {/* Table */}
       <div className="table-wrap">
         <table className="data-table">
@@ -1893,7 +2015,7 @@ export function PaymentRequestsPage() {
             <tr>
               <th>Student</th>
               <th>Phone</th>
-              <th>Subject</th>
+              {isCounselorHead && <th>Counselor</th>}
               <th>Total Amt</th>
               <th>Hours</th>
               <th>Paid Amt</th>
@@ -1908,7 +2030,11 @@ export function PaymentRequestsPage() {
               <tr key={r.id}>
                 <td style={{ fontWeight: 500 }}>{r.leads?.student_name || '—'}</td>
                 <td>{r.leads?.contact_number || '—'}</td>
-                <td>{r.leads?.subject || '—'}</td>
+                {isCounselorHead && (
+                  <td style={{ fontSize: '12px', color: '#4338ca' }}>
+                    {counselorMap[r.leads?.counselor_id] || '—'}
+                  </td>
+                )}
                 <td style={{ fontWeight: 600 }}>{r.total_amount ? `₹${Number(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
                 <td>{r.hours || '—'}</td>
                 <td style={{ fontWeight: 600, color: '#15803d' }}>₹{Number(r.amount).toLocaleString('en-IN')}</td>
@@ -1928,7 +2054,7 @@ export function PaymentRequestsPage() {
               </tr>
             ))}
             {!filtered.length && (
-              <tr><td colSpan={10} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>
+              <tr><td colSpan={isCounselorHead ? 10 : 9} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>
                 No payment requests found.
               </td></tr>
             )}
@@ -1940,6 +2066,7 @@ export function PaymentRequestsPage() {
       {showNewModal && (
         <NewPaymentRequestModal
           leads={leads}
+          initialLeadId={initialLeadId}
           onClose={() => setShowNewModal(false)}
           onSuccess={() => { setShowNewModal(false); loadData(); }}
         />
@@ -2114,47 +2241,30 @@ export function OverdueLeadsPage() {
   );
 }
 
-function NewPaymentRequestModal({ leads, onClose, onSuccess }) {
-  const [selectedLeadId, setSelectedLeadId] = useState('');
+function NewPaymentRequestModal({ leads, onClose, onSuccess, initialLeadId }) {
+  const [selectedLeadId, setSelectedLeadId] = useState(initialLeadId || '');
   const [totalAmount, setTotalAmount] = useState('');
   const [hours, setHours] = useState('');
   const [amount, setAmount] = useState('');
+  const [financeNote, setFinanceNote] = useState('');
   const [screenshotFile, setScreenshotFile] = useState(null);
   const [screenshotUrl, setScreenshotUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [leadSearch, setLeadSearch] = useState('');
 
-  const filteredLeads = useMemo(() => {
-    if (!leadSearch.trim()) return leads;
-    const q = leadSearch.toLowerCase();
-    return leads.filter(l =>
-      (l.student_name || '').toLowerCase().includes(q) ||
-      (l.contact_number || '').includes(q)
-    );
-  }, [leads, leadSearch]);
+  const leadOptions = useMemo(() => {
+    return leads.map(l => ({
+      value: l.id,
+      label: `${l.student_name} — ${l.contact_number || 'No phone'} (${l.status})`
+    }));
+  }, [leads]);
 
-  async function handleFileChange(e) {
+  function handleFileChange(e) {
     const file = e.target.files[0];
-    if (!file) return;
-    setScreenshotFile(file);
-    setUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await fetch('/upload/screenshot', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-        body: formData
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Upload failed');
-      setScreenshotUrl(data.url);
-    } catch (err) {
-      alert('Upload failed: ' + err.message);
-      setScreenshotFile(null);
-    } finally {
-      setUploading(false);
+    if (file) {
+      setScreenshotFile(file);
+      setScreenshotUrl(''); // Clear any old URL if they select a new file
     }
   }
 
@@ -2162,21 +2272,56 @@ function NewPaymentRequestModal({ leads, onClose, onSuccess }) {
     e.preventDefault();
     if (!selectedLeadId) return alert('Please select a lead');
     if (!amount || Number(amount) <= 0) return alert('Please enter a valid amount');
-    if (!screenshotUrl) return alert('Please upload a screenshot');
+    if (!screenshotFile && !screenshotUrl) return alert('Please upload a screenshot');
+
     setSaving(true);
     try {
+      let finalUrl = screenshotUrl;
+
+      if (screenshotFile) {
+        setUploading(true);
+        // 1. Get presigned URL
+        const presignData = await apiFetch(`/upload/presigned-url`, {
+          method: 'POST',
+          body: JSON.stringify({
+            filename: screenshotFile.name,
+            contentType: screenshotFile.type
+          })
+        });
+
+        // 2. Upload directly to R2/S3
+        const uploadRes = await fetch(presignData.uploadUrl, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': screenshotFile.type
+          },
+          body: screenshotFile
+        });
+
+        if (!uploadRes.ok) {
+          setUploading(false);
+          throw new Error('Failed to upload file to storage');
+        }
+
+        setUploading(false);
+        finalUrl = presignData.publicUrl;
+        setScreenshotUrl(finalUrl);
+      }
+
       await apiFetch(`/leads/${selectedLeadId}/payment-request`, {
         method: 'POST',
         body: JSON.stringify({
           amount: Number(amount),
           total_amount: Number(totalAmount) || null,
           hours: Number(hours) || null,
-          screenshot_url: screenshotUrl
+          screenshot_url: finalUrl,
+          finance_note: financeNote || null
         })
       });
       alert('Payment request submitted!');
       onSuccess();
     } catch (err) {
+      setUploading(false);
       alert('Error: ' + err.message);
     } finally {
       setSaving(false);
@@ -2194,29 +2339,15 @@ function NewPaymentRequestModal({ leads, onClose, onSuccess }) {
 
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Lead Search/Select */}
-          <label style={{ fontSize: '13px', fontWeight: 600 }}>
-            Select Lead *
-            <input
-              type="text"
-              placeholder="Search by name or phone…"
-              value={leadSearch}
-              onChange={e => setLeadSearch(e.target.value)}
-              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', marginTop: '4px', marginBottom: '4px' }}
-            />
-            <select
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+            <SearchSelect
+              label="Select Lead *"
               value={selectedLeadId}
-              onChange={e => setSelectedLeadId(e.target.value)}
-              required
-              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
-            >
-              <option value="">Select a lead…</option>
-              {filteredLeads.map(l => (
-                <option key={l.id} value={l.id}>
-                  {l.student_name} — {l.contact_number || 'No phone'} ({l.status})
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={setSelectedLeadId}
+              options={leadOptions}
+              placeholder="Search and select a lead…"
+            />
+          </div>
 
           {/* Total Amount */}
           <label style={{ fontSize: '13px', fontWeight: 600 }}>
@@ -2270,22 +2401,29 @@ function NewPaymentRequestModal({ leads, onClose, onSuccess }) {
               type="file"
               accept="image/*"
               onChange={handleFileChange}
-              required={!screenshotUrl}
+              required={!screenshotFile && !screenshotUrl}
               style={{ width: '100%', padding: '8px 0', fontSize: '13px', marginTop: '4px' }}
             />
-            {uploading && <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0' }}>Uploading…</p>}
-            {screenshotUrl && !uploading && (
-              <div style={{ marginTop: '6px' }}>
-                <p style={{ fontSize: '12px', color: '#15803d', margin: 0 }}>✅ Screenshot uploaded</p>
-                <a href={screenshotUrl} target="_blank" rel="noreferrer" style={{ fontSize: '12px', color: '#2563eb' }}>View</a>
-              </div>
-            )}
+            {screenshotFile && !uploading && <p style={{ fontSize: '12px', color: '#15803d', margin: '4px 0 0' }}>✅ File selected: {screenshotFile.name}</p>}
+            {uploading && <p style={{ fontSize: '12px', color: '#6b7280', margin: '4px 0 0' }}>Uploading screenshot…</p>}
+          </label>
+
+          {/* Finance Note */}
+          <label style={{ fontSize: '13px', fontWeight: 600 }}>
+            Finance Note
+            <textarea
+              value={financeNote}
+              onChange={e => setFinanceNote(e.target.value)}
+              placeholder="Optional note for finance team…"
+              rows={2}
+              style={{ width: '100%', padding: '8px 12px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px', marginTop: '4px', resize: 'vertical' }}
+            />
           </label>
 
           <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '8px' }}>
             <button type="button" onClick={onClose} className="secondary" style={{ fontSize: '13px' }}>Cancel</button>
-            <button type="submit" className="primary" disabled={saving || uploading || !screenshotUrl} style={{ fontSize: '13px' }}>
-              {saving ? 'Submitting…' : 'Submit Request'}
+            <button type="submit" className="primary" disabled={saving || uploading || (!screenshotFile && !screenshotUrl)} style={{ fontSize: '13px' }}>
+              {saving || uploading ? 'Submitting…' : 'Submit Request'}
             </button>
           </div>
         </form>

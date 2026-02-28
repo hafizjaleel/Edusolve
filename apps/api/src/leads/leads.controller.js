@@ -80,6 +80,18 @@ export async function handleLeads(req, res, url) {
       return true;
     }
 
+    if (req.method === 'GET' && url.pathname === '/leads/teacher-demos') {
+      const teacherId = url.searchParams.get('teacher_id');
+      const date = url.searchParams.get('date');
+      if (!teacherId || !date) {
+        sendJson(res, 400, { ok: false, error: 'teacher_id and date are required' });
+        return true;
+      }
+      const items = await leadsService.getTeacherDemos(teacherId, date);
+      sendJson(res, 200, { ok: true, items });
+      return true;
+    }
+
     if (req.method === 'GET' && url.pathname === '/leads/payment-requests') {
       const result = await leadsService.listPaymentRequests(actor);
       if (result?.error) {

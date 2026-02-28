@@ -31,7 +31,6 @@ export default function AppShell({ roleLabel, role, pages, activePath, onNavigat
             Edusolve
             <span className="role-badge-small">{roleLabel}</span>
           </h1>
-          <p>Education Hub Operations</p>
         </div>
 
         <nav className="nav-groups" aria-label="Main navigation">

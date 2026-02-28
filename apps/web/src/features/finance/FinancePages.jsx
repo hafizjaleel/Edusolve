@@ -708,6 +708,7 @@ export function PaymentVerificationPage() {
   const [activeTab, setActiveTab] = useState('payments');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selectedPayment, setSelectedPayment] = useState(null);
 
   async function load() {
     setLoading(true); setError('');
@@ -765,31 +766,43 @@ export function PaymentVerificationPage() {
         <article className="card" style={{ padding: '16px' }}>
           <div className="table-wrap mobile-friendly-table">
             <table>
-              <thead><tr><th>Lead</th><th>Amount</th><th>Screenshot</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr>
+                <th>Lead</th>
+                <th>Phone</th>
+                <th>Total Amt</th>
+                <th>Hours</th>
+                <th>Paid Amt</th>
+                <th>Finance Note</th>
+                <th>Screenshot</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr></thead>
               <tbody>
                 {payments.map(item => (
                   <tr key={item.id}>
-                    <td data-label="Lead">{item.leads?.student_name || item.lead_id}</td>
-                    <td data-label="Amount" style={{ fontWeight: 600 }}>₹{Number(item.amount).toLocaleString()}</td>
+                    <td data-label="Lead" style={{ fontWeight: 500 }}>{item.leads?.student_name || item.lead_id}</td>
+                    <td data-label="Phone">{item.leads?.contact_number || '—'}</td>
+                    <td data-label="Total Amt" style={{ fontWeight: 600 }}>{item.total_amount ? `₹${Number(item.total_amount).toLocaleString('en-IN')}` : '—'}</td>
+                    <td data-label="Hours">{item.hours || '—'}</td>
+                    <td data-label="Paid Amt" style={{ fontWeight: 600, color: '#15803d' }}>₹{Number(item.amount).toLocaleString('en-IN')}</td>
+                    <td data-label="Finance Note" style={{ fontSize: '12px', color: '#6b7280', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{item.finance_note || '—'}</td>
                     <td data-label="Screenshot">
-                      {item.screenshot_url ? <a href={item.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>Open</a> : '—'}
+                      {item.screenshot_url ? <a href={item.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>View</a> : '—'}
                     </td>
                     <td data-label="Status">
                       <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700, background: `${statusColors[item.status]}18`, color: statusColors[item.status] }}>{item.status}</span>
                     </td>
                     <td data-label="Actions" className="actions">
                       {item.status === 'pending' ? (
-                        <>
-                          <button className="small primary" onClick={() => verifyPayment(item.id, true)}>✅ Verify</button>
-                          <button className="small danger" onClick={() => verifyPayment(item.id, false)}>✕ Reject</button>
-                        </>
+                        <button className="small primary" onClick={() => setSelectedPayment(item)}>🔍 Review</button>
                       ) : '—'}
                     </td>
                   </tr>
                 ))}
-                {!payments.length ? <tr><td colSpan="5" style={{ textAlign: 'center' }}>No payment requests</td></tr> : null}
+                {!payments.length ? <tr><td colSpan="9" style={{ textAlign: 'center' }}>No payment requests</td></tr> : null}
               </tbody>
             </table>
+
           </div>
         </article>
       ) : null}
@@ -825,7 +838,93 @@ export function PaymentVerificationPage() {
           </div>
         </article>
       ) : null}
+      {selectedPayment && (
+        <PaymentVerifyModal
+          payment={selectedPayment}
+          onClose={() => setSelectedPayment(null)}
+          onDone={() => { setSelectedPayment(null); load(); }}
+        />
+      )}
     </section>
+  );
+}
+
+function PaymentVerifyModal({ payment, onClose, onDone }) {
+  const [financeNote, setFinanceNote] = useState(payment.finance_note || '');
+  const [saving, setSaving] = useState(false);
+
+  async function handle(approved) {
+    setSaving(true);
+    try {
+      await apiFetch(`/finance/payment-requests/${payment.id}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ approved, finance_note: financeNote || null })
+      });
+      onDone();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const row = (label, value) => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px' }}>
+      <span style={{ color: '#6b7280', fontWeight: 500 }}>{label}</span>
+      <span style={{ fontWeight: 600, textAlign: 'right', maxWidth: '60%' }}>{value}</span>
+    </div>
+  );
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '480px', background: 'white', padding: '24px', borderRadius: '12px', width: '100%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h3 style={{ margin: 0, fontSize: '17px' }}>Payment Request Review</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer', color: '#6b7280' }}>×</button>
+        </div>
+
+        <div style={{ marginBottom: '16px' }}>
+          {row('Student Name', payment.leads?.student_name || '—')}
+          {row('Phone', payment.leads?.contact_number || '—')}
+          {row('Total Package Amount', payment.total_amount ? `₹${Number(payment.total_amount).toLocaleString('en-IN')}` : '—')}
+          {row('Hours Purchased', payment.hours ? `${payment.hours} hrs` : '—')}
+          {row('Paid Amount', `₹${Number(payment.amount).toLocaleString('en-IN')}`)}
+          {row('Counselor Note', payment.finance_note || '—')}
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f3f4f6', fontSize: '13px' }}>
+            <span style={{ color: '#6b7280', fontWeight: 500 }}>Screenshot</span>
+            {payment.screenshot_url
+              ? <a href={payment.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca', fontWeight: 600 }}>View Screenshot ↗</a>
+              : <span style={{ fontWeight: 600 }}>—</span>}
+          </div>
+        </div>
+
+        <div style={{ background: '#fef3c7', border: '1px solid #fcd34d', borderRadius: '8px', padding: '12px', marginBottom: '16px', fontSize: '13px', color: '#92400e' }}>
+          ⚠️ <strong>Clicking Verify will convert this lead to a student</strong>, add their purchased hours to their account, and mark them as Joined in the counselor dashboard.
+        </div>
+
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '13px', fontWeight: 600, marginBottom: '16px' }}>
+          Finance Note (optional)
+          <textarea
+            value={financeNote}
+            onChange={e => setFinanceNote(e.target.value)}
+            rows={2}
+            placeholder="Add a note for records…"
+            style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', resize: 'vertical', fontWeight: 400 }}
+          />
+        </label>
+
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <button className="secondary" onClick={onClose} disabled={saving} style={{ fontSize: '13px' }}>Cancel</button>
+          <button className="danger" onClick={() => handle(false)} disabled={saving} style={{ fontSize: '13px' }}>
+            {saving ? '…' : '✕ Reject'}
+          </button>
+          <button className="primary" onClick={() => handle(true)} disabled={saving} style={{ fontSize: '13px', background: '#15803d' }}>
+            {saving ? 'Processing…' : '✅ Verify & Convert to Student'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
