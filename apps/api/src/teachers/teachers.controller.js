@@ -52,6 +52,43 @@ export async function handleTeachers(req, res, url) {
   const actor = actorFromHeaders(req);
 
   try {
+    // ── GET /teachers/directory — fetch all teachers (AC/Admin) ──
+    if (req.method === 'GET' && url.pathname === '/teachers/directory') {
+      if (!['academic_coordinator', 'super_admin', 'teacher_coordinator'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'forbidden' });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name)')
+        .order('created_at', { ascending: false });
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
+    // ── PATCH /teachers/:id/pool-status — toggle is_in_pool ──
+    const poolStatusMatch = url.pathname.match(/^\/teachers\/([0-9a-fA-F-]+)\/pool-status$/);
+    if (req.method === 'PATCH' && poolStatusMatch) {
+      if (!['academic_coordinator', 'super_admin', 'teacher_coordinator'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'forbidden' });
+        return true;
+      }
+      const teacherId = poolStatusMatch[1];
+      const body = await readJson(req);
+      const is_in_pool = !!body?.is_in_pool;
+
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .update({ is_in_pool, updated_at: nowIso() })
+        .eq('id', teacherId)
+        .select()
+        .single();
+        
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
     if (req.method === 'GET' && url.pathname === '/teachers/pool') {
       const { data, error } = await adminClient
         .from('teacher_profiles')
@@ -70,25 +107,46 @@ export async function handleTeachers(req, res, url) {
         return p;
       });
 
+      const startDate = url.searchParams.get('start_date');
+      const endDate = url.searchParams.get('end_date');
+
       // Fetch upcoming booked demos and active classes for all pool teachers
       const teacherUserIds = items.map(t => t.user_id).filter(Boolean);
       let bookedDemos = [];
       let assignedClasses = [];
       if (teacherUserIds.length) {
-        const { data: demos } = await adminClient
+        let demosQuery = adminClient
           .from('demo_sessions')
           .select('id, teacher_id, scheduled_at, ends_at, status, leads(student_name, subject)')
           .in('teacher_id', teacherUserIds)
-          .eq('status', 'scheduled')
-          .gte('scheduled_at', new Date().toISOString());
+          .in('status', ['scheduled', 'rescheduled']);
+          
+        if (startDate && endDate) {
+            demosQuery = demosQuery.gte('scheduled_at', `${startDate}T00:00:00.000Z`)
+                                   .lte('scheduled_at', `${endDate}T23:59:59.999Z`);
+        } else {
+            demosQuery = demosQuery.gte('scheduled_at', new Date().toISOString());
+        }
+
+        const { data: demos } = await demosQuery;
         bookedDemos = demos || [];
 
-        const { data: assignments } = await adminClient
-          .from('student_teacher_assignments')
-          .select('id, teacher_id, day, time, students(student_name)')
+        let sessionsQuery = adminClient
+          .from('academic_sessions')
+          .select('id, teacher_id, session_date, started_at, duration_hours, status')
           .in('teacher_id', teacherUserIds)
-          .eq('is_active', true);
-        assignedClasses = assignments || [];
+          .in('status', ['scheduled', 'rescheduled', 'completed']);
+          
+        if (startDate && endDate) {
+            sessionsQuery = sessionsQuery.gte('session_date', startDate)
+                                         .lte('session_date', endDate);
+        } else {
+            const todayStr = new Date().toISOString().slice(0, 10);
+            sessionsQuery = sessionsQuery.gte('session_date', todayStr);
+        }
+
+        const { data: sessions } = await sessionsQuery;
+        assignedClasses = sessions || [];
       }
 
       // Attach booked demos and assigned classes to each teacher

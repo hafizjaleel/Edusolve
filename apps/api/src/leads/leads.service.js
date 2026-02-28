@@ -119,11 +119,16 @@ export class LeadsService {
         : base;
     }
 
-    let query = adminClient
-      .from('leads')
-      .select('*')
-      .is('deleted_at', null)
-      .order('created_at', { ascending: false });
+    let selectQuery = '*';
+  if (resolvedScope === 'joined') {
+    selectQuery = '*, students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))';
+  }
+
+  let query = adminClient
+    .from('leads')
+    .select(selectQuery)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
 
     if (resolvedScope === 'mine') {
       query = query.eq('counselor_id', actor.userId);

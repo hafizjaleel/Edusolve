@@ -32,6 +32,7 @@ import {
   TeacherPoolPage,
   AutomationPage
 } from './features/academic/AcademicPages.jsx';
+import { TeacherDirectoryPage } from './features/teachers/TeacherDirectoryPage.jsx';
 import { SubjectsBoardsPage } from './features/academic/SubjectsBoardsPage.jsx';
 import { CounselorTeamPage } from './features/counselors/CounselorPages.jsx';
 import { CounselorReportsPage } from './features/counselors/CounselorReportsPage.jsx';
@@ -176,6 +177,7 @@ export default function App() {
 
     /* Teacher Pool (AC) */
     if (page.path === '/teachers/pool') return <TeacherPoolPage />;
+    if (page.path === '/teachers/all') return <TeacherDirectoryPage />;
 
     /* Team (Counselor Head) */
     if (page.path === '/team/counselors') return <CounselorTeamPage />;

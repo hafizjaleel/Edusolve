@@ -2649,10 +2649,32 @@ export function TeacherPoolPage() {
   const [fLang, setFLang] = useState('');
   const [fSubj, setFSubj] = useState('');
   const [fSyllabus, setFSyllabus] = useState('');
-  const [fTime, setFTime] = useState('');
+  const [fStartTime, setFStartTime] = useState('');
+  const [fEndTime, setFEndTime] = useState('');
   const [selectedMapDay, setSelectedMapDay] = useState(new Date().getDay()); // Default to today
   const [viewTeacher, setViewTeacher] = useState(null);
   const [showSlotsFor, setShowSlotsFor] = useState(null);
+
+  const [weekOffsetMap, setWeekOffsetMap] = useState(0);
+  const [weekStartMap, setWeekStartMap] = useState('');
+  const [weekEndMap, setWeekEndMap] = useState('');
+
+  const loadWeekMap = useCallback(() => {
+    const now = new Date();
+    const dayOfWeek = now.getDay();
+    const sunday = new Date(now);
+    sunday.setDate(now.getDate() - dayOfWeek + weekOffsetMap * 7);
+
+    const saturday = new Date(sunday);
+    saturday.setDate(sunday.getDate() + 6);
+
+    const fDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    setWeekStartMap(fDate(sunday));
+    setWeekEndMap(fDate(saturday));
+  }, [weekOffsetMap]);
+
+  useEffect(() => { loadWeekMap(); }, [loadWeekMap]);
 
   const ClockIcon = () => (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -2661,14 +2683,24 @@ export function TeacherPoolPage() {
     </svg>
   );
 
-  useEffect(() => { (async () => { try { const d = await apiFetch('/teachers/pool'); setTeachers(d.items || []); } catch (e) { setError(e.message); } })(); }, []);
+  useEffect(() => {
+    if (!weekStartMap || !weekEndMap) return;
+    (async () => {
+      try {
+        const d = await apiFetch(`/teachers/pool?start_date=${weekStartMap}&end_date=${weekEndMap}`);
+        setTeachers(d.items || []);
+      } catch (e) {
+        setError(e.message);
+      }
+    })();
+  }, [weekStartMap, weekEndMap]);
   useEffect(() => { function close(e) { if (!e.target.closest('.filter-panel') && !e.target.closest('.filter-toggle-btn')) setFiltersOpen(false); } if (filtersOpen) document.addEventListener('click', close); return () => document.removeEventListener('click', close); }, [filtersOpen]);
 
   const allLangs = useMemo(() => { const s = new Set(); teachers.forEach(t => (t.languages || []).forEach(l => s.add(l))); return [...s].sort(); }, [teachers]);
   const allSubjs = useMemo(() => { const s = new Set(); teachers.forEach(t => (t.subjects_taught || []).forEach(l => s.add(l))); return [...s].sort(); }, [teachers]);
   const allSyllabus = useMemo(() => { const s = new Set(); teachers.forEach(t => (t.syllabus || []).forEach(l => s.add(l))); return [...s].sort(); }, [teachers]);
 
-  const activeFilterCount = [fExp, fLang, fSubj, fSyllabus, fTime].filter(Boolean).length;
+  const activeFilterCount = [fExp, fLang, fSubj, fSyllabus, fStartTime, fEndTime].filter(Boolean).length;
 
   const filtered = useMemo(() => {
     let items = teachers;
@@ -2676,15 +2708,64 @@ export function TeacherPoolPage() {
     if (fLang) items = items.filter(t => (t.languages || []).includes(fLang));
     if (fSubj) items = items.filter(t => (t.subjects_taught || []).includes(fSubj));
     if (fSyllabus) items = items.filter(t => (t.syllabus || []).includes(fSyllabus));
-    if (fTime) items = items.filter(t => t.preferred_time === fTime);
-    return items;
-  }, [teachers, fExp, fLang, fSubj, fSyllabus, fTime]);
+    if (fStartTime || fEndTime) {
+      items = items.filter(t => {
+        if (!t.teacher_availability || t.teacher_availability.length === 0) return false;
 
-  function clearFilters() { setFExp(''); setFLang(''); setFSubj(''); setFSyllabus(''); setFTime(''); }
+        // Helper to convert HH:mm or HH:mm:ss to minutes
+        const toMinutes = (timeStr) => {
+          if (!timeStr) return null;
+          const [h, m] = timeStr.split(':').map(Number);
+          return h * 60 + m;
+        };
+
+        const filterStart = fStartTime ? toMinutes(fStartTime) : 0;
+        const filterEnd = fEndTime ? toMinutes(fEndTime) : 24 * 60;
+
+        return t.teacher_availability.some(slot => {
+          const slotStart = toMinutes(slot.start_time);
+          const slotEnd = toMinutes(slot.end_time);
+          if (slotStart === null || slotEnd === null) return false;
+          // Check if slot overlaps or contains the requested time
+          return slotStart <= filterEnd && slotEnd >= filterStart;
+        });
+      });
+    }
+    return items;
+  }, [teachers, fExp, fLang, fSubj, fSyllabus, fStartTime, fEndTime]);
+
+  function clearFilters() { setFExp(''); setFLang(''); setFSubj(''); setFSyllabus(''); setFStartTime(''); setFEndTime(''); }
 
   const dayLabels = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const mapDateLabels = useMemo(() => {
+    if (!weekStartMap) return dayLabels;
+    const parts = weekStartMap.split('-');
+    const startObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    return dayLabels.map((lbl, i) => {
+      const d = new Date(startObj);
+      d.setDate(startObj.getDate() + i);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${lbl} ${dd}/${mm}`;
+    });
+  }, [weekStartMap, dayLabels]);
+
   const fullDayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
   const hours = Array.from({ length: 17 }, (_, i) => i + 6); // 6 AM to 10 PM (22)
+
+  const timeOptions = useMemo(() => {
+    const opts = [];
+    for (let h = 6; h <= 22; h++) {
+      for (let m = 0; m < 60; m += 15) {
+        if (h === 22 && m > 0) continue; // max 10:00 PM
+        const hh = String(h).padStart(2, '0');
+        const mm = String(m).padStart(2, '0');
+        const val = `${hh}:${mm}`;
+        opts.push({ value: val, label: formatTime12(val) });
+      }
+    }
+    return opts;
+  }, []);
 
   return (
     <section className="panel">
@@ -2700,7 +2781,8 @@ export function TeacherPoolPage() {
               <SearchSelect label="Language" value={fLang} onChange={setFLang} options={allLangs.map(l => ({ value: l, label: l }))} placeholder="Any" />
               <SearchSelect label="Subject" value={fSubj} onChange={setFSubj} options={allSubjs.map(l => ({ value: l, label: l }))} placeholder="Any" />
               <SearchSelect label="Syllabus" value={fSyllabus} onChange={setFSyllabus} options={allSyllabus.map(l => ({ value: l, label: l }))} placeholder="Any" />
-              <SearchSelect label="Pref. Time" value={fTime} onChange={setFTime} options={[{ value: 'morning', label: 'Morning' }, { value: 'afternoon', label: 'Afternoon' }, { value: 'evening', label: 'Evening' }, { value: 'flexible', label: 'Flexible' }]} placeholder="Any" />
+              <SearchSelect label="From Time" value={fStartTime} onChange={setFStartTime} options={timeOptions} placeholder="Any" />
+              <SearchSelect label="To Time" value={fEndTime} onChange={setFEndTime} options={timeOptions} placeholder="Any" />
             </div>
             {activeFilterCount ? <button type="button" className="secondary small" onClick={clearFilters} style={{ marginTop: 12 }}>Clear All</button> : null}
           </div> : null}
@@ -2712,7 +2794,7 @@ export function TeacherPoolPage() {
         </div>
       </div>
 
-      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th><th>View</th></tr></thead><tbody>{filtered.map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">
+      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th></tr></thead><tbody>{filtered.map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">
         <div style={{ position: 'relative', display: 'inline-block' }}>
           <button
             type="button"
@@ -2751,13 +2833,20 @@ export function TeacherPoolPage() {
             </div>
           )}
         </div>
-      </td><td data-label="View"><button onClick={() => setViewTeacher(t)} className="secondary small">View</button></td></tr>)}{!filtered.length ? <tr><td colSpan="9">No teachers match filters.</td></tr> : null}</tbody></table></div></article> : null}
+      </td></tr>)}{!filtered.length ? <tr><td colSpan="8">No teachers match filters.</td></tr> : null}</tbody></table></div></article> : null}
 
       {view === 'map' ? <article className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <p className="muted" style={{ fontSize: 13 }}>Availability for <strong>{dayLabels[selectedMapDay]}</strong> (Green = Available, Orange = Demo, Red = Scheduled)</p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
+          <div>
+            <p className="muted" style={{ margin: '0 0 8px 0', fontSize: 13 }}>Availability for <strong>{mapDateLabels[selectedMapDay]}</strong> (Green = Available, Orange = Demo, Red = Scheduled)</p>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <button type="button" className="secondary small" onClick={() => setWeekOffsetMap(prev => prev - 1)}>&lt; Prev Week</button>
+              <button type="button" className={weekOffsetMap === 0 ? "primary small" : "secondary small"} onClick={() => setWeekOffsetMap(0)}>Current Week</button>
+              <button type="button" className="secondary small" onClick={() => setWeekOffsetMap(prev => prev + 1)}>Next Week &gt;</button>
+            </div>
+          </div>
           <div className="day-tabs">
-            {dayLabels.map((d, i) => <button key={d} type="button" className={`day-tab-btn ${selectedMapDay === i ? 'active' : ''}`} onClick={() => setSelectedMapDay(i)}>{d}</button>)}
+            {mapDateLabels.map((lbl, i) => <button key={lbl} type="button" className={`day-tab-btn ${selectedMapDay === i ? 'active' : ''}`} onClick={() => setSelectedMapDay(i)}>{lbl}</button>)}
           </div>
         </div>
         <div style={{ overflowX: 'hidden', width: '100%' }}>
@@ -2788,7 +2877,7 @@ export function TeacherPoolPage() {
               return <tr key={t.id}>
                 <td style={{ width: '150px', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 13, textAlign: 'left', padding: '4px 8px', position: 'sticky', left: 0, background: 'white', zIndex: 9, borderRight: '1px solid #eee', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.users?.full_name}>
                   {t.users?.full_name || t.teacher_code}
-                  <br /><span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>₹{t.per_hour_rate || '?'}/hr</span>
+                  <br /><span className="muted" style={{ fontWeight: 400, fontSize: 11, textTransform: 'capitalize' }}>{t.experience_level || 'N/A'}</span>
                 </td>
                 {hours.map(h => {
                   return [0, 15, 30, 45].map(m => {
@@ -2808,8 +2897,19 @@ export function TeacherPoolPage() {
                     const isDemo = demos.some(d => {
                       if (!d.scheduled_at) return false;
                       const dDate = new Date(d.scheduled_at);
-                      const dDay = dDate.toLocaleDateString('en-US', { weekday: 'long' });
-                      if (dDay !== fullDayLabels[selectedMapDay]) return false;
+
+                      // Match exactly with the selected date tab within the week
+                      if (!weekStartMap) return false;
+                      const parts = weekStartMap.split('-');
+                      const targetDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                      targetDateObj.setDate(targetDateObj.getDate() + selectedMapDay);
+
+                      const fDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                      const targetDateStr = fDate(targetDateObj);
+                      const dDateStr = fDate(dDate);
+
+                      if (dDateStr !== targetDateStr) return false;
+
                       const dStartMins = dDate.getHours() * 60 + dDate.getMinutes();
                       const dEndMins = d.ends_at ? new Date(d.ends_at).getHours() * 60 + new Date(d.ends_at).getMinutes() : dStartMins + 60;
                       return dStartMins <= cellStart && dEndMins > cellStart;
@@ -2817,12 +2917,31 @@ export function TeacherPoolPage() {
 
                     // Check if a regular class is scheduled
                     const isScheduled = (t.assigned_classes || []).some(a => {
-                      if (a.day !== fullDayLabels[selectedMapDay]) return false;
-                      if (!a.time) return false;
-                      const [sh, sm] = a.time.split(':').map(Number);
-                      const startMins = sh * 60 + sm;
-                      const endMins = startMins + 60; // Assuming 1 hour per regular class
-                      return startMins <= cellStart && endMins > cellStart;
+                      if (!a.session_date || !a.started_at) {
+                        return false;
+                      }
+
+                      // Match exactly with the selected date tab within the week
+                      if (!weekStartMap) return false;
+                      const parts = weekStartMap.split('-');
+                      const targetDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+                      targetDateObj.setDate(targetDateObj.getDate() + selectedMapDay);
+
+                      const fDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                      const targetDateStr = fDate(targetDateObj);
+
+                      if (a.session_date !== targetDateStr) return false;
+
+                      const dDate = new Date(a.started_at);
+                      // Use local timezone hours/minutes for the match
+                      const startMins = dDate.getHours() * 60 + dDate.getMinutes();
+
+                      // academic_sessions may have duration_hours
+                      const dur = a.duration_hours ? Number(a.duration_hours) * 60 : 60;
+                      const endMins = startMins + dur;
+
+                      const isMatch = startMins <= cellStart && endMins > cellStart;
+                      return isMatch;
                     });
 
                     const cellClass = isScheduled ? 'avail-cell avail-no' : (isDemo ? 'avail-cell avail-demo' : (isAvail ? 'avail-cell avail-yes' : 'avail-cell'));
@@ -3220,7 +3339,7 @@ function parseSubjects(s) {
 
 /* ─── View Lead Modal (Reused for Teachers) ─── */
 /* ─── View Lead Modal (Reused for Teachers) ─── */
-function ViewTeacherModal({ teacher, onClose }) {
+export function ViewTeacherModal({ teacher, onClose }) {
   const [activeTab, setActiveTab] = useState('details');
   const [isEditing, setIsEditing] = useState(false);
 
