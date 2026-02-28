@@ -142,8 +142,18 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
 
-  const [selectedSession, setSelectedSession] = useState(null); // details modal
-  const [rescheduleData, setRescheduleData] = useState(null); // { id, date, time, duration }
+  const [selectedSession, setSelectedSession] = useState(null);
+  const [rescheduleData, setRescheduleData] = useState(null);
+  const [rescheduleStudentClasses, setRescheduleStudentClasses] = useState([]);
+  const [rescheduleTeacherClasses, setRescheduleTeacherClasses] = useState([]);
+  const [rescheduleTeacherDemos, setRescheduleTeacherDemos] = useState([]);
+  const [rescheduleLoadingSlots, setRescheduleLoadingSlots] = useState(false);
+  const [sessionEditData, setSessionEditData] = useState(null);
+  const [sessionDeleteId, setSessionDeleteId] = useState(null);
+  const [editStudentClasses, setEditStudentClasses] = useState([]);
+  const [editTeacherClasses, setEditTeacherClasses] = useState([]);
+  const [editTeacherDemos, setEditTeacherDemos] = useState([]);
+  const [editLoadingSlots, setEditLoadingSlots] = useState(false);
 
   // Bulk Form State
   const today = new Date().toISOString().slice(0, 10);
@@ -181,6 +191,36 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
 
   useEffect(() => { setSessions(initialSessions); }, [initialSessions]);
   useEffect(() => { loadWeek(); }, [loadWeek]);
+
+  // Fetch student + teacher availability when reschedule date changes
+  useEffect(() => {
+    if (!rescheduleData?.date || !studentId) return;
+    setRescheduleLoadingSlots(true);
+    const fetchStudents = apiFetch(`/students/${studentId}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+      .then(res => setRescheduleStudentClasses(res.classes || []))
+      .catch(() => setRescheduleStudentClasses([]));
+    const fetchTeacher = rescheduleData.teacher_id
+      ? apiFetch(`/teachers/${rescheduleData.teacher_id}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+        .then(res => { setRescheduleTeacherClasses(res.classes || []); setRescheduleTeacherDemos(res.demos || []); })
+        .catch(() => { setRescheduleTeacherClasses([]); setRescheduleTeacherDemos([]); })
+      : Promise.resolve();
+    Promise.all([fetchStudents, fetchTeacher]).finally(() => setRescheduleLoadingSlots(false));
+  }, [rescheduleData?.date, studentId, rescheduleData?.teacher_id]);
+
+  // Fetch availability for edit modal when date or teacher changes
+  useEffect(() => {
+    if (!sessionEditData?.date) return;
+    setEditLoadingSlots(true);
+    const fetchStudent = apiFetch(`/students/${studentId}/availability?start_date=${sessionEditData.date}&end_date=${sessionEditData.date}`)
+      .then(res => setEditStudentClasses(res.classes || []))
+      .catch(() => setEditStudentClasses([]));
+    const fetchTeacher = sessionEditData.teacher_id
+      ? apiFetch(`/teachers/${sessionEditData.teacher_id}/availability?start_date=${sessionEditData.date}&end_date=${sessionEditData.date}`)
+        .then(res => { setEditTeacherClasses(res.classes || []); setEditTeacherDemos(res.demos || []); })
+        .catch(() => { setEditTeacherClasses([]); setEditTeacherDemos([]); })
+      : Promise.resolve();
+    Promise.all([fetchStudent, fetchTeacher]).finally(() => setEditLoadingSlots(false));
+  }, [sessionEditData?.date, sessionEditData?.teacher_id, studentId]);
 
   useEffect(() => {
     if (!fTeacher || !fStart || !fEnd || fStart > fEnd) {
@@ -291,6 +331,60 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
     setFEndTime('');
   }
 
+  // 15-min time slots for reschedule modal
+  const rescheduleTimeSlots = [];
+  for (let h = 6; h <= 22; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 22 && m > 0) break;
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const hr12 = h % 12 || 12;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      rescheduleTimeSlots.push({ value: `${hh}:${mm}`, label: `${hr12}:${mm} ${ampm}` });
+    }
+  }
+
+  function isRescheduleSlotOverlapping(slotValue) {
+    if (!rescheduleData?.duration || Number(rescheduleData.duration) <= 0) return false;
+    const [sH, sM] = slotValue.split(':').map(Number);
+    const newStartMins = sH * 60 + sM;
+    const newEndMins = newStartMins + Number(rescheduleData.duration) * 60;
+
+    // Check student conflicts
+    for (const cls of rescheduleStudentClasses) {
+      if (cls.id === rescheduleData?.id) continue;
+      const clsStart = (cls.started_at || '').slice(0, 5);
+      if (!clsStart) continue;
+      const [cH, cM] = clsStart.split(':').map(Number);
+      const cStartMins = cH * 60 + cM;
+      const cEndMins = cStartMins + Number(cls.duration_hours || 1) * 60;
+      if (newStartMins < cEndMins && newEndMins > cStartMins) return 'student';
+    }
+
+    // Check teacher class conflicts
+    for (const cls of rescheduleTeacherClasses) {
+      if (cls.id === rescheduleData?.id) continue;
+      const clsStart = (cls.started_at || '').slice(0, 5);
+      if (!clsStart) continue;
+      const [cH, cM] = clsStart.split(':').map(Number);
+      const cStartMins = cH * 60 + cM;
+      const cEndMins = cStartMins + Number(cls.duration_hours || 1) * 60;
+      if (newStartMins < cEndMins && newEndMins > cStartMins) return 'teacher';
+    }
+
+    // Check teacher demo conflicts
+    for (const demo of rescheduleTeacherDemos) {
+      if (!demo.scheduled_at) continue;
+      const demoStart = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      const [dH, dM] = demoStart.split(':').map(Number);
+      const dStartMins = dH * 60 + dM;
+      const dEndMins = dStartMins + 60; // assume 1h for demos
+      if (newStartMins < dEndMins && newEndMins > dStartMins) return 'teacher';
+    }
+
+    return false;
+  }
+
   async function handleBulkSubmit(e) {
     e.preventDefault();
     setError(''); setMsg('');
@@ -341,6 +435,75 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
       onClassesChanged();
     } catch (err) { alert(err.message); }
   }
+
+  async function submitSessionEdit(e) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/sessions/${sessionEditData.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          subject: sessionEditData.subject,
+          session_date: sessionEditData.date,
+          started_at: sessionEditData.time,
+          duration_hours: Number(sessionEditData.duration),
+          status: sessionEditData.status,
+          teacher_id: sessionEditData.teacher_id || undefined
+        })
+      });
+      setSessionEditData(null);
+      setSelectedSession(null);
+      onClassesChanged();
+    } catch (e) { setError(e.message); }
+  }
+
+  async function handleSessionDelete(id) {
+    try {
+      await apiFetch(`/sessions/${id}`, { method: 'DELETE' });
+      setSessionDeleteId(null);
+      setSelectedSession(null);
+      onClassesChanged();
+    } catch (e) { setError(e.message); }
+  }
+
+  const editTimeSlots = [];
+  for (let h = 6; h <= 22; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 22 && m > 0) break;
+      editTimeSlots.push({ value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, label: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` });
+    }
+  }
+
+  function isEditSlotOverlapping(slotValue) {
+    if (!sessionEditData?.duration || Number(sessionEditData.duration) <= 0) return false;
+    const [sH, sM] = slotValue.split(':').map(Number);
+    const newStart = sH * 60 + sM;
+    const newEnd = newStart + Number(sessionEditData.duration) * 60;
+    for (const cls of editStudentClasses) {
+      if (cls.id === sessionEditData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM, cEnd = cStart + (cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'student';
+    }
+    for (const cls of editTeacherClasses) {
+      if (cls.id === sessionEditData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM, cEnd = cStart + (cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'teacher';
+    }
+    for (const demo of editTeacherDemos) {
+      if (!demo.scheduled_at) continue;
+      const ds = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      const [dH, dM] = ds.split(':').map(Number);
+      const dStart = dH * 60 + dM, dEnd = dStart + 60;
+      if (newStart < dEnd && newEnd > dStart) return 'teacher';
+    }
+    return false;
+  }
+
 
   const byDay = useMemo(() => {
     const m = {};
@@ -490,11 +653,28 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
                 <button type="button" className="secondary" onClick={() => {
                   setRescheduleData({
                     id: selectedSession.id,
+                    teacher_id: selectedSession.teacher_id,
                     date: selectedSession.session_date,
                     time: selectedSession.started_at ? selectedSession.started_at.slice(11, 16) : '',
                     duration: selectedSession.duration_hours
                   });
                 }}>Reschedule</button>
+              )}
+              {selectedSession.status !== 'completed' && (
+                <button type="button" title="Edit" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}
+                  onClick={() => setSessionEditData({
+                    id: selectedSession.id,
+                    teacher_id: selectedSession.teacher_id || '',
+                    subject: selectedSession.subject || '',
+                    date: selectedSession.session_date || '',
+                    time: selectedSession.started_at ? selectedSession.started_at.slice(11, 16) : '',
+                    duration: selectedSession.duration_hours || 1,
+                    status: selectedSession.status || 'scheduled'
+                  })}>✏️</button>
+              )}
+              {selectedSession.status !== 'completed' && (
+                <button type="button" title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '18px' }}
+                  onClick={() => setSessionDeleteId(selectedSession.id)}>🗑️</button>
               )}
               <button type="button" onClick={() => setSelectedSession(null)}>Close</button>
             </div>
@@ -510,12 +690,35 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
             <form onSubmit={handleRescheduleSave}>
               <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
                 <label>Date
-                  <input type="date" value={rescheduleData.date} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value })} required />
+                  <input type="date" value={rescheduleData.date} min={today} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
                 </label>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <label>Start Time (24h)
-                    <input type="time" value={rescheduleData.time} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required />
+                  <label>Start Time
+                    <select
+                      value={rescheduleData.time}
+                      onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })}
+                      disabled={rescheduleLoadingSlots}
+                      required
+                    >
+                      <option value="">{rescheduleLoadingSlots ? 'Loading...' : 'Select time'}</option>
+                      {rescheduleTimeSlots.map(t => {
+                        const overlapType = isRescheduleSlotOverlapping(t.value);
+                        const nowLocal = new Date();
+                        const todayStr = nowLocal.getFullYear() + '-' + String(nowLocal.getMonth() + 1).padStart(2, '0') + '-' + String(nowLocal.getDate()).padStart(2, '0');
+                        const currentMins = nowLocal.getHours() * 60 + nowLocal.getMinutes();
+                        const [tH, tM] = t.value.split(':').map(Number);
+                        const isPast = rescheduleData.date === todayStr && (tH * 60 + tM) <= currentMins;
+                        const disabled = !!overlapType || isPast;
+                        const suffix = overlapType === 'student' ? ' (Student Booked)' : overlapType === 'teacher' ? ' (Teacher Booked)' : isPast ? ' (Past)' : '';
+                        return (
+                          <option key={t.value} value={t.value} disabled={disabled}>
+                            {t.label}{suffix}
+                          </option>
+                        );
+                      })}
+                    </select>
                   </label>
+
                   <label>Duration (Hours)
                     <input type="number" step="0.25" min="1" value={rescheduleData.duration} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })} required />
                   </label>
@@ -526,6 +729,92 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
                 <button type="submit">Save Changes</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Session Modal (Classes tab) */}
+      {sessionEditData && (() => {
+        const editTeacher = teachers.find(t => t.user_id === sessionEditData.teacher_id);
+        const editSubjects = editTeacher
+          ? (Array.isArray(editTeacher.subjects_taught)
+            ? editTeacher.subjects_taught
+            : (typeof editTeacher.subjects_taught === 'string'
+              ? JSON.parse(editTeacher.subjects_taught || '[]') : []))
+          : [];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+        return (
+          <div className="modal-overlay" onClick={() => setSessionEditData(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Edit Session</h3>
+              <form onSubmit={submitSessionEdit}>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                  <label>Teacher
+                    <select value={sessionEditData.teacher_id} onChange={e => setSessionEditData({ ...sessionEditData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                      <option value="">Select teacher</option>
+                      {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.user_id}</option>)}
+                    </select>
+                  </label>
+                  <label>Subject
+                    <select value={sessionEditData.subject} onChange={e => setSessionEditData({ ...sessionEditData, subject: e.target.value })} required>
+                      <option value="">{sessionEditData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                      {editSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Date
+                      <input type="date" value={sessionEditData.date} onChange={e => setSessionEditData({ ...sessionEditData, date: e.target.value, time: '' })} required />
+                    </label>
+                    <label>Duration (hrs)
+                      <select value={sessionEditData.duration} onChange={e => setSessionEditData({ ...sessionEditData, duration: e.target.value })}>
+                        {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => <option key={h} value={h}>{h}h</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Start Time
+                      <select value={sessionEditData.time} onChange={e => setSessionEditData({ ...sessionEditData, time: e.target.value })} required disabled={editLoadingSlots}>
+                        <option value="">{editLoadingSlots ? 'Checking availability...' : 'Select time'}</option>
+                        {editTimeSlots.map(t => {
+                          const overlap = isEditSlotOverlapping(t.value);
+                          const [tH, tM] = t.value.split(':').map(Number);
+                          const isPast = sessionEditData.date === todayStr && (tH * 60 + tM) <= nowMins;
+                          const disabled = !!overlap || isPast;
+                          const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : isPast ? ' (Past)' : '';
+                          return <option key={t.value} value={t.value} disabled={disabled}>{t.label}{suffix}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Status
+                      <select value={sessionEditData.status} onChange={e => setSessionEditData({ ...sessionEditData, status: e.target.value })}>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={() => setSessionEditData(null)}>Cancel</button>
+                  <button type="submit">Save Changes</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Session Confirmation (Classes tab) */}
+      {sessionDeleteId && (
+        <div className="modal-overlay" onClick={() => setSessionDeleteId(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '360px', textAlign: 'center' }}>
+            <h3>Delete Session?</h3>
+            <p style={{ color: '#6b7280', marginBottom: '20px' }}>This cannot be undone. The session will be permanently removed.</p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button className="secondary" onClick={() => setSessionDeleteId(null)}>Cancel</button>
+              <button style={{ background: '#ef4444', color: '#fff', border: 'none' }} onClick={() => handleSessionDelete(sessionDeleteId)}>Yes, Delete</button>
+            </div>
           </div>
         </div>
       )}
@@ -1049,54 +1338,340 @@ export function StudentsHubPage({ role }) {
 
 /* ═══════ Today Classes ═══════ */
 export function TodayClassesPage() {
-  const [today, setToday] = useState([]);
-  const [filtered, setFiltered] = useState([]);
+  const [sessions, setSessions] = useState([]);
   const [error, setError] = useState('');
   const [fTeacher, setFTeacher] = useState('');
   const [fStudent, setFStudent] = useState('');
+  const [fStatus, setFStatus] = useState('');
+  const [allTeachers, setAllTeachers] = useState([]);
 
-  useEffect(() => { apiFetch('/students/sessions/today').then(d => { setToday(d.items || []); setFiltered(d.items || []) }).catch(e => setError(e.message)); }, []);
+  // Reschedule
+  const [rescheduleData, setRescheduleData] = useState(null);
+  const [rescheduleStudentClasses, setRescheduleStudentClasses] = useState([]);
+  const [rescheduleTeacherClasses, setRescheduleTeacherClasses] = useState([]);
+  const [rescheduleTeacherDemos, setRescheduleTeacherDemos] = useState([]);
+  const [rescheduleLoadingSlots, setRescheduleLoadingSlots] = useState(false);
+  // Edit
+  const [editData, setEditData] = useState(null);
+  const [editStudentClasses, setEditStudentClasses] = useState([]);
+  const [editTeacherClasses, setEditTeacherClasses] = useState([]);
+  const [editTeacherDemos, setEditTeacherDemos] = useState([]);
+  const [editLoadingSlots, setEditLoadingSlots] = useState(false);
+  // Delete
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
+  const load = useCallback(async () => {
+    try {
+      const [d, tRes] = await Promise.all([
+        apiFetch('/students/sessions/today'),
+        apiFetch('/teachers/pool')
+      ]);
+      setSessions(d.items || []);
+      setAllTeachers(tRes.items || []);
+    } catch (e) { setError(e.message); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // Availability for reschedule
   useEffect(() => {
-    let items = today;
-    if (fTeacher) items = items.filter(s => s.teacher_id === fTeacher);
-    if (fStudent) items = items.filter(s => s.student_id === fStudent);
-    setFiltered(items);
-  }, [today, fTeacher, fStudent]);
+    if (!rescheduleData?.date) return;
+    setRescheduleLoadingSlots(true);
+    const fs = rescheduleData.student_id
+      ? apiFetch(`/students/${rescheduleData.student_id}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+        .then(r => setRescheduleStudentClasses(r.classes || [])).catch(() => setRescheduleStudentClasses([]))
+      : Promise.resolve();
+    const ft = rescheduleData.teacher_id
+      ? apiFetch(`/teachers/${rescheduleData.teacher_id}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+        .then(r => { setRescheduleTeacherClasses(r.classes || []); setRescheduleTeacherDemos(r.demos || []); }).catch(() => { setRescheduleTeacherClasses([]); setRescheduleTeacherDemos([]); })
+      : Promise.resolve();
+    Promise.all([fs, ft]).finally(() => setRescheduleLoadingSlots(false));
+  }, [rescheduleData?.date, rescheduleData?.student_id, rescheduleData?.teacher_id]);
 
-  const teacherOpts = useMemo(() => {
-    const m = new Map(); today.forEach(s => { if (s.users?.full_name) m.set(s.teacher_id, s.users.full_name) });
-    return [...m.entries()].map(([value, label]) => ({ value, label }));
-  }, [today]);
+  // Availability for edit
+  useEffect(() => {
+    if (!editData?.date) return;
+    setEditLoadingSlots(true);
+    const fs = editData.student_id
+      ? apiFetch(`/students/${editData.student_id}/availability?start_date=${editData.date}&end_date=${editData.date}`)
+        .then(r => setEditStudentClasses(r.classes || [])).catch(() => setEditStudentClasses([]))
+      : Promise.resolve();
+    const ft = editData.teacher_id
+      ? apiFetch(`/teachers/${editData.teacher_id}/availability?start_date=${editData.date}&end_date=${editData.date}`)
+        .then(r => { setEditTeacherClasses(r.classes || []); setEditTeacherDemos(r.demos || []); }).catch(() => { setEditTeacherClasses([]); setEditTeacherDemos([]); })
+      : Promise.resolve();
+    Promise.all([fs, ft]).finally(() => setEditLoadingSlots(false));
+  }, [editData?.date, editData?.teacher_id, editData?.student_id]);
 
-  const studentOpts = useMemo(() => {
-    const m = new Map(); today.forEach(s => { if (s.students?.student_name) m.set(s.student_id, s.students.student_name) });
-    return [...m.entries()].map(([value, label]) => ({ value, label }));
-  }, [today]);
+  async function submitReschedule(e) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/sessions/${rescheduleData.id}/reschedule`, {
+        method: 'PUT',
+        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration) })
+      });
+      setRescheduleData(null);
+      await load();
+    } catch (e) { setError(e.message); }
+  }
+
+  async function submitEdit(e) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/sessions/${editData.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ subject: editData.subject, session_date: editData.date, started_at: editData.time, duration_hours: Number(editData.duration), status: editData.status, teacher_id: editData.teacher_id || undefined })
+      });
+      setEditData(null);
+      await load();
+    } catch (e) { setError(e.message); }
+  }
+
+  async function handleDelete(id) {
+    try {
+      await apiFetch(`/sessions/${id}`, { method: 'DELETE' });
+      setDeleteConfirmId(null);
+      await load();
+    } catch (e) { setError(e.message); }
+  }
+
+  function checkOverlap(slotValue, duration, studentClasses, teacherClasses, teacherDemos, excludeId) {
+    if (!duration || Number(duration) <= 0) return false;
+    const [sH, sM] = slotValue.split(':').map(Number);
+    const newStart = sH * 60 + sM, newEnd = newStart + Number(duration) * 60;
+    for (const cls of studentClasses) {
+      if (cls.id === excludeId) continue;
+      const t = (cls.started_at || '').slice(0, 5); if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cS = cH * 60 + cM, cE = cS + (cls.duration_hours || 1) * 60;
+      if (newStart < cE && newEnd > cS) return 'student';
+    }
+    for (const cls of teacherClasses) {
+      if (cls.id === excludeId) continue;
+      const t = (cls.started_at || '').slice(0, 5); if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cS = cH * 60 + cM, cE = cS + (cls.duration_hours || 1) * 60;
+      if (newStart < cE && newEnd > cS) return 'teacher';
+    }
+    for (const demo of teacherDemos) {
+      if (!demo.scheduled_at) continue;
+      const ds = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      const [dH, dM] = ds.split(':').map(Number);
+      const dS = dH * 60 + dM, dE = dS + 60;
+      if (newStart < dE && newEnd > dS) return 'teacher';
+    }
+    return false;
+  }
+
+  // 15-min slots
+  const timeSlots = [];
+  for (let h = 6; h <= 22; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 22 && m > 0) break;
+      timeSlots.push({ value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, label: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` });
+    }
+  }
+
+  function formatTime12(timeStr) {
+    if (!timeStr) return '—';
+    if (timeStr.includes('T')) return new Date(timeStr).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+    const [h, m] = timeStr.split(':'); const hr = parseInt(h, 10);
+    return `${hr % 12 || 12}:${m} ${hr >= 12 ? 'PM' : 'AM'}`;
+  }
+
+  const teacherOpts = useMemo(() => { const map = new Map(); sessions.forEach(s => { if (s.users?.full_name) map.set(s.teacher_id, s.users.full_name); }); return [...map.entries()].map(([v, l]) => ({ value: v, label: l })); }, [sessions]);
+  const studentOpts = useMemo(() => { const map = new Map(); sessions.forEach(s => { if (s.students?.student_name) map.set(s.student_id, s.students.student_name); }); return [...map.entries()].map(([v, l]) => ({ value: v, label: l })); }, [sessions]);
+  const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+  const filtered = useMemo(() => sessions.filter(s =>
+    (!fTeacher || s.teacher_id === fTeacher) &&
+    (!fStudent || s.student_id === fStudent) &&
+    (!fStatus || s.status === fStatus)
+  ), [sessions, fTeacher, fStudent, fStatus]);
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
 
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
       <article className="card">
-        <div className="filter-bar">
+        <div className="filter-bar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', alignItems: 'end' }}>
           <SearchSelect label="Teacher" value={fTeacher} onChange={setFTeacher} options={teacherOpts} placeholder="All Teachers" />
           <SearchSelect label="Student" value={fStudent} onChange={setFStudent} options={studentOpts} placeholder="All Students" />
+          <SearchSelect label="Status" value={fStatus} onChange={setFStatus} options={[
+            { value: 'scheduled', label: 'Scheduled' },
+            { value: 'completed', label: 'Completed' },
+            { value: 'cancelled', label: 'Cancelled' }
+          ]} placeholder="All Status" />
         </div>
-        <div className="table-wrap mobile-friendly-table">
-          <table><thead><tr><th>Time</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th></tr></thead>
-            <tbody>{filtered.map(s => <tr key={s.id}>
-              <td data-label="Time">{s.started_at ? new Date(s.started_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' }) : '—'}</td>
-              <td data-label="Student">{s.students?.student_name || s.student_id}</td>
-              <td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td>
-              <td data-label="Subject">{s.subject || '—'}</td>
-              <td data-label="Hrs">{s.duration_hours}h</td>
-              <td data-label="Status"><span className={`status-tag ${s.status === 'completed' ? 'success' : ''}`}>{s.status}</span></td>
-            </tr>)}{!filtered.length ? <tr><td colSpan="6">No classes match filters.</td></tr> : null}</tbody></table>
+        <div className="table-wrap mobile-friendly-table" style={{ marginTop: '16px' }}>
+          <table>
+            <thead><tr>
+              <th>Time</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th><th>Actions</th>
+            </tr></thead>
+            <tbody>
+              {filtered.map(s => {
+                const isUpcoming = s.status === 'scheduled';
+                return (
+                  <tr key={s.id}>
+                    <td data-label="Time">{formatTime12(s.started_at)}</td>
+                    <td data-label="Student">{s.students?.student_name || s.student_id}</td>
+                    <td data-label="Teacher">{s.users?.full_name || s.teacher_id}</td>
+                    <td data-label="Subject">{s.subject || '—'}</td>
+                    <td data-label="Hrs">{s.duration_hours}h</td>
+                    <td data-label="Status">
+                      <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
+                    </td>
+                    <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
+                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({
+                        id: s.id, student_id: s.student_id || '', teacher_id: s.teacher_id || '',
+                        date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1
+                      })}>Reschedule</button>}
+                      {s.status !== 'completed' && (
+                        <button type="button" title="Edit" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
+                          onClick={() => setEditData({ id: s.id, teacher_id: s.teacher_id || '', student_id: s.student_id || '', subject: s.subject || '', date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1, status: s.status || 'scheduled' })}>✏️</button>
+                      )}
+                      {s.status !== 'completed' && (
+                        <button type="button" title="Delete" style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
+                          onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filtered.length ? <tr><td colSpan="9">No classes match filters.</td></tr> : null}
+            </tbody>
+          </table>
         </div>
       </article>
+
+      {/* Reschedule Modal */}
+      {rescheduleData && (() => (
+        <div className="modal-overlay" onClick={() => setRescheduleData(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+            <h3>Reschedule Session</h3>
+            <form onSubmit={submitReschedule}>
+              <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                <label>Date
+                  <input type="date" value={rescheduleData.date} min={todayStr}
+                    onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <label>Start Time
+                    <select value={rescheduleData.time} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required disabled={rescheduleLoadingSlots}>
+                      <option value="">{rescheduleLoadingSlots ? 'Checking...' : 'Select time'}</option>
+                      {timeSlots.map(t => {
+                        const overlap = checkOverlap(t.value, rescheduleData.duration, rescheduleStudentClasses, rescheduleTeacherClasses, rescheduleTeacherDemos, rescheduleData.id);
+                        const [tH, tM] = t.value.split(':').map(Number);
+                        const isPast = rescheduleData.date === todayStr && (tH * 60 + tM) <= nowMins;
+                        const disabled = !!overlap || isPast;
+                        const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : isPast ? ' (Past)' : '';
+                        return <option key={t.value} value={t.value} disabled={disabled}>{t.label}{suffix}</option>;
+                      })}
+                    </select>
+                  </label>
+                  <label>Duration (hrs)
+                    <select value={rescheduleData.duration} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })}>
+                      {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => <option key={h} value={h}>{h}h</option>)}
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button type="button" className="secondary" onClick={() => setRescheduleData(null)}>Cancel</button>
+                <button type="submit">Save Changes</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ))()}
+
+      {/* Edit Modal */}
+      {editData && (() => {
+        const editTeacher = allTeachers.find(t => t.user_id === editData.teacher_id);
+        const editSubjects = editTeacher
+          ? (Array.isArray(editTeacher.subjects_taught) ? editTeacher.subjects_taught
+            : (typeof editTeacher.subjects_taught === 'string' ? JSON.parse(editTeacher.subjects_taught || '[]') : []))
+          : [];
+        return (
+          <div className="modal-overlay" onClick={() => setEditData(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Edit Session</h3>
+              <form onSubmit={submitEdit}>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                  <label>Teacher
+                    <select value={editData.teacher_id} onChange={e => setEditData({ ...editData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                      <option value="">Select teacher</option>
+                      {allTeachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.user_id}</option>)}
+                    </select>
+                  </label>
+                  <label>Subject
+                    <select value={editData.subject} onChange={e => setEditData({ ...editData, subject: e.target.value })} required>
+                      <option value="">{editData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                      {editSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Date
+                      <input type="date" value={editData.date} onChange={e => setEditData({ ...editData, date: e.target.value, time: '' })} required />
+                    </label>
+                    <label>Duration (hrs)
+                      <select value={editData.duration} onChange={e => setEditData({ ...editData, duration: e.target.value })}>
+                        {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => <option key={h} value={h}>{h}h</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Start Time
+                      <select value={editData.time} onChange={e => setEditData({ ...editData, time: e.target.value })} required disabled={editLoadingSlots}>
+                        <option value="">{editLoadingSlots ? 'Checking...' : 'Select time'}</option>
+                        {timeSlots.map(t => {
+                          const overlap = checkOverlap(t.value, editData.duration, editStudentClasses, editTeacherClasses, editTeacherDemos, editData.id);
+                          const [tH, tM] = t.value.split(':').map(Number);
+                          const isPast = editData.date === todayStr && (tH * 60 + tM) <= nowMins;
+                          const disabled = !!overlap || isPast;
+                          const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : isPast ? ' (Past)' : '';
+                          return <option key={t.value} value={t.value} disabled={disabled}>{t.label}{suffix}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Status
+                      <select value={editData.status} onChange={e => setEditData({ ...editData, status: e.target.value })}>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={() => setEditData(null)}>Cancel</button>
+                  <button type="submit">Save Changes</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Confirmation */}
+      {deleteConfirmId && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirmId(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '360px', textAlign: 'center' }}>
+            <h3>Delete Session?</h3>
+            <p style={{ color: '#6b7280', marginBottom: '20px' }}>This cannot be undone. The session will be permanently removed.</p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button className="secondary" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
+              <button style={{ background: '#ef4444', color: '#fff', border: 'none' }} onClick={() => handleDelete(deleteConfirmId)}>Yes, Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
+
 
 /* ═══════ Weekly Calendar ═══════ */
 export function WeeklyCalendarPage() {
@@ -1156,6 +1731,18 @@ export function SessionsManagePage() {
 
   // Reschedule Modal
   const [rescheduleData, setRescheduleData] = useState(null);
+  const [rescheduleStudentClasses, setRescheduleStudentClasses] = useState([]);
+  const [rescheduleTeacherClasses, setRescheduleTeacherClasses] = useState([]);
+  const [rescheduleTeacherDemos, setRescheduleTeacherDemos] = useState([]);
+  const [rescheduleLoadingSlots, setRescheduleLoadingSlots] = useState(false);
+  // Edit Modal
+  const [editData, setEditData] = useState(null);
+  const [editStudentClasses, setEditStudentClasses] = useState([]);
+  const [editTeacherClasses, setEditTeacherClasses] = useState([]);
+  const [editTeacherDemos, setEditTeacherDemos] = useState([]);
+  const [editLoadingSlots, setEditLoadingSlots] = useState(false);
+  // Delete confirmation
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   // Master lists
   const [allTeachers, setAllTeachers] = useState([]);
@@ -1206,16 +1793,155 @@ export function SessionsManagePage() {
   useEffect(() => { loadMasterData(); }, [loadMasterData]);
   useEffect(() => { loadAllSessions(); }, [loadAllSessions]);
 
+  // Fetch availability when reschedule date/student/teacher changes
+  useEffect(() => {
+    if (!rescheduleData?.date) return;
+    setRescheduleLoadingSlots(true);
+    const fetchStudent = rescheduleData.student_id
+      ? apiFetch(`/students/${rescheduleData.student_id}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+        .then(res => setRescheduleStudentClasses(res.classes || []))
+        .catch(() => setRescheduleStudentClasses([]))
+      : Promise.resolve();
+    const fetchTeacher = rescheduleData.teacher_id
+      ? apiFetch(`/teachers/${rescheduleData.teacher_id}/availability?start_date=${rescheduleData.date}&end_date=${rescheduleData.date}`)
+        .then(res => { setRescheduleTeacherClasses(res.classes || []); setRescheduleTeacherDemos(res.demos || []); })
+        .catch(() => { setRescheduleTeacherClasses([]); setRescheduleTeacherDemos([]); })
+      : Promise.resolve();
+    Promise.all([fetchStudent, fetchTeacher]).finally(() => setRescheduleLoadingSlots(false));
+  }, [rescheduleData?.date, rescheduleData?.student_id, rescheduleData?.teacher_id]);
+
+  // Fetch availability when edit date or teacher changes
+  useEffect(() => {
+    if (!editData?.date || (!editData?.teacher_id && !editData?.student_id)) return;
+    setEditLoadingSlots(true);
+    const fetchTeacher = editData.teacher_id
+      ? apiFetch(`/teachers/${editData.teacher_id}/availability?start_date=${editData.date}&end_date=${editData.date}`)
+        .then(res => { setEditTeacherClasses(res.classes || []); setEditTeacherDemos(res.demos || []); })
+        .catch(() => { setEditTeacherClasses([]); setEditTeacherDemos([]); })
+      : Promise.resolve();
+    const fetchStudent = editData.student_id
+      ? apiFetch(`/students/${editData.student_id}/availability?start_date=${editData.date}&end_date=${editData.date}`)
+        .then(res => setEditStudentClasses(res.classes || []))
+        .catch(() => setEditStudentClasses([]))
+      : Promise.resolve();
+    Promise.all([fetchTeacher, fetchStudent]).finally(() => setEditLoadingSlots(false));
+  }, [editData?.date, editData?.teacher_id, editData?.student_id]);
+
   async function submitReschedule(e) {
     e.preventDefault();
     try {
       await apiFetch(`/sessions/${rescheduleData.id}/reschedule`, {
         method: 'PUT',
-        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: rescheduleData.duration })
+        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration) })
       });
       setRescheduleData(null);
       await loadAllSessions();
     } catch (e) { setError(e.message); }
+  }
+
+  function isRescheduleSlotOverlapping(slotValue) {
+    if (!rescheduleData?.duration || Number(rescheduleData.duration) <= 0) return false;
+    const [sH, sM] = slotValue.split(':').map(Number);
+    const newStart = sH * 60 + sM;
+    const newEnd = newStart + Number(rescheduleData.duration) * 60;
+    for (const cls of rescheduleStudentClasses) {
+      if (cls.id === rescheduleData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM, cEnd = cStart + (cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'student';
+    }
+    for (const cls of rescheduleTeacherClasses) {
+      if (cls.id === rescheduleData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM, cEnd = cStart + (cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'teacher';
+    }
+    for (const demo of rescheduleTeacherDemos) {
+      if (!demo.scheduled_at) continue;
+      const ds = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      const [dH, dM] = ds.split(':').map(Number);
+      const dStart = dH * 60 + dM, dEnd = dStart + 60;
+      if (newStart < dEnd && newEnd > dStart) return 'teacher';
+    }
+    return false;
+  }
+
+  async function submitEdit(e) {
+    e.preventDefault();
+    try {
+      await apiFetch(`/sessions/${editData.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          subject: editData.subject,
+          session_date: editData.date,
+          started_at: editData.time,
+          duration_hours: Number(editData.duration),
+          status: editData.status,
+          teacher_id: editData.teacher_id || undefined
+        })
+      });
+      setEditData(null);
+      await loadAllSessions();
+    } catch (e) { setError(e.message); }
+  }
+
+  function isEditSlotOverlapping(slotValue) {
+    if (!editData?.duration || Number(editData.duration) <= 0) return false;
+    const [sH, sM] = slotValue.split(':').map(Number);
+    const newStart = sH * 60 + sM;
+    const newEnd = newStart + Number(editData.duration) * 60;
+    for (const cls of editStudentClasses) {
+      if (cls.id === editData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM;
+      const cEnd = cStart + Number(cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'student';
+    }
+    for (const cls of editTeacherClasses) {
+      if (cls.id === editData.id) continue;
+      const t = (cls.started_at || '').slice(0, 5);
+      if (!t) continue;
+      const [cH, cM] = t.split(':').map(Number);
+      const cStart = cH * 60 + cM;
+      const cEnd = cStart + Number(cls.duration_hours || 1) * 60;
+      if (newStart < cEnd && newEnd > cStart) return 'teacher';
+    }
+    for (const demo of editTeacherDemos) {
+      if (!demo.scheduled_at) continue;
+      const ds = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+      const [dH, dM] = ds.split(':').map(Number);
+      const dStart = dH * 60 + dM;
+      const dEnd = dStart + 60;
+      if (newStart < dEnd && newEnd > dStart) return 'teacher';
+    }
+    return false;
+  }
+
+  async function handleDelete(id) {
+    try {
+      await apiFetch(`/sessions/${id}`, { method: 'DELETE' });
+      setDeleteConfirmId(null);
+      await loadAllSessions();
+    } catch (e) { setError(e.message); }
+  }
+
+  // 15-min time slots
+  const timeSlots = [];
+  for (let h = 6; h <= 22; h++) {
+    for (let m = 0; m < 60; m += 15) {
+      if (h === 22 && m > 0) break;
+      const hh = String(h).padStart(2, '0');
+      const mm = String(m).padStart(2, '0');
+      const hr12 = h % 12 || 12;
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      timeSlots.push({ value: `${hh}:${mm}`, label: `${hr12}:${mm} ${ampm}` });
+    }
   }
 
   function formatTime12(timeStr) {
@@ -1292,8 +2018,36 @@ export function SessionsManagePage() {
                       <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
                       {s.status === 'completed' && <span className={`status-tag small ${s.verification_status === 'approved' ? 'success' : 'muted'}`} style={{ marginLeft: 4 }}>{s.verification_status}</span>}
                     </td>
-                    <td className="actions" data-label="Actions">
-                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({ id: s.id, date: s.session_date, time: s.started_at, duration: s.duration_hours })}>Reschedule</button>}
+                    <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
+                      {isUpcoming && <button type="button" className="small secondary" onClick={() => setRescheduleData({
+                        id: s.id,
+                        student_id: s.student_id || '',
+                        teacher_id: s.teacher_id || '',
+                        date: s.session_date || '',
+                        time: s.started_at ? s.started_at.slice(11, 16) : '',
+                        duration: s.duration_hours || 1
+                      })}>Reschedule</button>}
+                      {s.status !== 'completed' && (
+                        <button
+                          type="button" title="Edit session"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
+                          onClick={() => setEditData({
+                            id: s.id,
+                            teacher_id: s.teacher_id || '',
+                            student_id: s.student_id || '',
+                            subject: s.subject || '',
+                            date: s.session_date || '',
+                            time: s.started_at ? s.started_at.slice(11, 16) : '',
+                            duration: s.duration_hours || 1,
+                            status: s.status || 'scheduled'
+                          })}>✏️</button>
+                      )}
+                      {s.status !== 'completed' && (
+                        <button
+                          type="button" title="Delete session"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '2px 5px' }}
+                          onClick={() => setDeleteConfirmId(s.id)}>🗑️</button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -1304,25 +2058,137 @@ export function SessionsManagePage() {
         </div>
       </article>
 
-      {rescheduleData && (
-        <div className="modal-overlay">
-          <div className="modal card" style={{ maxWidth: '400px' }}>
-            <h3>Reschedule Session</h3>
-            <form className="form-grid" onSubmit={submitReschedule}>
-              <label>Date
-                <input type="date" value={rescheduleData.date} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value })} required />
-              </label>
-              <label>Start Time (24h)
-                <input type="time" value={rescheduleData.time || ''} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required />
-              </label>
-              <label>Duration (Hours)
-                <input type="number" step="0.25" min="1" value={rescheduleData.duration || ''} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })} required />
-              </label>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px', gridColumn: '1 / -1' }}>
-                <button type="button" className="secondary" onClick={() => setRescheduleData(null)}>Cancel</button>
-                <button type="submit">Save Changes</button>
-              </div>
-            </form>
+      {rescheduleData && (() => {
+        const todayStr = new Date().toISOString().split('T')[0];
+        const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+        return (
+          <div className="modal-overlay" onClick={() => setRescheduleData(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '420px' }}>
+              <h3>Reschedule Session</h3>
+              <form onSubmit={submitReschedule}>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                  <label>Date
+                    <input type="date" value={rescheduleData.date} min={todayStr}
+                      onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
+                  </label>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Start Time
+                      <select value={rescheduleData.time} onChange={e => setRescheduleData({ ...rescheduleData, time: e.target.value })} required disabled={rescheduleLoadingSlots}>
+                        <option value="">{rescheduleLoadingSlots ? 'Checking...' : 'Select time'}</option>
+                        {timeSlots.map(t => {
+                          const overlap = isRescheduleSlotOverlapping(t.value);
+                          const [tH, tM] = t.value.split(':').map(Number);
+                          const isPast = rescheduleData.date === todayStr && (tH * 60 + tM) <= nowMins;
+                          const disabled = !!overlap || isPast;
+                          const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : isPast ? ' (Past)' : '';
+                          return <option key={t.value} value={t.value} disabled={disabled}>{t.label}{suffix}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Duration (hrs)
+                      <select value={rescheduleData.duration} onChange={e => setRescheduleData({ ...rescheduleData, duration: e.target.value })}>
+                        {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => <option key={h} value={h}>{h}h</option>)}
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={() => setRescheduleData(null)}>Cancel</button>
+                  <button type="submit">Save Changes</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Edit Session Modal */}
+      {editData && (() => {
+        const editTeacher = allTeachers.find(t => t.user_id === editData.teacher_id);
+        const editSubjects = editTeacher
+          ? (Array.isArray(editTeacher.subjects_taught)
+            ? editTeacher.subjects_taught
+            : (typeof editTeacher.subjects_taught === 'string'
+              ? JSON.parse(editTeacher.subjects_taught || '[]')
+              : []))
+          : [];
+        const todayStr = new Date().toISOString().split('T')[0];
+        const nowMins = new Date().getHours() * 60 + new Date().getMinutes();
+        return (
+          <div className="modal-overlay" onClick={() => setEditData(null)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '500px' }}>
+              <h3>Edit Session</h3>
+              <form onSubmit={submitEdit}>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                  {/* Teacher */}
+                  <label>Teacher
+                    <select value={editData.teacher_id} onChange={e => setEditData({ ...editData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                      <option value="">Select teacher</option>
+                      {allTeachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.user_id}</option>)}
+                    </select>
+                  </label>
+                  {/* Subject */}
+                  <label>Subject
+                    <select value={editData.subject} onChange={e => setEditData({ ...editData, subject: e.target.value })} required>
+                      <option value="">{editData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                      {editSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </label>
+                  {/* Date & Duration */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Date
+                      <input type="date" value={editData.date} onChange={e => setEditData({ ...editData, date: e.target.value, time: '' })} required />
+                    </label>
+                    <label>Duration (hrs)
+                      <select value={editData.duration} onChange={e => setEditData({ ...editData, duration: e.target.value })}>
+                        {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => <option key={h} value={h}>{h}h</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  {/* Time (availability-gated) & Status */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Start Time
+                      <select value={editData.time} onChange={e => setEditData({ ...editData, time: e.target.value })} required disabled={editLoadingSlots}>
+                        <option value="">{editLoadingSlots ? 'Checking availability...' : 'Select time'}</option>
+                        {timeSlots.map(t => {
+                          const overlap = isEditSlotOverlapping(t.value);
+                          const [tH, tM] = t.value.split(':').map(Number);
+                          const isPast = editData.date === todayStr && (tH * 60 + tM) <= nowMins;
+                          const disabled = !!overlap || isPast;
+                          const suffix = overlap === 'student' ? ' (Student Busy)' : overlap === 'teacher' ? ' (Teacher Busy)' : isPast ? ' (Past)' : '';
+                          return <option key={t.value} value={t.value} disabled={disabled}>{t.label}{suffix}</option>;
+                        })}
+                      </select>
+                    </label>
+                    <label>Status
+                      <select value={editData.status} onChange={e => setEditData({ ...editData, status: e.target.value })}>
+                        <option value="scheduled">Scheduled</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={() => setEditData(null)}>Cancel</button>
+                  <button type="submit">Save Changes</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="modal-overlay" onClick={() => setDeleteConfirmId(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '360px', textAlign: 'center' }}>
+            <h3>Delete Session?</h3>
+            <p style={{ color: '#6b7280', marginBottom: '20px' }}>This action cannot be undone. The session will be permanently removed.</p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button className="secondary" onClick={() => setDeleteConfirmId(null)}>Cancel</button>
+              <button style={{ background: '#ef4444', color: '#fff', border: 'none' }} onClick={() => handleDelete(deleteConfirmId)}>Yes, Delete</button>
+            </div>
           </div>
         </div>
       )}

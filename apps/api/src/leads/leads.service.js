@@ -134,7 +134,7 @@ export class LeadsService {
 
     const { data, error } = await adminClient
       .from('leads')
-      .select('*, teacher_profiles(id, teacher_code, users(id, full_name, email))')
+      .select('*, teacher_profiles(id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email))')
       .eq('id', id)
       .is('deleted_at', null)
       .maybeSingle();
@@ -162,25 +162,25 @@ export class LeadsService {
       .order('name', { ascending: true });
 
     if (error) {
-       // fallback if new table is not there yet
-       const { data: raw, error: rawError } = await adminClient
+      // fallback if new table is not there yet
+      const { data: raw, error: rawError } = await adminClient
         .from('leads')
         .select('lead_type')
         .neq('lead_type', null)
         .is('deleted_at', null);
-       
-       if (rawError) throw new Error(rawError.message);
-       const unique = new Set((raw || []).map(r => r.lead_type).filter(Boolean));
-       return Array.from(unique);
+
+      if (rawError) throw new Error(rawError.message);
+      const unique = new Set((raw || []).map(r => r.lead_type).filter(Boolean));
+      return Array.from(unique);
     }
-    
+
     return (data || []).map(r => r.name);
   }
 
   async addType(name, actor) {
     const adminClient = getSupabaseAdminClient();
     if (!name) return { error: 'name is required' };
-    
+
     if (!adminClient) {
       return { ok: true, name };
     }
@@ -809,47 +809,47 @@ export class LeadsService {
       if (updateError) throw new Error(updateError.message);
       student = updated;
     } else {
-    // Generate student code: e.g. FB02601397
-    const MONTH_CODES = ['JA','FB','MR','AP','MY','JN','JL','AG','SP','OC','NV','DC'];
-    const now = new Date();
-    const monthCode = MONTH_CODES[now.getMonth()];
-    const yearCode = String(now.getFullYear()).slice(-2);
+      // Generate student code: e.g. FB02601397
+      const MONTH_CODES = ['JA', 'FB', 'MR', 'AP', 'MY', 'JN', 'JL', 'AG', 'SP', 'OC', 'NV', 'DC'];
+      const now = new Date();
+      const monthCode = MONTH_CODES[now.getMonth()];
+      const yearCode = String(now.getFullYear()).slice(-2);
 
-    // Get the current max sequential number
-    const { count: totalStudents } = await adminClient
-      .from('students')
-      .select('*', { count: 'exact', head: true });
-    const seq = (totalStudents || 0) + 1;
-    const studentCode = `${monthCode}0${yearCode}0${seq}`;
+      // Get the current max sequential number
+      const { count: totalStudents } = await adminClient
+        .from('students')
+        .select('*', { count: 'exact', head: true });
+      const seq = (totalStudents || 0) + 1;
+      const studentCode = `${monthCode}0${yearCode}0${seq}`;
 
-    // Create new student record from lead data
-    const { data: created, error: createError } = await adminClient
-      .from('students')
-      .insert({
-        lead_id: leadId,
-        academic_coordinator_id: acUserId,
-        counselor_id: lead.counselor_id || null,
-        student_name: lead.student_name,
-        student_code: studentCode,
-        parent_name: lead.parent_name || null,
-        country_code: lead.country_code || null,
-        contact_number: lead.contact_number || null,
-        class_level: lead.class_level || null,
-        subject: lead.subject || null,
-        package_name: lead.package_name || null,
-        source: lead.source || null,
-        status: 'active',
-        joined_at: nowIso(),
-        total_hours: 0,
-        remaining_hours: 0,
-        created_at: nowIso(),
-        updated_at: nowIso()
-      })
-      .select('*')
-      .single();
-    if (createError) throw new Error(createError.message);
-    student = created;
-  }
+      // Create new student record from lead data
+      const { data: created, error: createError } = await adminClient
+        .from('students')
+        .insert({
+          lead_id: leadId,
+          academic_coordinator_id: acUserId,
+          counselor_id: lead.counselor_id || null,
+          student_name: lead.student_name,
+          student_code: studentCode,
+          parent_name: lead.parent_name || null,
+          country_code: lead.country_code || null,
+          contact_number: lead.contact_number || null,
+          class_level: lead.class_level || null,
+          subject: lead.subject || null,
+          package_name: lead.package_name || null,
+          source: lead.source || null,
+          status: 'active',
+          joined_at: nowIso(),
+          total_hours: 0,
+          remaining_hours: 0,
+          created_at: nowIso(),
+          updated_at: nowIso()
+        })
+        .select('*')
+        .single();
+      if (createError) throw new Error(createError.message);
+      student = created;
+    }
 
     // Log in lead timeline
     await adminClient.from('lead_status_history').insert({

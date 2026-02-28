@@ -55,7 +55,7 @@ export async function handleTeachers(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/teachers/pool') {
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
         .eq('is_in_pool', true)
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
@@ -129,7 +129,7 @@ export async function handleTeachers(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
         .eq('user_id', actor.userId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -253,7 +253,7 @@ export async function handleTeachers(req, res, url) {
       const teacherId = parts[1];
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
         .eq('id', teacherId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -324,7 +324,7 @@ export async function handleTeachers(req, res, url) {
         // Return updated profile
         const { data: updatedProfile, error: fetchError } = await adminClient
           .from('teacher_profiles')
-          .select('*, users(id,email,full_name)')
+          .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name)')
           .eq('id', teacherId)
           .single();
 
@@ -394,7 +394,7 @@ export async function handleTeachers(req, res, url) {
 
       const { data: profileWithRel, error: relError } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name)')
         .eq('id', teacherProfile.id)
         .single();
       if (relError) throw new Error(relError.message);
@@ -454,7 +454,7 @@ export async function handleTeachers(req, res, url) {
       // Return updated profile
       const { data: updated, error: fetchErr } = await adminClient
         .from('teacher_profiles')
-        .select('*, users(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
         .eq('id', profile.id)
         .single();
       if (fetchErr) throw new Error(fetchErr.message);
