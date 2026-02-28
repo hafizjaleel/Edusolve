@@ -394,42 +394,59 @@ function RescheduleModal({ session, onClose, onDone }) {
     const [newDuration, setNewDuration] = useState(session.duration_hours || '');
     const [err, setErr] = useState('');
     const [studentClasses, setStudentClasses] = useState([]);
+    const [teacherClasses, setTeacherClasses] = useState([]);
+    const [teacherDemos, setTeacherDemos] = useState([]);
     const [loadingSlots, setLoadingSlots] = useState(false);
 
-    // Fetch student's existing sessions for the selected date
+    // Fetch student + teacher availability for the selected date
     useEffect(() => {
         if (!newDate || !session.student_id) return;
         setLoadingSlots(true);
-        apiFetch(`/students/${session.student_id}/availability?start_date=${newDate}&end_date=${newDate}`)
+        const fetchStudent = apiFetch(`/students/${session.student_id}/availability?start_date=${newDate}&end_date=${newDate}`)
             .then(res => setStudentClasses(res.classes || []))
-            .catch(() => setStudentClasses([]))
-            .finally(() => setLoadingSlots(false));
-    }, [newDate, session.student_id]);
+            .catch(() => setStudentClasses([]));
+        const fetchTeacher = session.teacher_id
+            ? apiFetch(`/teachers/${session.teacher_id}/availability?start_date=${newDate}&end_date=${newDate}`)
+                .then(res => { setTeacherClasses(res.classes || []); setTeacherDemos(res.demos || []); })
+                .catch(() => { setTeacherClasses([]); setTeacherDemos([]); })
+            : Promise.resolve();
+        Promise.all([fetchStudent, fetchTeacher]).finally(() => setLoadingSlots(false));
+    }, [newDate, session.student_id, session.teacher_id]);
 
-    // Check if a time slot overlaps with any of the student's existing classes
+    // Check if a time slot overlaps with student or teacher schedule
     const isSlotOverlapping = (slotValue) => {
-        // slotValue is "HH:mm"
         if (!newDuration || newDuration <= 0) return false;
-
         const [slotH, slotM] = slotValue.split(':').map(Number);
-        // Start time in minutes from midnight
         const newStartMins = (slotH * 60) + slotM;
-        // End time in minutes from midnight
         const newEndMins = newStartMins + (Number(newDuration) * 60);
 
         for (const cls of studentClasses) {
-            // Ignore the very session we are trying to reschedule!
             if (cls.id === session.id) continue;
-
             const [clsH, clsM] = extractTime(cls.started_at).split(':').map(Number);
             const clsStartMins = (clsH * 60) + clsM;
             const clsEndMins = clsStartMins + (Number(cls.duration_hours || 1) * 60);
-
-            // Overlap logic: (StartA < EndB) and (EndA > StartB)
-            if (newStartMins < clsEndMins && newEndMins > clsStartMins) {
-                return true;
-            }
+            if (newStartMins < clsEndMins && newEndMins > clsStartMins) return 'student';
         }
+
+        for (const cls of teacherClasses) {
+            if (cls.id === session.id) continue;
+            const tStart = extractTime(cls.started_at);
+            if (!tStart) continue;
+            const [tH, tM] = tStart.split(':').map(Number);
+            const tStartMins = tH * 60 + tM;
+            const tEndMins = tStartMins + (Number(cls.duration_hours || 1) * 60);
+            if (newStartMins < tEndMins && newEndMins > tStartMins) return 'teacher';
+        }
+
+        for (const demo of teacherDemos) {
+            if (!demo.scheduled_at) continue;
+            const demoStart = new Date(demo.scheduled_at).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+            const [dH, dM] = demoStart.split(':').map(Number);
+            const dStartMins = dH * 60 + dM;
+            const dEndMins = dStartMins + 60;
+            if (newStartMins < dEndMins && newEndMins > dStartMins) return 'teacher';
+        }
+
         return false;
     };
 
@@ -498,10 +515,11 @@ function RescheduleModal({ session, onClose, onDone }) {
                                     }
                                 }
 
-                                const disabled = !isOriginalSessionWindow && (overlap || isPast);
+                                const disabled = !isOriginalSessionWindow && (!!overlap || isPast);
+                                const overlapLabel = overlap === 'student' ? '(Student Booked)' : overlap === 'teacher' ? '(Teacher Booked)' : '';
                                 return (
                                     <option key={t.value} value={t.value} disabled={disabled}>
-                                        {t.label} {overlap && !isOriginalSessionWindow ? '(Unavailable: Student Booked)' : isPast && !isOriginalSessionWindow ? '(Past time)' : ''}
+                                        {t.label} {!isOriginalSessionWindow && (overlapLabel || (isPast ? '(Past time)' : ''))}
                                     </option>
                                 );
                             })}

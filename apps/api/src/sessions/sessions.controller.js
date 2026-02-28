@@ -332,7 +332,56 @@ export async function handleSessions(req, res, url) {
       return true;
     }
 
+
+    // ── Edit session (AC / super_admin) ──
+    if (req.method === 'PATCH' && parts.length === 2 && parts[0] === 'sessions') {
+      if (!['academic_coordinator', 'super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'Not allowed to edit sessions' });
+        return true;
+      }
+      const sessionId = parts[1];
+      const payload = await readJson(req);
+      const allowed = ['subject', 'session_date', 'started_at', 'duration_hours', 'status', 'teacher_id'];
+      const patch = {};
+      for (const key of allowed) {
+        if (payload[key] !== undefined) patch[key] = payload[key];
+      }
+      if (patch.session_date && patch.started_at && !patch.started_at.includes('T')) {
+        patch.started_at = `${patch.session_date}T${patch.started_at}:00+05:30`;
+      }
+      patch.updated_at = nowIso();
+
+      const { data, error } = await adminClient
+        .from('academic_sessions')
+        .update(patch)
+        .eq('id', sessionId)
+        .select('*')
+        .single();
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, session: data });
+      return true;
+    }
+
+    // ── Delete session (AC / super_admin) ──
+    if (req.method === 'DELETE' && parts.length === 2 && parts[0] === 'sessions') {
+      if (!['academic_coordinator', 'super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'Not allowed to delete sessions' });
+        return true;
+      }
+      const sessionId = parts[1];
+      const { error } = await adminClient
+        .from('academic_sessions')
+        .delete()
+        .eq('id', sessionId);
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+
     sendJson(res, 404, { ok: false, error: 'route not found' });
+
     return true;
   } catch (error) {
     sendJson(res, 500, { ok: false, error: error.message || 'internal server error' });
