@@ -337,6 +337,7 @@ export async function handleTeacherLeads(req, res, url) {
                 gpay_holder_name: lead.gpay_holder_name || null,
                 gpay_number: lead.gpay_number || null,
                 upi_id: lead.upi_id || null,
+                teacher_coordinator_id: lead.coordinator_id || null,
                 created_at: nowIso(),
                 updated_at: nowIso()
             };

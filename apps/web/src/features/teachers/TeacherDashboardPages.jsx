@@ -606,39 +606,37 @@ export function TeacherTimetablePage() {
 
     return (
         <section className="panel">
-            {/* Single toolbar: week nav + filters + legend */}
-            <div style={{ display: 'flex', flexWrap: 'nowrap', overflowX: 'auto', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
-                {/* Week nav */}
+            {/* Week navigation — centered */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
                 <button className="small secondary" onClick={() => setWeekOffset(w => w - 1)} style={{ padding: '5px 10px' }}>◀ Prev</button>
                 <span style={{ fontSize: '13px', fontWeight: 600, color: '#374151', minWidth: '150px', textAlign: 'center' }}>{formatWeekLabel()}</span>
                 <button className="small secondary" onClick={() => setWeekOffset(w => w + 1)} style={{ padding: '5px 10px' }}>Next ▶</button>
                 {weekOffset !== 0 && (
                     <button className="small primary" onClick={() => setWeekOffset(0)} style={{ padding: '5px 10px', fontSize: '11px' }}>Today</button>
                 )}
+            </div>
 
-                <span style={{ color: '#d1d5db', fontSize: '16px' }}>|</span>
+            {/* Filters row */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
+                    <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', flex: 1, minWidth: '0' }}>
+                        <option value=''>All Students</option>
+                        {allStudentNames.map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                    <select value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', flex: 1, minWidth: '0' }}>
+                        <option value=''>All Subjects</option>
+                        {allSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    {(studentFilter || subjectFilter) && (
+                        <button className='small secondary' onClick={() => { setStudentFilter(''); setSubjectFilter(''); }} style={{ padding: '5px 10px', fontSize: '11px' }}>✕ Clear</button>
+                    )}
+                </div>
+            </div>
 
-                {/* Student filter */}
-                <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', minWidth: '130px' }}>
-                    <option value=''>All Students</option>
-                    {allStudentNames.map(n => <option key={n} value={n}>{n}</option>)}
-                </select>
-
-                {/* Subject filter */}
-                <select value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', minWidth: '120px' }}>
-                    <option value=''>All Subjects</option>
-                    {allSubjects.map(s => <option key={s} value={s}>{s}</option>)}
-                </select>
-
-                {(studentFilter || subjectFilter) && (
-                    <button className='small secondary' onClick={() => { setStudentFilter(''); setSubjectFilter(''); }} style={{ padding: '5px 10px', fontSize: '11px' }}>✕ Clear</button>
-                )}
-
-                <span style={{ color: '#d1d5db', fontSize: '16px' }}>|</span>
-
-                {/* Legend */}
-                {[['#e0e7ff', 'Scheduled'], ['#cffafe', 'Completed'], ['#dcfce7', 'Verified'], ['#fef9c3', 'Pending']].map(([bg, label]) => (
-                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6b7280' }}>
+            {/* Legend row */}
+            <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {[['#3b82f6', 'Scheduled'], ['#06b6d4', 'Completed'], ['#22c55e', 'Verified'], ['#f59e0b', 'Pending'], ['#ef4444', 'Rescheduled']].map(([bg, label]) => (
+                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#111827', fontWeight: 600 }}>
                         <span style={{ width: '10px', height: '10px', borderRadius: '2px', background: bg, display: 'inline-block' }} />
                         {label}
                     </span>
@@ -696,6 +694,13 @@ export function TeacherMyProfilePage() {
     const [activeTab, setActiveTab] = useState('personal');
     const TIME_OPTIONS = useMemo(() => generateTimeOptions(), []);
 
+    // ── Edit mode state ──
+    const [editingPersonal, setEditingPersonal] = useState(false);
+    const [editingProfessional, setEditingProfessional] = useState(false);
+    const [editForm, setEditForm] = useState({});
+    const [profileMsg, setProfileMsg] = useState('');
+    const [savingProfile, setSavingProfile] = useState(false);
+
     async function loadProfile() {
         try {
             const d = await apiFetch('/teachers/me');
@@ -718,6 +723,61 @@ export function TeacherMyProfilePage() {
     }
 
     useEffect(() => { loadProfile(); }, []);
+
+    // ── Start editing Personal tab ──
+    function startEditPersonal() {
+        setEditForm({
+            full_name: profile?.users?.full_name || '',
+            gender: profile?.gender || '',
+            dob: profile?.dob || '',
+            address: profile?.address || '',
+            pincode: profile?.pincode || '',
+            city: profile?.city || '',
+            place: profile?.place || ''
+        });
+        setEditingPersonal(true);
+        setProfileMsg('');
+    }
+
+    // ── Start editing Professional tab ──
+    function startEditProfessional() {
+        setEditForm({
+            meeting_link: profile?.meeting_link || ''
+        });
+        setEditingProfessional(true);
+        setProfileMsg('');
+    }
+
+    function cancelEdit() {
+        setEditingPersonal(false);
+        setEditingProfessional(false);
+        setEditForm({});
+        setProfileMsg('');
+    }
+
+    async function saveProfileEdits() {
+        setSavingProfile(true);
+        setProfileMsg('');
+        try {
+            const res = await apiFetch('/teachers/me/profile', {
+                method: 'PUT',
+                body: JSON.stringify(editForm)
+            });
+            setProfile(res.teacher);
+            setEditingPersonal(false);
+            setEditingProfessional(false);
+            setEditForm({});
+            setProfileMsg('Profile updated successfully!');
+            setTimeout(() => setProfileMsg(''), 3000);
+        } catch (e) {
+            setProfileMsg('Error: ' + e.message);
+        }
+        setSavingProfile(false);
+    }
+
+    function updateEditField(key, val) {
+        setEditForm(prev => ({ ...prev, [key]: val }));
+    }
 
     function handleAddSlots(newSlots) {
         // Validation 1: Start Time < End Time
@@ -914,6 +974,14 @@ export function TeacherMyProfilePage() {
         </div>
     );
 
+    const editInputStyle = {
+        width: '100%', padding: '8px 12px', border: '1px solid #3b82f6',
+        borderRadius: '6px', fontSize: '14px', color: '#111827',
+        minHeight: '40px', background: '#eff6ff', outline: 'none',
+        boxSizing: 'border-box'
+    };
+    const editLabelStyle = { display: 'block', fontSize: '13px', fontWeight: 600, color: '#374151', marginBottom: '6px' };
+
     const Badge = ({ children, color }) => (
         <span style={{
             background: color ? `${color}15` : '#e5e7eb',
@@ -939,9 +1007,35 @@ export function TeacherMyProfilePage() {
 
     const gridRow = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '16px' };
 
+    const editBtnStyle = {
+        padding: '6px 16px', fontSize: '13px', fontWeight: 600,
+        border: '1px solid #2563eb', background: '#eff6ff', color: '#2563eb',
+        borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px'
+    };
+    const saveBtnStyle = {
+        padding: '6px 16px', fontSize: '13px', fontWeight: 600,
+        border: 'none', background: '#2563eb', color: '#fff',
+        borderRadius: '6px', cursor: 'pointer'
+    };
+    const cancelBtnStyle = {
+        padding: '6px 16px', fontSize: '13px', fontWeight: 500,
+        border: '1px solid #d1d5db', background: '#fff', color: '#6b7280',
+        borderRadius: '6px', cursor: 'pointer'
+    };
+
     return (
         <section className="panel">
             <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Profile</h2>
+
+            {profileMsg && (
+                <div style={{
+                    padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', fontWeight: 500,
+                    background: profileMsg.startsWith('Error') ? '#fee2e2' : '#dcfce7',
+                    color: profileMsg.startsWith('Error') ? '#dc2626' : '#15803d'
+                }}>
+                    {profileMsg}
+                </div>
+            )}
 
             {/* Tabs Navigation */}
             <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '0' }}>
@@ -951,7 +1045,7 @@ export function TeacherMyProfilePage() {
                     return (
                         <button
                             key={key}
-                            onClick={() => setActiveTab(key)}
+                            onClick={() => { setActiveTab(key); cancelEdit(); }}
                             style={{
                                 padding: '10px 20px',
                                 border: 'none',
@@ -970,38 +1064,91 @@ export function TeacherMyProfilePage() {
                 })}
             </div>
 
-            {/* Profile Details */}
+            {/* ═══ Personal Tab ═══ */}
             {activeTab === 'personal' && (
                 <article className="card" style={{ padding: '24px', marginBottom: '24px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>
                         <h3 style={{ margin: 0, fontSize: '18px' }}>Personal Information</h3>
-                        <div style={{ fontWeight: 600, color: profile?.is_in_pool ? '#15803d' : '#dc2626', fontSize: '14px', padding: '4px 12px', background: profile?.is_in_pool ? '#dcfce7' : '#fee2e2', borderRadius: '20px' }}>
-                            {profile?.is_in_pool ? '✅ Active Pool Member' : '❌ Inactive'}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{ fontWeight: 600, color: profile?.is_in_pool ? '#15803d' : '#dc2626', fontSize: '14px', padding: '4px 12px', background: profile?.is_in_pool ? '#dcfce7' : '#fee2e2', borderRadius: '20px' }}>
+                                {profile?.is_in_pool ? '✅ Active Pool Member' : '❌ Inactive'}
+                            </div>
+                            {!editingPersonal ? (
+                                <button onClick={startEditPersonal} style={editBtnStyle}>
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                    Edit
+                                </button>
+                            ) : (
+                                <>
+                                    <button onClick={cancelEdit} style={cancelBtnStyle}>Cancel</button>
+                                    <button onClick={saveProfileEdits} disabled={savingProfile} style={saveBtnStyle}>
+                                        {savingProfile ? 'Saving...' : 'Save'}
+                                    </button>
+                                </>
+                            )}
                         </div>
                     </div>
 
+                    {/* Editable fields: Full Name, Gender, DOB, Address, Pincode, City, Place */}
                     <div style={gridRow}>
-                        <ReadOnlyField label="Full Name" value={profile?.users?.full_name} />
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Full Name</span><input value={editForm.full_name || ''} onChange={e => updateEditField('full_name', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="Full Name" value={profile?.users?.full_name} />
+                        }
                         <ReadOnlyField label="Teacher Code" value={profile?.teacher_code} />
                         <ReadOnlyField label="Email" value={profile?.users?.email} />
                         <ReadOnlyField label="Phone" value={profile?.phone} />
                     </div>
                     <div style={gridRow}>
-                        <ReadOnlyField label="Gender" value={profile?.gender} />
-                        <ReadOnlyField label="Date of Birth" value={profile?.dob} />
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Gender</span><select value={editForm.gender || ''} onChange={e => updateEditField('gender', e.target.value)} style={editInputStyle}><option value="">Select Gender</option><option value="Male">Male</option><option value="Female">Female</option><option value="Other">Other</option></select></div>
+                            : <ReadOnlyField label="Gender" value={profile?.gender} />
+                        }
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Date of Birth</span><input type="date" value={editForm.dob || ''} onChange={e => updateEditField('dob', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="Date of Birth" value={profile?.dob} />
+                        }
                     </div>
                     <div style={gridRow}>
-                        <ReadOnlyField label="Address" value={profile?.address} />
-                        <ReadOnlyField label="Pincode" value={profile?.pincode} />
-                        <ReadOnlyField label="City" value={profile?.city} />
-                        <ReadOnlyField label="Place/Area" value={profile?.place} />
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Address</span><input value={editForm.address || ''} onChange={e => updateEditField('address', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="Address" value={profile?.address} />
+                        }
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Pincode</span><input value={editForm.pincode || ''} onChange={e => updateEditField('pincode', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="Pincode" value={profile?.pincode} />
+                        }
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>City</span><input value={editForm.city || ''} onChange={e => updateEditField('city', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="City" value={profile?.city} />
+                        }
+                        {editingPersonal
+                            ? <div><span style={editLabelStyle}>Place/Area</span><input value={editForm.place || ''} onChange={e => updateEditField('place', e.target.value)} style={editInputStyle} /></div>
+                            : <ReadOnlyField label="Place/Area" value={profile?.place} />
+                        }
                     </div>
                 </article>
             )}
 
+            {/* ═══ Professional Tab ═══ */}
             {activeTab === 'professional' && (
                 <article className="card" style={{ padding: '24px', marginBottom: '24px' }}>
-                    <h3 style={{ margin: '0 0 16px', fontSize: '18px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>Professional Details</h3>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid #e5e7eb', paddingBottom: '16px' }}>
+                        <h3 style={{ margin: 0, fontSize: '18px' }}>Professional Details</h3>
+                        {!editingProfessional ? (
+                            <button onClick={startEditProfessional} style={editBtnStyle}>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                Edit
+                            </button>
+                        ) : (
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <button onClick={cancelEdit} style={cancelBtnStyle}>Cancel</button>
+                                <button onClick={saveProfileEdits} disabled={savingProfile} style={saveBtnStyle}>
+                                    {savingProfile ? 'Saving...' : 'Save'}
+                                </button>
+                            </div>
+                        )}
+                    </div>
                     <div style={gridRow}>
                         <ReadOnlyField label="Qualification" value={profile?.qualification} />
                         <ReadOnlyField label="Experience" value={profile?.experience_level} />
@@ -1009,6 +1156,17 @@ export function TeacherMyProfilePage() {
                         <ReadOnlyField label="Rate per Hour" value={profile?.per_hour_rate ? `₹${profile.per_hour_rate}/hr` : null} />
                     </div>
 
+                    {/* Meeting Link — editable by teacher */}
+                    <div style={gridRow}>
+                        {editingProfessional
+                            ? <div style={{ gridColumn: '1 / -1' }}><span style={editLabelStyle}>Meeting Link</span><input type="url" value={editForm.meeting_link || ''} onChange={e => updateEditField('meeting_link', e.target.value)} style={editInputStyle} placeholder="https://meet.google.com/..." /></div>
+                            : <ReadOnlyField label="Meeting Link" value={
+                                profile?.meeting_link
+                                    ? <a href={profile.meeting_link} target="_blank" rel="noopener noreferrer" style={{ color: '#2563eb', textDecoration: 'underline', wordBreak: 'break-all' }}>{profile.meeting_link}</a>
+                                    : null
+                            } full />
+                        }
+                    </div>
 
                     <div style={gridRow}>
                         <ReadOnlyField label="Subjects" value={subjects.length ? subjects.map((s, i) => <Badge key={i} color="#3b82f6">{s}</Badge>) : null} full />

@@ -21,6 +21,7 @@ function TeacherPoolTable({ items, onOpenProfile }) {
             <th>Teacher ID</th>
             <th>Name</th>
             <th>Email</th>
+            <th>Coordinator</th>
             <th>Experience</th>
 
             <th>Preferred Time</th>
@@ -34,6 +35,7 @@ function TeacherPoolTable({ items, onOpenProfile }) {
               <td data-label="Teacher ID">{item.teacher_code || '-'}</td>
               <td data-label="Name">{item.users?.full_name || '-'}</td>
               <td data-label="Email">{item.users?.email || '-'}</td>
+              <td data-label="Coordinator">{item.coordinator?.full_name || '-'}</td>
               <td data-label="Experience">{item.experience_level || '-'}</td>
 
               <td data-label="Preferred Time">
@@ -85,7 +87,7 @@ function TeacherPoolTable({ items, onOpenProfile }) {
           ))}
           {!items.length ? (
             <tr>
-              <td colSpan="6">No teachers in pool yet.</td>
+              <td colSpan="8">No teachers in pool yet.</td>
             </tr>
           ) : null}
         </tbody>
@@ -311,6 +313,7 @@ export function TeacherProfilePage({ teacherProfileId }) {
         <p><strong>Email:</strong> {teacher?.users?.email || '-'}</p>
         <p><strong>Experience:</strong> {teacher?.experience_level || '-'}</p>
         <p><strong>Rate:</strong> {teacher?.per_hour_rate || '-'}</p>
+        <p><strong>Coordinator:</strong> {teacher?.coordinator?.full_name || '-'}</p>
       </article>
       <article className="card">
         <h3>Availability Slots</h3>

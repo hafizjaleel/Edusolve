@@ -550,6 +550,9 @@ function StudentDetailPage({ studentId, onBack }) {
   const [aTime, setATime] = useState('');
   const [msgText, setMsgText] = useState('');
   const [subjectOptions, setSubjectOptions] = useState([]);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
 
   const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const timeOptions = useMemo(() => {
@@ -609,6 +612,38 @@ function StudentDetailPage({ studentId, onBack }) {
     try { await apiFetch(`/students/${studentId}/messages/send-reminder`, { method: 'POST', body: JSON.stringify({ message: msgText, type: 'general' }) }); setMsgText(''); await load(); } catch (e) { setError(e.message); }
   }
 
+  function openEditModal() {
+    setEditForm({
+      student_name: student.student_name || '',
+      parent_name: student.parent_name || '',
+      contact_number: student.contact_number || '',
+      alternative_number: student.alternative_number || '',
+      parent_phone: student.parent_phone || '',
+      class_level: student.class_level || '',
+      package_name: student.package_name || '',
+      messaging_number: student.messaging_number || 'contact'
+    });
+    setShowEdit(true);
+  }
+
+  async function saveEdit(e) {
+    e.preventDefault();
+    setEditSaving(true); setError('');
+    try {
+      await apiFetch(`/students/${studentId}`, {
+        method: 'PUT',
+        body: JSON.stringify(editForm)
+      });
+      setShowEdit(false);
+      await load();
+    } catch (e) { setError(e.message); }
+    finally { setEditSaving(false); }
+  }
+
+  const messagingLabel = { contact: 'Contact Number', alternative: 'Alternative Number', parent: 'Parent Phone' };
+  const activeSubjects = (assignments || []).filter(a => a.is_active).map(a => a.subject).filter(Boolean);
+  const uniqueSubjects = [...new Set(activeSubjects)];
+
   if (!student) return <section className="panel">{error ? <p className="error">{error}</p> : <p>Loading...</p>}</section>;
   const tabs = [
     { id: 'profile', label: 'Profile' },
@@ -627,21 +662,80 @@ function StudentDetailPage({ studentId, onBack }) {
       <div className="tabs-row">{tabs.map(t => <button key={t.id} type="button" className={tab === t.id ? 'tab-btn active' : 'tab-btn'} onClick={() => setTab(t.id)}>{t.label}</button>)}</div>
 
       {tab === 'profile' ? <div className="grid-two">
-        <article className="card"><h3>Info</h3><div className="detail-grid">
-          <div><span className="eyebrow">Code</span><p><strong>{student.student_code || '—'}</strong></p></div>
-          <div><span className="eyebrow">Class</span><p>{student.class_level || student.leads?.class_level || '—'}</p></div>
-          <div><span className="eyebrow">Subject</span><p>{student.leads?.subject || '—'}</p></div>
-          <div><span className="eyebrow">Parent</span><p>{student.parent_name || student.leads?.parent_name || '—'}</p></div>
-          <div><span className="eyebrow">Student No.</span><p>{(student.leads?.country_code ? student.leads.country_code + ' ' : '') + (student.contact_number || student.leads?.contact_number || '—')}</p></div>
-          <div><span className="eyebrow">Package</span><p>{student.package_name || student.leads?.package_name || '—'}</p></div>
-          <div><span className="eyebrow">Source</span><p>{student.leads?.source || '—'}</p></div>
-          <div><span className="eyebrow">Notification</span><p>{student.notification_pref || 'WhatsApp'}</p></div>
-          <div><span className="eyebrow">Joined</span><p>{student.joined_at ? new Date(student.joined_at).toLocaleDateString('en-IN') : '—'}</p></div>
-        </div></article>
+        <article className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <h3 style={{ margin: 0 }}>Info</h3>
+            <button type="button" className="secondary small" onClick={openEditModal}>✏️ Edit Details</button>
+          </div>
+          <div className="detail-grid" style={{ marginTop: 12 }}>
+            <div><span className="eyebrow">Code</span><p><strong>{student.student_code || '—'}</strong></p></div>
+            <div><span className="eyebrow">Class</span><p>{student.class_level || student.leads?.class_level || '—'}</p></div>
+            <div><span className="eyebrow">Subjects</span><p>{uniqueSubjects.length ? uniqueSubjects.join(', ') : '—'}</p></div>
+            <div><span className="eyebrow">Parent</span><p>{student.parent_name || student.leads?.parent_name || '—'}</p></div>
+            <div><span className="eyebrow">Contact No.</span><p>{(student.country_code ? student.country_code + ' ' : '') + (student.contact_number || '—')}</p></div>
+            <div><span className="eyebrow">Alternative No.</span><p>{student.alternative_number || '—'}</p></div>
+            <div><span className="eyebrow">Parent Phone</span><p>{student.parent_phone || '—'}</p></div>
+            <div><span className="eyebrow">Messaging No.</span><p>{messagingLabel[student.messaging_number] || 'Contact Number'}</p></div>
+            <div><span className="eyebrow">Package</span><p>{student.package_name || student.leads?.package_name || '—'}</p></div>
+            <div><span className="eyebrow">Source</span><p>{student.counselor_id ? (student.leads?.source || 'Lead') : 'Manual'}</p></div>
+            <div><span className="eyebrow">Joined</span><p>{student.joined_at ? new Date(student.joined_at).toLocaleDateString('en-IN') : '—'}</p></div>
+          </div>
+        </article>
         <article className="card"><h3>Hours</h3><div className="grid-two" style={{ gap: 12 }}>
           <div className="stat-card card" style={{ textAlign: 'center' }}><p className="eyebrow">Total</p><h3>{student.total_hours}</h3></div>
           <div className={`stat-card card ${Number(student.remaining_hours) <= 5 ? 'danger' : 'success'}`} style={{ textAlign: 'center' }}><p className="eyebrow">Left</p><h3>{student.remaining_hours}</h3></div>
         </div></article>
+
+        {/* Edit Details Modal */}
+        {showEdit && (
+          <div className="modal-overlay" onClick={() => setShowEdit(false)}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+              <h3>Edit Student Details</h3>
+              <form onSubmit={saveEdit}>
+                <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <label>Student Name
+                      <input value={editForm.student_name} onChange={e => setEditForm({ ...editForm, student_name: e.target.value })} required />
+                    </label>
+                    <label>Parent Name
+                      <input value={editForm.parent_name} onChange={e => setEditForm({ ...editForm, parent_name: e.target.value })} />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                    <label>Contact Number
+                      <input value={editForm.contact_number} onChange={e => setEditForm({ ...editForm, contact_number: e.target.value })} />
+                    </label>
+                    <label>Alternative No.
+                      <input value={editForm.alternative_number} onChange={e => setEditForm({ ...editForm, alternative_number: e.target.value })} />
+                    </label>
+                    <label>Parent Phone
+                      <input value={editForm.parent_phone} onChange={e => setEditForm({ ...editForm, parent_phone: e.target.value })} />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
+                    <label>Class / Level
+                      <input value={editForm.class_level} onChange={e => setEditForm({ ...editForm, class_level: e.target.value })} />
+                    </label>
+                    <label>Package
+                      <input value={editForm.package_name} onChange={e => setEditForm({ ...editForm, package_name: e.target.value })} />
+                    </label>
+                    <label>Messaging Number
+                      <select value={editForm.messaging_number} onChange={e => setEditForm({ ...editForm, messaging_number: e.target.value })}>
+                        <option value="contact">Contact Number</option>
+                        <option value="alternative">Alternative Number</option>
+                        <option value="parent">Parent Phone</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                  <button type="button" className="secondary" onClick={() => setShowEdit(false)}>Cancel</button>
+                  <button type="submit" disabled={editSaving}>{editSaving ? 'Saving...' : 'Save Changes'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
       </div> : null}
 
       {tab === 'classes' ? <StudentClassesTab studentId={studentId} initialSessions={sessions} teachers={teachers} onClassesChanged={load} /> : null}
@@ -839,6 +933,8 @@ export function StudentsHubPage({ role }) {
   const [teachers, setTeachers] = useState([]);
   const [subjectsList, setSubjectsList] = useState([]);
   const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('');
   const isAC = role === 'academic_coordinator';
 
   const tabs = useMemo(() => {
@@ -864,6 +960,32 @@ export function StudentsHubPage({ role }) {
   }, [isAC, teachers.length]);
   useEffect(() => { loadData(); }, [loadData]);
 
+  const filtered = useMemo(() => {
+    let items = students;
+    if (statusFilter) items = items.filter(s => s.status === statusFilter);
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      items = items.filter(s =>
+        (s.student_name || '').toLowerCase().includes(q) ||
+        (s.student_code || '').toLowerCase().includes(q)
+      );
+    }
+    return items;
+  }, [students, statusFilter, search]);
+
+  async function quickStatusChange(studentId, newStatus, e) {
+    e.stopPropagation();
+    try {
+      await apiFetch(`/students/${studentId}/status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: newStatus })
+      });
+      setStudents(prev => prev.map(s => s.id === studentId ? { ...s, status: newStatus } : s));
+    } catch (e) { setError(e.message); }
+  }
+
+  const statusColor = { active: 'success', vacation: 'warning', inactive: '' };
+
   if (selId) return <StudentDetailPage studentId={selId} onBack={() => { setSelId(null); loadData(); }} />;
 
   return (
@@ -871,7 +993,54 @@ export function StudentsHubPage({ role }) {
       {error ? <p className="error">{error}</p> : null}
       <div className="tabs-row">{tabs.map(t => <button key={t.id} type="button" className={activeTab === t.id ? 'tab-btn active' : 'tab-btn'} onClick={() => setActiveTab(t.id)}>{t.label}</button>)}</div>
       <article className="card">
-        {activeTab === 'students' ? <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th><th>Teachers</th></tr></thead><tbody>{students.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}><td data-label="ID">{s.student_code || '—'}</td><td data-label="Name">{s.student_name}</td><td data-label="Class">{s.class_level || '—'}</td><td data-label="Status"><span className={`status-tag ${s.status === 'active' ? 'success' : ''}`}>{s.status}</span></td><td data-label="Hours Left"><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td><td data-label="Teachers">{(s.student_teacher_assignments || []).filter(a => a.is_active).map(a => <span key={a.id} className="status-tag small" style={{ marginRight: 4 }}>{a.users?.full_name || '?'}·{a.subject}</span>)}{!(s.student_teacher_assignments || []).filter(a => a.is_active).length ? <span className="muted">None</span> : null}</td></tr>)}{!students.length ? <tr><td colSpan="6">No students.</td></tr> : null}</tbody></table></div> : null}
+        {activeTab === 'students' ? <>
+          <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="text" placeholder="Search by name or code..." value={search}
+              onChange={e => setSearch(e.target.value)}
+              style={{ flex: '1 1 220px', minWidth: '180px' }}
+            />
+            <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ minWidth: '140px' }}>
+              <option value="">All Statuses</option>
+              <option value="active">Active</option>
+              <option value="vacation">Vacation</option>
+              <option value="inactive">Inactive</option>
+            </select>
+          </div>
+          <div className="table-wrap mobile-friendly-table"><table><thead><tr>
+            <th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th><th>Teachers</th>
+          </tr></thead><tbody>
+              {filtered.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}>
+                <td data-label="ID">{s.student_code || '—'}</td>
+                <td data-label="Name">{s.student_name}</td>
+                <td data-label="Class">{s.class_level || '—'}</td>
+                <td data-label="Status">{isAC ? (
+                  <select
+                    value={s.status}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => quickStatusChange(s.id, e.target.value, e)}
+                    className={`status-select ${statusColor[s.status] || ''}`}
+                    style={{
+                      fontSize: '0.85em', padding: '4px 6px', borderRadius: '6px', fontWeight: 600,
+                      background: s.status === 'active' ? '#dcfce7' : s.status === 'vacation' ? '#fef9c3' : '#f1f5f9',
+                      color: s.status === 'active' ? '#166534' : s.status === 'vacation' ? '#854d0e' : '#475569',
+                      border: '1px solid ' + (s.status === 'active' ? '#bbf7d0' : s.status === 'vacation' ? '#fde68a' : '#cbd5e1'),
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="active">Active</option>
+                    <option value="vacation">Vacation</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                ) : (
+                  <span className={`status-tag ${statusColor[s.status] || ''}`}>{s.status}</span>
+                )}</td>
+                <td data-label="Hours Left"><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td>
+                <td data-label="Teachers">{(s.student_teacher_assignments || []).filter(a => a.is_active).map(a => <span key={a.id} className="status-tag small" style={{ marginRight: 4 }}>{a.users?.full_name || '?'}·{a.subject}</span>)}{!(s.student_teacher_assignments || []).filter(a => a.is_active).length ? <span className="muted">None</span> : null}</td>
+              </tr>)}
+              {!filtered.length ? <tr><td colSpan="6">No students match filters.</td></tr> : null}
+            </tbody></table></div>
+        </> : null}
         {activeTab === 'onboard' ? <StudentOnboardingForm teachers={teachers} subjects={subjectsList} onDone={loadData} onNewSubjectAdded={(newSubj) => setSubjectsList(prev => [...prev, newSubj])} /> : null}
       </article>
     </section>
