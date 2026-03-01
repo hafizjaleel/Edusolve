@@ -265,6 +265,11 @@ export async function handleTeacherLeads(req, res, url) {
                 return true;
             }
 
+            if (!lead.full_name || !lead.phone) {
+                sendJson(res, 400, { ok: false, error: 'Teacher Lead is missing a full name or phone number. Please edit the lead details before converting.' });
+                return true;
+            }
+
             // Helper to format Postgres Array literal: {val1,val2}
             const toPgArray = (arr) => {
                 if (typeof arr === 'string' && arr.trim().startsWith('[')) {
@@ -280,7 +285,7 @@ export async function handleTeacherLeads(req, res, url) {
                 email: payload.email,
                 password: payload.password,
                 email_confirm: true,
-                user_metadata: { role: 'teacher', full_name: lead.full_name }
+                user_metadata: { role: 'teacher', full_name: lead.full_name, phone: lead.phone }
             });
 
             if (userError) {
@@ -298,6 +303,7 @@ export async function handleTeacherLeads(req, res, url) {
                     id: newUserId,
                     email: payload.email,
                     full_name: lead.full_name,
+                    phone: lead.phone,
                     is_active: true,
                     created_at: nowIso(),
                     updated_at: nowIso()

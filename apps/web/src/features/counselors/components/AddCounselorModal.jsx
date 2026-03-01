@@ -1,11 +1,12 @@
-
 import { useState } from 'react';
 import { apiFetch } from '../../../lib/api.js';
+import { PhoneInput, isValidEmail } from '../../../components/PhoneInput.jsx';
 
 export function AddCounselorModal({ onClose, onSuccess }) {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [fullName, setFullName] = useState('');
+    const [phone, setPhone] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
 
@@ -13,10 +14,21 @@ export function AddCounselorModal({ onClose, onSuccess }) {
         e.preventDefault();
         setLoading(true);
         setError('');
+
+        const safeEmail = email.trim();
+        const safeName = fullName.trim();
+        const safePhone = phone.trim();
+
+        if (!isValidEmail(safeEmail)) {
+            setError("Please enter a valid email address format");
+            setLoading(false);
+            return;
+        }
+
         try {
             await apiFetch('/counselors', {
                 method: 'POST',
-                body: JSON.stringify({ email, password, full_name: fullName })
+                body: JSON.stringify({ email: safeEmail, password, full_name: safeName, phone: safePhone })
             });
             onSuccess();
         } catch (err) {
@@ -38,6 +50,10 @@ export function AddCounselorModal({ onClose, onSuccess }) {
                     <label>
                         Email
                         <input type="email" value={email} onChange={e => setEmail(e.target.value)} required />
+                    </label>
+                    <label>
+                        Phone Number
+                        <PhoneInput value={phone} onChange={setPhone} required={true} />
                     </label>
                     <label>
                         Password

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
+import { PhoneInput, isValidEmail } from '../../components/PhoneInput.jsx';
 
 /* ═══════ HR DASHBOARD ═══════ */
 export function HRDashboardPage() {
@@ -384,8 +385,19 @@ function AddEmployeeModal({ onClose, onDone }) {
     async function submit(e) {
         e.preventDefault();
         setSaving(true);
+
+        const safeForm = { ...form };
+        if (safeForm.email) safeForm.email = safeForm.email.trim();
+        if (safeForm.full_name) safeForm.full_name = safeForm.full_name.trim();
+
+        if (safeForm.email && !isValidEmail(safeForm.email)) {
+            alert('Please enter a valid email address');
+            setSaving(false);
+            return;
+        }
+
         try {
-            await apiFetch('/hr/employees', { method: 'POST', body: JSON.stringify(form) });
+            await apiFetch('/hr/employees', { method: 'POST', body: JSON.stringify(safeForm) });
             onDone();
         } catch (err) {
             alert(err.message);
@@ -410,7 +422,7 @@ function AddEmployeeModal({ onClose, onDone }) {
                         </label>
                         <label style={labelStyle}>
                             Phone
-                            <input value={form.phone} onChange={e => upd('phone', e.target.value)} style={inputStyle} />
+                            <PhoneInput value={form.phone} onChange={v => upd('phone', v)} />
                         </label>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -456,8 +468,19 @@ function EditEmployeeModal({ employee, onClose, onDone }) {
     async function submit(e) {
         e.preventDefault();
         setSaving(true);
+
+        const safeForm = { ...form };
+        if (safeForm.email) safeForm.email = safeForm.email.trim();
+        if (safeForm.full_name) safeForm.full_name = safeForm.full_name.trim();
+
+        if (safeForm.email && !isValidEmail(safeForm.email)) {
+            alert('Please enter a valid email address');
+            setSaving(false);
+            return;
+        }
+
         try {
-            await apiFetch(`/hr/employees/${employee.id}`, { method: 'PATCH', body: JSON.stringify(form) });
+            await apiFetch(`/hr/employees/${employee.id}`, { method: 'PATCH', body: JSON.stringify(safeForm) });
             onDone();
         } catch (err) {
             alert(err.message);
@@ -482,7 +505,7 @@ function EditEmployeeModal({ employee, onClose, onDone }) {
                         </label>
                         <label style={labelStyle}>
                             Phone
-                            <input value={form.phone} onChange={e => upd('phone', e.target.value)} style={inputStyle} />
+                            <PhoneInput value={form.phone} onChange={v => upd('phone', v)} />
                         </label>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
