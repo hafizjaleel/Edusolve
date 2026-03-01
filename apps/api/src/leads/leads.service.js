@@ -142,12 +142,31 @@ export class LeadsService {
         .order('updated_at', { ascending: false });
       if (joinedError) throw new Error(joinedError.message);
 
+      // Fetch corresponding students to get AC assignments
+      const leadIds = (joinedLeads || []).map(l => l.id);
+      let studentsMap = {};
+      let acUserIds = new Set();
+
+      if (leadIds.length > 0) {
+        const { data: studentsData } = await adminClient
+          .from('students')
+          .select('id, lead_id, student_code, academic_coordinator_id')
+          .in('lead_id', leadIds);
+          
+        (studentsData || []).forEach(s => {
+          studentsMap[s.lead_id] = s;
+          if (s.academic_coordinator_id) acUserIds.add(s.academic_coordinator_id);
+        });
+      }
+
       // Resolve counselor + ac_user names from users table
-      const userIds = [...new Set(
-        (joinedLeads || []).flatMap(l => [l.counselor_id, l.ac_user_id].filter(Boolean))
-      )];
+      const userIds = [...new Set([
+        ...(joinedLeads || []).map(l => l.counselor_id).filter(Boolean),
+        ...Array.from(acUserIds)
+      ])];
+      
       let userMap = {};
-      if (userIds.length) {
+      if (userIds.length > 0) {
         const { data: users } = await adminClient
           .from('users')
           .select('id, full_name, email')
@@ -155,23 +174,18 @@ export class LeadsService {
         (users || []).forEach(u => { userMap[u.id] = { id: u.id, full_name: u.full_name, email: u.email }; });
       }
 
-      // Resolve student codes via joined_student_id
-      const studentIds = (joinedLeads || []).map(l => l.joined_student_id).filter(Boolean);
-      let studentMap = {};
-      if (studentIds.length) {
-        const { data: students } = await adminClient
-          .from('students')
-          .select('id, student_code')
-          .in('id', studentIds);
-        (students || []).forEach(s => { studentMap[s.id] = s.student_code; });
-      }
-
-      return (joinedLeads || []).map(l => ({
-        ...l,
-        counselor: l.counselor_id ? (userMap[l.counselor_id] || null) : null,
-        ac_user: l.ac_user_id ? (userMap[l.ac_user_id] || null) : null,
-        student_code: l.joined_student_id ? (studentMap[l.joined_student_id] || null) : null,
-      }));
+      return (joinedLeads || []).map(l => {
+        const student = studentsMap[l.id];
+        return {
+          ...l,
+          counselor: l.counselor_id ? (userMap[l.counselor_id] || null) : null,
+          ac_user: (student && student.academic_coordinator_id) ? (userMap[student.academic_coordinator_id] || null) : null,
+          student_code: student ? student.student_code : null,
+          students: student ? {
+            users: student.academic_coordinator_id ? (userMap[student.academic_coordinator_id] || null) : null
+          } : null
+        };
+      });
     }
 
     const { data, error } = await query;
