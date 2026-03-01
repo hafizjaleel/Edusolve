@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { ROLE_OPTIONS } from '../../lib/roles.js';
+import { PhoneInput, isValidEmail } from '../../components/PhoneInput.jsx';
 
 export function UsersPage() {
     const [users, setUsers] = useState([]);
@@ -36,6 +37,7 @@ export function UsersPage() {
                                 <tr>
                                     <th>Email</th>
                                     <th>Role</th>
+                                    <th>Phone</th>
                                     <th>Last Sign In</th>
                                     <th>Created</th>
                                     <th>Actions</th>
@@ -52,6 +54,9 @@ export function UsersPage() {
                                             <span className={`tag ${u.role === 'unknown' ? 'warning' : ''}`} style={{ textTransform: 'uppercase', fontSize: '11px' }}>
                                                 {ROLE_OPTIONS.find(r => r.value === u.role)?.label || u.role}
                                             </span>
+                                        </td>
+                                        <td data-label="Phone">
+                                            {u.phone || '-'}
                                         </td>
                                         <td data-label="Last Sign In" className="text-muted" style={{ fontSize: '13px' }}>
                                             {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString() : 'Never'}
@@ -98,6 +103,14 @@ function UserModal({ user, onClose, onDone }) {
 
         const formData = new FormData(e.target);
         const payload = Object.fromEntries(formData);
+
+        if (payload.email && !isValidEmail(payload.email.trim())) {
+            setError("Please enter a valid email address format");
+            setLoading(false);
+            return;
+        }
+        if (payload.email) payload.email = payload.email.trim();
+        if (payload.name) payload.name = payload.name.trim();
 
         try {
             const url = isEdit ? `/admin/users/${user.id}` : '/admin/users';
@@ -158,9 +171,16 @@ function UserModal({ user, onClose, onDone }) {
                     </div>
 
                     <div>
-                        <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Name (Optional)</label>
-                        <input type="text" name="name" defaultValue={user?.name} placeholder="Full Name" style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
+                        <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Name *</label>
+                        <input type="text" name="name" required defaultValue={user?.name} placeholder="Full Name" style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '6px' }} />
                     </div>
+
+                    {!isEdit && (
+                        <div>
+                            <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Phone Number *</label>
+                            <PhoneInput name="phone" required={true} />
+                        </div>
+                    )}
 
                     <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                         <button type="button" onClick={onClose} className="secondary" style={{ flex: 1 }}>Cancel</button>

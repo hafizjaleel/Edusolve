@@ -44,8 +44,8 @@ export async function handleCounselors(req, res, url) {
         // POST /counselors (Create)
         if (req.method === 'POST' && url.pathname === '/counselors') {
             const payload = await readJson(req);
-            if (!payload.email || !payload.password) {
-                sendJson(res, 400, { error: 'Email and password required' });
+            if (!payload.email || !payload.password || !payload.full_name || !payload.phone) {
+                sendJson(res, 400, { error: 'Email, password, full_name, and phone are required' });
                 return true;
             }
             const user = await counselorsService.create(payload);

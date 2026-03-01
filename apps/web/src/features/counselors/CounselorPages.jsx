@@ -55,6 +55,7 @@ export function CounselorTeamPage() {
                             <tr>
                                 <th>Name</th>
                                 <th>Email</th>
+                                <th>Phone</th>
                                 <th>Status</th>
                                 <th>Actions</th>
                             </tr>
@@ -64,6 +65,7 @@ export function CounselorTeamPage() {
                                 <tr key={c.id}>
                                     <td>{c.full_name || c.email}</td>
                                     <td>{c.email}</td>
+                                    <td>{c.phone || '-'}</td>
                                     <td>
                                         <span className={`status-badge ${c.is_active ? 'success' : 'neutral'}`}>
                                             {c.is_active ? 'Active' : 'Inactive'}

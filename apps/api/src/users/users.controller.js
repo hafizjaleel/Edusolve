@@ -45,6 +45,7 @@ export async function handleUsers(req, res) {
                     email: u.email,
                     role: role,
                     name: u.user_metadata?.name || '',
+                    phone: u.user_metadata?.phone || '',
                     last_sign_in_at: u.last_sign_in_at,
                     created_at: u.created_at
                 };
@@ -54,13 +55,12 @@ export async function handleUsers(req, res) {
             return true;
         }
 
-        // POST /admin/users - Create user
         if (req.method === 'POST') {
             const body = await readJson(req);
-            const { email, password, role, name } = body;
+            const { email, password, role, name, phone } = body;
 
-            if (!email || !password || !role) {
-                sendJson(res, 400, { ok: false, error: 'Email, password, and role are required' });
+            if (!email || !password || !role || !name || !phone) {
+                sendJson(res, 400, { ok: false, error: 'Email, password, role, name, and phone are required' });
                 return true;
             }
 
@@ -68,7 +68,7 @@ export async function handleUsers(req, res) {
                 email,
                 password,
                 email_confirm: true,
-                user_metadata: { role, name }
+                user_metadata: { role, name, phone }
             });
 
             if (error) throw error;
@@ -85,6 +85,7 @@ export async function handleUsers(req, res) {
                 user_id: data.user.id,
                 full_name: name || email,
                 email: email,
+                phone: phone,
                 designation: role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
                 department: deptMap[role] || 'General',
                 employee_type: 'staff',

@@ -1,7 +1,7 @@
-
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../../../lib/api.js';
 import { CreatableSelect } from '../../../components/ui/CreatableSelect.jsx';
+import { PhoneInput, isValidEmail } from '../../../components/PhoneInput.jsx';
 
 export function AddLeadModal({ onClose, onSuccess }) {
     const [studentName, setStudentName] = useState('');
@@ -38,15 +38,26 @@ export function AddLeadModal({ onClose, onSuccess }) {
         e.preventDefault();
         setError('');
         setSaving(true);
+
+        const safeStudentName = studentName.trim();
+        const safeContact = contactNumber.trim();
+        const safeEmail = email.trim();
+
+        if (safeEmail && !isValidEmail(safeEmail)) {
+            setError("Please enter a valid email address");
+            setSaving(false);
+            return;
+        }
+
         try {
             await apiFetch('/leads', {
                 method: 'POST',
                 body: JSON.stringify({
-                    student_name: studentName,
-                    contact_number: contactNumber,
+                    student_name: safeStudentName,
+                    contact_number: safeContact,
                     subject,
                     lead_type: leadType,
-                    email
+                    email: safeEmail
                 })
             });
             onSuccess();
@@ -68,7 +79,7 @@ export function AddLeadModal({ onClose, onSuccess }) {
                     </label>
                     <label>
                         Contact
-                        <input value={contactNumber} onChange={(e) => setContactNumber(e.target.value)} required />
+                        <PhoneInput value={contactNumber} onChange={setContactNumber} required={true} />
                     </label>
                     <label>
                         Subject

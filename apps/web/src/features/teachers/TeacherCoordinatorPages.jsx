@@ -1583,6 +1583,7 @@ export function TeacherPerformancePage() {
                                 <th>#</th>
                                 <th>Teacher</th>
                                 <th>Code</th>
+                                <th>Phone</th>
                                 <th>Experience</th>
                                 <th>Sessions</th>
                                 <th>Completed</th>
@@ -1595,6 +1596,7 @@ export function TeacherPerformancePage() {
                                     <td data-label="#">{idx + 1}</td>
                                     <td data-label="Teacher">{t.name}</td>
                                     <td data-label="Code">{t.code || '—'}</td>
+                                    <td data-label="Phone">{t.phone || '—'}</td>
                                     <td data-label="Experience">{t.experience || '—'}</td>
                                     <td data-label="Sessions">{t.totalSessions}</td>
                                     <td data-label="Completed">{t.completedSessions}</td>

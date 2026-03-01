@@ -49,14 +49,14 @@ export class CounselorsService {
     // Create a new counselor
     async create(payload) {
         if (!this.admin) return { error: 'Admin client not available' };
-        const { email, password, full_name } = payload;
+        const { email, password, full_name, phone } = payload;
 
         // 1. Create Auth User
         const { data: authData, error: authError } = await this.admin.auth.admin.createUser({
             email,
             password,
             email_confirm: true,
-            user_metadata: { full_name, role: 'counselor' },
+            user_metadata: { full_name, role: 'counselor', phone },
             app_metadata: { role: 'counselor' }
         });
 
@@ -69,6 +69,7 @@ export class CounselorsService {
             .insert({
                 id: user.id,
                 email: user.email,
+                phone: phone,
                 full_name: full_name || email.split('@')[0],
                 is_active: true
             });

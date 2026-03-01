@@ -80,6 +80,7 @@ export function TeacherDirectoryPage() {
                             <th>Code</th>
                             <th>Teacher Name</th>
                             <th>Email</th>
+                            <th>Phone</th>
                             <th>Experience</th>
                             <th>Rate / Hr</th>
                             <th>Coordinator</th>
@@ -89,15 +90,16 @@ export function TeacherDirectoryPage() {
                     </thead>
                     <tbody>
                         {loading ? (
-                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24 }}>Loading...</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24 }}>Loading...</td></tr>
                         ) : filtered.length === 0 ? (
-                            <tr><td colSpan={8} style={{ textAlign: 'center', padding: 24, color: '#666' }}>No teachers found.</td></tr>
+                            <tr><td colSpan={9} style={{ textAlign: 'center', padding: 24, color: '#666' }}>No teachers found.</td></tr>
                         ) : (
                             filtered.map(t => (
                                 <tr key={t.id}>
                                     <td style={{ fontWeight: 500 }}>{t.teacher_code || '-'}</td>
                                     <td style={{ fontWeight: 600 }}>{t.users?.full_name || '-'}</td>
                                     <td>{t.users?.email || '-'}</td>
+                                    <td>{t.phone || t.users?.phone || '-'}</td>
                                     <td style={{ textTransform: 'capitalize' }}>{t.experience_level || 'N/A'}</td>
                                     <td>{t.per_hour_rate ? `₹${t.per_hour_rate}` : '-'}</td>
                                     <td>{t.coordinator?.full_name || 'Unassigned'}</td>
