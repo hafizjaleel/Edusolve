@@ -15,6 +15,7 @@ import { handleTeacherLeads } from './teacher-leads/teacher-leads.controller.js'
 import { handleSubjectsBoards } from './subjects-boards/subjects-boards.controller.js';
 import { handleUsers } from './users/users.controller.js';
 import { handleHR } from './hr/hr.controller.js';
+import { handleWaappa } from './waappa/waappa.routes.js';
 
 import { AuthService } from './auth/auth.service.js';
 import { getBearerToken } from './common/http.js';
@@ -67,6 +68,7 @@ const server = http.createServer(async (req, res) => {
   if (await handleTeacherLeads(req, res, url)) return;
   if (await handleUsers(req, res)) return;
   if (await handleHR(req, res, url)) return;
+  if (await handleWaappa(req, res, url)) return;
 
   if (req.method === 'GET' && url.pathname === '/health') {
     return sendJson(res, 200, { ok: true, service: 'ehms-api' });
