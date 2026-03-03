@@ -3165,43 +3165,157 @@ export function TeacherPoolPage() {
   );
 }
 
+/* ═══════ AckTick: WhatsApp-style delivery/read ticks ═══════ */
+function AckTick({ ack }) {
+  if (ack === -1) return <span title="Error" style={{ color: '#e53935' }}>⚠</span>;
+  if (ack === 0 || ack == null) return <span title="Pending" style={{ color: '#aaa', fontSize: 10 }}>🕐</span>;
+  if (ack === 1) {
+    // single grey tick (sent to server)
+    return <span title="Sent" style={{ color: '#aaa', fontSize: 13, letterSpacing: '-2px' }}>✓</span>;
+  }
+  if (ack === 2) {
+    // double grey tick (delivered to device)
+    return <span title="Delivered" style={{ color: '#aaa', fontSize: 13, letterSpacing: '-2px' }}>✓✓</span>;
+  }
+  // ack >= 3: READ or PLAYED — double blue ticks
+  return <span title="Read" style={{ color: '#34B7F1', fontSize: 13, letterSpacing: '-2px' }}>✓✓</span>;
+}
+
 /* ═══════ Automation Hub ═══════ */
 export function AutomationPage() {
   const [tab, setTab] = useState('messages');
   const [contacts, setContacts] = useState([]);
   const [filteredContacts, setFilteredContacts] = useState([]);
+  const [search, setSearch] = useState('');
   const [selContact, setSelContact] = useState(null); // { id, name, role, type }
   const [messages, setMessages] = useState([]);
   const [msgText, setMsgText] = useState('');
-  const [search, setSearch] = useState('');
   const [error, setError] = useState('');
 
   // Campaigns State
-  const [cRole, setCRole] = useState('student');
-  const [cClass, setCClass] = useState('');
-  const [recipients, setRecipients] = useState([]); // Array of IDs
   const [cMsg, setCMsg] = useState('');
+  const [cRole, setCRole] = useState('all'); // 'all' | 'student' | 'teacher'
+  const [cClass, setCClass] = useState('');
+  const [cSearch, setCSearch] = useState('');
+  const [recipients, setRecipients] = useState([]); // Array of IDs
   const [sending, setSending] = useState(false);
   const [bulkStatus, setBulkStatus] = useState('');
+  const [campaignHistory, setCampaignHistory] = useState([]);
+  const [campaignMedia, setCampaignMedia] = useState(null); // { file, previewUrl, mimetype }
 
   // Data Loading
   const [allStudents, setAllStudents] = useState([]);
   const [allTeachers, setAllTeachers] = useState([]);
 
+  // WhatsApp States
+  const [waSession, setWaSession] = useState(null);
+  const [waLoading, setWaLoading] = useState(false);
+  const [qrKey, setQrKey] = useState(Date.now());
+  const [showQr, setShowQr] = useState(false);
+  const chatBodyRef = useRef(null);
+  const [msgOffset, setMsgOffset] = useState(0);
+  const [hasMoreMsgs, setHasMoreMsgs] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [pendingFile, setPendingFile] = useState(null); // { file, previewUrl, mimetype }
+
+  // Auto-scroll chat to bottom when messages change
   useEffect(() => {
-    (async () => {
-      try {
-        const [s, t] = await Promise.all([apiFetch('/students'), apiFetch('/teachers/pool')]);
-        setAllStudents(s.items || []);
-        setAllTeachers(t.items || []);
-      } catch (e) { setError(e.message); }
-    })();
+    if (chatBodyRef.current) {
+      chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    // Load students and teachers (don't block on waappa)
+    Promise.all([
+      apiFetch('/students'),
+      apiFetch('/teachers/pool'),
+    ]).then(([s, t]) => {
+      setAllStudents(s.items || []);
+      setAllTeachers(t.items || []);
+    }).catch(e => setError(e.message));
+
+    // Load waappa session separately so it never blocks the UI
+    apiFetch('/waappa/sessions')
+      .then(ws => { if (ws && ws.session) setWaSession(ws.session); })
+      .catch(e => console.warn('[waappa] session load failed:', e.message));
   }, []);
 
-  // Prepare Contacts List (Chat)
+  const fetchSession = async () => {
+    try {
+      const res = await apiFetch('/waappa/sessions');
+      setWaSession(res.session || null);
+    } catch (e) { console.error(e); }
+    finally { setWaLoading(false); }
+  };
+
+  const handleWaAction = async (action) => {
+    setWaLoading(true);
+    try {
+      if (action === 'create') {
+        // Derive session name from logged-in coordinator's email
+        const session = JSON.parse(localStorage.getItem('ehms_auth') || '{}');
+        const email = session?.user?.email || 'coordinator';
+        const sessionName = email.replace(/[^a-z0-9]/gi, '-').toLowerCase().slice(0, 50);
+        await apiFetch('/waappa/sessions', { method: 'POST', body: JSON.stringify({ sessionName }) });
+      } else {
+        const sessionName = waSession?.session_name || 'coordinator';
+        await apiFetch(`/waappa/sessions/${sessionName}/${action}`, { method: 'POST', body: JSON.stringify({}) });
+      }
+      if (action === 'start') setQrKey(Date.now());
+      await fetchSession(); // fetch immediately and unlocks loading
+    } catch (e) {
+      alert(e.message);
+      setWaLoading(false);
+    }
+  };
+
+  // Build contacts from students + teachers always
   useEffect(() => {
-    const sList = allStudents.map(s => ({ id: s.id, name: s.student_name, role: 'Student', type: 'student', avatar: s.student_name.charAt(0) }));
-    const tList = allTeachers.map(t => ({ id: t.user_id, name: t.users?.full_name || t.teacher_code, role: 'Teacher', type: 'teacher', avatar: (t.users?.full_name || 'T').charAt(0) }));
+    // Helper: resolve which phone number to use for a student
+    const resolveStudentPhone = (s) => {
+      const pref = s.messaging_number; // 'contact' | 'alternative' | 'parent'
+      if (pref === 'alternative' && s.alternative_number) return s.alternative_number;
+      if (pref === 'parent' && s.parent_phone) return s.parent_phone;
+      return s.contact_number || s.alternative_number || s.parent_phone;
+    };
+
+    const sList = allStudents
+      .map(s => {
+        const rawPhone = resolveStudentPhone(s);
+        const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, '') : null;
+        return { ...s, _phone: cleanPhone };
+      })
+      .filter(s => s._phone)
+      .map(s => ({
+        ...s,
+        id: s._phone,
+        chatId: `${s._phone}@c.us`,
+        name: s.student_name || s._phone,
+        role: 'Student',
+        type: 'student',
+        phone: s._phone,
+        avatar: (s.student_name || 'S').charAt(0).toUpperCase()
+      }));
+
+    // allTeachers are teacher_profiles rows with users join
+    const tList = allTeachers
+      .filter(t => t.phone) // teacher_profiles.phone column
+      .map(t => {
+        const cleanPhone = String(t.phone).replace(/\D/g, '');
+        return {
+          ...t,
+          id: cleanPhone,
+          chatId: `${cleanPhone}@c.us`,
+          name: t.users?.full_name || t.teacher_code,
+          role: 'Teacher',
+          type: 'teacher',
+          phone: cleanPhone,
+          avatar: (t.users?.full_name || 'T').charAt(0).toUpperCase()
+        };
+      });
+
     const combined = [...sList, ...tList].sort((a, b) => a.name.localeCompare(b.name));
     setContacts(combined);
   }, [allStudents, allTeachers]);
@@ -3215,65 +3329,186 @@ export function AutomationPage() {
   const loadChat = useCallback(async (contact) => {
     if (!contact) return;
     try {
-      if (contact.type === 'student') {
-        const d = await apiFetch(`/students/${contact.id}/messages`);
-        setMessages(d.items || []);
+      const raw = (contact.phone || contact.id || '').replace(/[^0-9]/g, '');
+      const phone = raw.slice(-10);
+      if (!phone) { setMessages([]); return; }
+      const d = await apiFetch(`/waappa/messages?phone=${encodeURIComponent(phone)}&limit=15&offset=0`);
+      if (d.ok) {
+        setMessages(d.messages.map(m => ({
+          id: m.id,
+          content: m.body,
+          direction: m.from_me ? 'outgoing' : 'incoming',
+          created_at: m.timestamp * 1000,
+          has_media: m.has_media,
+          media_url: m.media_url,
+          media_type: m.media_type,
+          ack: m.ack,
+          ack_name: m.ack_name
+        })));
+        setMsgOffset(15);
+        setHasMoreMsgs(d.hasMore || false);
       } else {
-        setMessages([]); // TODO: Teacher chat endpoint
+        setMessages([]);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); setMessages([]); }
   }, []);
+
+  const loadMoreMessages = async () => {
+    if (!selContact || loadingMore || !hasMoreMsgs) return;
+    setLoadingMore(true);
+    try {
+      const raw = (selContact.phone || selContact.id || '').replace(/[^0-9]/g, '');
+      const phone = raw.slice(-10);
+      const d = await apiFetch(`/waappa/messages?phone=${encodeURIComponent(phone)}&limit=15&offset=${msgOffset}`);
+      if (d.ok) {
+        const older = d.messages.map(m => ({
+          id: m.id,
+          content: m.body,
+          direction: m.from_me ? 'outgoing' : 'incoming',
+          created_at: m.timestamp * 1000,
+          has_media: m.has_media,
+          media_url: m.media_url,
+          media_type: m.media_type,
+          ack: m.ack,
+          ack_name: m.ack_name
+        }));
+        // Preserve scroll position when prepending old messages
+        const el = chatBodyRef.current;
+        const prevScrollHeight = el ? el.scrollHeight : 0;
+        setMessages(prev => [...older, ...prev]);
+        setMsgOffset(prev => prev + 15);
+        setHasMoreMsgs(d.hasMore || false);
+        // Restore scroll position so viewport doesn't jump to top
+        if (el) requestAnimationFrame(() => { el.scrollTop = el.scrollHeight - prevScrollHeight; });
+      }
+    } catch (e) { console.error(e); } finally { setLoadingMore(false); }
+  };
 
   useEffect(() => { loadChat(selContact); }, [selContact, loadChat]);
 
   async function sendChat(e) {
     e.preventDefault();
-    if (!msgText.trim() || !selContact) return;
+    if ((!msgText.trim() && !pendingFile) || !selContact || isSending) return;
+    if (!waSession || waSession.status !== 'WORKING') {
+      alert('WhatsApp session not connected.');
+      return;
+    }
+    setIsSending(true);
     try {
-      if (selContact.type === 'student') {
-        await apiFetch(`/students/${selContact.id}/messages/send-reminder`, { method: 'POST', body: JSON.stringify({ message: msgText, type: 'general' }) });
+      if (pendingFile) {
+        // Convert to base64 → upload to R2 → send via Waappa
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(pendingFile.file);
+        });
+        const uploaded = await apiFetch('/waappa/messages/upload', {
+          method: 'POST',
+          body: JSON.stringify({ base64, filename: pendingFile.file.name, mimetype: pendingFile.mimetype })
+        });
+        if (!uploaded.ok) throw new Error('Upload failed');
+        await apiFetch('/waappa/messages/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            chatId: selContact.chatId || `${selContact.phone}@c.us`,
+            mediaUrl: uploaded.url,
+            mimetype: uploaded.mimetype,
+            caption: msgText.trim(),
+            sessionName: waSession.session_name
+          })
+        });
+        setPendingFile(null);
         setMsgText('');
-        await loadChat(selContact);
       } else {
-        alert('Teacher chat not yet connected.');
+        await apiFetch('/waappa/messages/send', {
+          method: 'POST',
+          body: JSON.stringify({
+            chatId: selContact.chatId || `${selContact.phone}@c.us`,
+            text: msgText,
+            sessionName: waSession.session_name
+          })
+        });
+        setMsgText('');
       }
+      await loadChat(selContact);
     } catch (e) { setError(e.message); }
+    finally { setIsSending(false); }
   }
 
   // Campaigns Filtering
   const filteredRecipients = useMemo(() => {
-    if (cRole === 'student') {
-      return allStudents.filter(s => !cClass || s.class_level === cClass).map(s => ({ id: s.id, name: s.student_name, desc: s.class_level }));
-    } else if (cRole === 'teacher') {
-      return allTeachers.map(t => ({ id: t.user_id, name: t.users?.full_name || t.teacher_code, desc: t.subjects_taught?.join(', ') }));
-    }
-    return [];
-  }, [cRole, cClass, allStudents, allTeachers]);
+    let pool = contacts;
 
-  // Toggle Recipient
-  const toggleRecipient = (id) => {
-    setRecipients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
-  const toggleAll = () => {
-    if (recipients.length === filteredRecipients.length) setRecipients([]);
-    else setRecipients(filteredRecipients.map(r => r.id));
-  };
+    if (cRole !== 'all') {
+      pool = pool.filter(c => c.type === cRole);
+    }
+
+    if (cClass && (cRole === 'all' || cRole === 'student')) {
+      pool = pool.filter(c => c.type !== 'student' || c.class_level === cClass);
+    }
+
+    if (cSearch) {
+      const q = cSearch.toLowerCase();
+      pool = pool.filter(c => c.name?.toLowerCase().includes(q) || c.phone?.includes(q));
+    }
+
+    return pool.map(c => ({
+      ...c,
+      desc: c.type === 'student' ? c.class_level : (c.subjects_taught?.join(', ') || '')
+    }));
+  }, [contacts, cRole, cClass, cSearch]);
+
+  const toggleRecipient = (id) => setRecipients(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const toggleAll = () => setRecipients(recipients.length === filteredRecipients.length && filteredRecipients.length > 0 ? [] : filteredRecipients.map(r => r.id));
 
   async function sendCampaign() {
     if (!cMsg.trim() || !recipients.length) return;
-    setSending(true); setBulkStatus('Sending...');
-    let success = 0;
-    for (const rId of recipients) {
+
+    const selectedContacts = filteredRecipients.filter(r => recipients.includes(r.id));
+    setSending(true);
+    setBulkStatus('');
+
+    let uploadedMedia = null;
+    if (campaignMedia) {
       try {
-        if (cRole === 'student') {
-          await apiFetch(`/students/${rId}/messages/send-reminder`, { method: 'POST', body: JSON.stringify({ message: cMsg, type: 'notification' }) });
-          success++;
-        }
-      } catch (e) { console.error(e); }
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(campaignMedia.file);
+        });
+        const uploaded = await apiFetch('/waappa/messages/upload', {
+          method: 'POST',
+          body: JSON.stringify({ base64, filename: campaignMedia.file.name, mimetype: campaignMedia.mimetype })
+        });
+        if (uploaded.ok) uploadedMedia = { url: uploaded.url, mimetype: uploaded.mimetype };
+      } catch (e) { console.error('Campaign media upload failed:', e.message); }
+    }
+
+    try {
+      const result = await apiFetch('/waappa/campaigns/send', {
+        method: 'POST',
+        body: JSON.stringify({
+          recipients: selectedContacts.map(r => ({ name: r.name, phone: r.phone, chatId: r.chatId, type: r.type })),
+          message: cMsg,
+          ...(uploadedMedia ? { mediaUrl: uploadedMedia.url, mimetype: uploadedMedia.mimetype } : {}),
+          sentAt: new Date().toISOString()
+        })
+      });
+      if (result.ok) {
+        setBulkStatus(`✅ Sent to n8n for ${selectedContacts.length} recipients`);
+        setCampaignHistory(prev => [{ id: Date.now(), sentAt: new Date().toLocaleString(), message: cMsg.slice(0, 80), count: selectedContacts.length, hasMedia: !!uploadedMedia }, ...prev]);
+        setCMsg('');
+        setCampaignMedia(null);
+        setRecipients([]);
+      } else {
+        setBulkStatus(`⚠️ ${result.error || 'n8n webhook error'}`);
+      }
+    } catch (e) {
+      setBulkStatus(`❌ ${e.message}`);
     }
     setSending(false);
-    setBulkStatus(`Sent to ${success} recipients.`);
-    setCMsg('');
   }
 
   return (
@@ -3286,83 +3521,416 @@ export function AutomationPage() {
       </div>
 
       {tab === 'messages' ? (
-        <div className="automation-grid">
-          <div className="chat-sidebar">
-            <div className="chat-sidebar-search">
-              <input type="text" placeholder="Search contacts..." value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%', padding: '8px', borderRadius: '4px', border: '1px solid #ddd' }} />
+        <div style={{ display: 'flex', height: 'calc(100vh - 200px)', minHeight: 500, border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface)' }}>
+          {/* Sidebar */}
+          <div style={{ width: 300, minWidth: 260, borderRight: '1px solid var(--border)', display: 'flex', flexDirection: 'column', background: 'var(--surface-alt, #f8f9fa)' }}>
+            <div style={{ padding: '12px 12px 8px', borderBottom: '1px solid var(--border)' }}>
+              <input
+                type="text"
+                placeholder="Search contacts..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 20, border: '1px solid var(--border)', fontSize: 13, background: 'var(--input-bg, #fff)', boxSizing: 'border-box' }}
+              />
             </div>
-            <div className="contact-list">
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {filteredContacts.length === 0 && (
+                <div style={{ padding: 24, textAlign: 'center', color: '#999', fontSize: 13 }}>No contacts found</div>
+              )}
               {filteredContacts.map(c => (
-                <div key={c.id} className={`contact-item ${selContact?.id === c.id ? 'active' : ''}`} onClick={() => setSelContact(c)}>
-                  <div className="contact-avatar">{c.avatar}</div>
-                  <div className="contact-info"><h4>{c.name}</h4><p>{c.role}</p></div>
+                <div
+                  key={c.id}
+                  onClick={() => setSelContact(c)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', cursor: 'pointer',
+                    background: selContact?.id === c.id ? 'var(--primary-faint, #e8f5e9)' : 'transparent',
+                    borderLeft: selContact?.id === c.id ? '3px solid #25D366' : '3px solid transparent',
+                    transition: 'background 0.15s'
+                  }}
+                >
+                  <div style={{ width: 42, height: 42, borderRadius: '50%', background: c.type === 'teacher' ? '#1565C0' : '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 17, flexShrink: 0 }}>
+                    {c.avatar}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</div>
+                    <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>{c.role} &bull; {c.phone}</div>
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-          <div className="chat-window">
-            {selContact ? <>
-              <div className="chat-header"><strong>{selContact.name}</strong><span className="muted">({selContact.role})</span></div>
-              <div className="chat-body">
-                {!messages.length ? <p className="muted" style={{ textAlign: 'center' }}>No messages found.</p> :
-                  messages.map(m => (
-                    <div key={m.id} className={`chat-bubble ${m.direction}`}>
-                      <div className="chat-bubble-content"><p>{m.content}</p><span className="chat-time">{new Date(m.created_at).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}</span></div>
+
+          {/* Chat Window */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#e5ddd5' }}>
+            {selContact ? (
+              <>
+                {/* Header */}
+                <div style={{ padding: '12px 16px', background: '#075E54', color: '#fff', display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: selContact.type === 'teacher' ? '#1E88E5' : '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 16, color: '#fff', flexShrink: 0 }}>
+                    {selContact.avatar}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{selContact.name}</div>
+                    <div style={{ fontSize: 12, opacity: 0.8 }}>{selContact.role} &bull; +{selContact.phone}</div>
+                  </div>
+                  <button type="button" onClick={() => loadChat(selContact)} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 13, opacity: 0.85 }}>
+                    ↻ Refresh
+                  </button>
+                </div>
+
+                {/* Messages body */}
+                <div ref={chatBodyRef} style={{ flex: 1, overflowY: 'auto', padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {/* Load Earlier */}
+                  {hasMoreMsgs && (
+                    <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                      <button type="button" onClick={loadMoreMessages} disabled={loadingMore}
+                        style={{ padding: '6px 16px', borderRadius: 16, border: '1px solid #ccc', background: '#fff', fontSize: 12, color: '#555', cursor: 'pointer' }}>
+                        {loadingMore ? 'Loading...' : '⬆ Load Earlier Messages'}
+                      </button>
+                    </div>
+                  )}
+                  {messages.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: '#888', marginTop: 40, fontSize: 14 }}>No messages yet. Send the first one!</div>
+                  ) : messages.map(m => (
+                    <div key={m.id} style={{ display: 'flex', justifyContent: m.direction === 'outgoing' ? 'flex-end' : 'flex-start' }}>
+                      <div style={{
+                        maxWidth: '70%', padding: '8px 12px', borderRadius: m.direction === 'outgoing' ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
+                        background: m.direction === 'outgoing' ? '#DCF8C6' : '#fff',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.12)', fontSize: 14, lineHeight: 1.4
+                      }}>
+                        {m.has_media && m.media_url && (() => {
+                          // Detect type from media_type or URL extension
+                          const mt = m.media_type || (() => {
+                            const ext = m.media_url.split('.').pop()?.split('?')[0]?.toLowerCase();
+                            const extMap = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp4: 'video/mp4', mov: 'video/mp4', ogg: 'audio/ogg', opus: 'audio/opus', mp3: 'audio/mpeg', aac: 'audio/aac', pdf: 'application/pdf' };
+                            return extMap[ext] || null;
+                          })();
+                          if (mt?.startsWith('video/')) return (
+                            <div style={{ marginBottom: 4 }}>
+                              <video controls style={{ maxWidth: 240, borderRadius: 8, display: 'block' }}>
+                                <source src={m.media_url} type={mt} />
+                              </video>
+                            </div>
+                          );
+                          if (mt?.startsWith('audio/')) return (
+                            <div style={{ marginBottom: 4 }}>
+                              <audio controls style={{ maxWidth: 240 }}>
+                                <source src={m.media_url} type={mt} />
+                              </audio>
+                            </div>
+                          );
+                          if (!mt || mt.startsWith('image/')) return (
+                            <div style={{ marginBottom: 4 }}>
+                              <img src={m.media_url} alt="Attachment" style={{ maxWidth: 220, borderRadius: 8, display: 'block' }}
+                                onError={e => { e.target.style.display = 'none'; }} />
+                            </div>
+                          );
+                          // Unknown type (PDF, doc, etc.) — show download link
+                          return (
+                            <div style={{ marginBottom: 4 }}>
+                              <a href={m.media_url} target="_blank" rel="noopener noreferrer"
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 12px', background: '#f0f0f0', borderRadius: 8, fontSize: 13, color: '#1565C0', textDecoration: 'none' }}>
+                                📄 Download attachment
+                              </a>
+                            </div>
+                          );
+                        })()}
+                        {m.has_media && !m.media_url && (
+                          <div style={{ padding: '8px 4px', color: '#666', fontSize: 13 }}>📎 Media (loading...)</div>
+                        )}
+                        {m.content && <p style={{ margin: 0 }}>{m.content}</p>}
+                        <div style={{ fontSize: 11, color: '#999', textAlign: 'right', marginTop: 4, display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 4 }}>
+                          {new Date(m.created_at).toLocaleString('en-IN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}
+                          {m.direction === 'outgoing' && <AckTick ack={m.ack} />}
+                        </div>
+                      </div>
                     </div>
                   ))}
+                </div>
+
+                {/* File Preview Bar (shown when file is selected but not yet sent) */}
+                {pendingFile && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#e3f2fd', borderTop: '1px solid #90caf9' }}>
+                    {pendingFile.mimetype?.startsWith('image/') ? (
+                      <img src={pendingFile.previewUrl} alt="Preview" style={{ width: 52, height: 52, objectFit: 'cover', borderRadius: 6, flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 52, height: 52, background: '#1565C0', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, flexShrink: 0 }}>📄</div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: '#1565C0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{pendingFile.file.name}</div>
+                      <div style={{ fontSize: 11, color: '#555' }}>{(pendingFile.file.size / 1024).toFixed(1)} KB — type caption in the message box</div>
+                    </div>
+                    <button type="button" onClick={() => { setPendingFile(null); setMsgText(''); }}
+                      style={{ border: 'none', background: 'transparent', fontSize: 18, cursor: 'pointer', color: '#e53935', padding: 4, lineHeight: 1 }} title="Remove">✕</button>
+                  </div>
+                )}
+
+                {/* Input bar */}
+                <form onSubmit={sendChat} style={{ display: 'flex', gap: 8, padding: '10px 12px', background: '#f0f0f0', borderTop: '1px solid #ddd', alignItems: 'center' }}>
+                  {/* Hidden file input */}
+                  <input
+                    id="wa-file-input"
+                    type="file"
+                    accept="image/*,video/*,audio/*,application/pdf"
+                    style={{ display: 'none' }}
+                    onChange={e => {
+                      const file = e.target.files[0];
+                      if (file) {
+                        const previewUrl = URL.createObjectURL(file);
+                        setPendingFile({ file, previewUrl, mimetype: file.type });
+                      }
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => document.getElementById('wa-file-input').click()}
+                    disabled={!waSession || waSession.status !== 'WORKING'}
+                    style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', background: pendingFile ? '#1565C0' : '#e0e0e0', color: pendingFile ? '#fff' : '#333', fontSize: 20, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+                    title="Attach file"
+                  >📎</button>
+                  <input
+                    value={msgText}
+                    onChange={e => setMsgText(e.target.value)}
+                    placeholder={pendingFile ? 'Add a caption (optional)...' : 'Type a message...'}
+                    style={{ flex: 1, padding: '10px 16px', borderRadius: 24, border: 'none', outline: 'none', fontSize: 14, background: '#fff', boxSizing: 'border-box' }}
+                    disabled={!waSession || waSession.status !== 'WORKING'}
+                  />
+                  <button
+                    type="submit"
+                    disabled={(!msgText.trim() && !pendingFile) || !waSession || waSession.status !== 'WORKING' || isSending}
+                    style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', background: isSending ? '#a5d6a7' : '#25D366', color: '#fff', fontSize: 20, cursor: isSending ? 'default' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'background 0.2s' }}
+                  >
+                    {isSending ? <span style={{ fontSize: 16, animation: 'spin 0.8s linear infinite', display: 'inline-block' }}>⟳</span> : '➤'}
+                  </button>
+                </form>
+                {waSession?.status !== 'WORKING' && (
+                  <div style={{ textAlign: 'center', padding: '4px 0 8px', fontSize: 12, color: '#e53935', background: '#f0f0f0' }}>
+                    WhatsApp not connected — connect in the Account tab to send messages
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#888', fontSize: 15 }}>
+                👈 Select a contact to start chatting
               </div>
-              <form className="chat-footer" onSubmit={sendChat}>
-                <input value={msgText} onChange={e => setMsgText(e.target.value)} placeholder="Type a message..." />
-                <button type="submit">Send</button>
-              </form>
-            </> : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999' }}>Select a contact to start chatting</div>}
+            )}
           </div>
         </div>
       ) : null}
 
       {tab === 'campaigns' ? (
-        <div className="automation-grid">
-          <div className="campaign-sidebar">
-            <div className="campaign-filter-header">
-              <SearchSelect label="Role" value={cRole} onChange={setCRole} options={[{ value: 'student', label: 'Student' }, { value: 'teacher', label: 'Teacher' }]} placeholder="Select Role" />
-              {cRole === 'student' ? <SearchSelect label="Class" value={cClass} onChange={setCClass} options={['10th', '11th', '12th'].map(c => ({ value: c, label: c }))} placeholder="All Classes" /> : null}
-              <div style={{ padding: '4px 0', fontSize: '13px', fontWeight: 600 }}>{recipients.length} selected</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <input type="checkbox" id="selAll" checked={recipients.length === filteredRecipients.length && filteredRecipients.length > 0} onChange={toggleAll} />
-                <label htmlFor="selAll" style={{ fontSize: '13px', cursor: 'pointer' }}>Select All</label>
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr 260px', gap: 16, height: 580 }}>
+            {/* ── LEFT: Recipient Panel ── */}
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 14px 10px', borderBottom: '1px solid #f0f0f0' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 10 }}>Recipients</div>
+                <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                  {['all', 'student', 'teacher'].map(r => (
+                    <button key={r} type="button" onClick={() => { setCRole(r); setRecipients([]); }}
+                      style={{ flex: 1, padding: '5px 0', borderRadius: 20, border: 'none', fontSize: 12, cursor: 'pointer', fontWeight: 600, background: cRole === r ? '#1a73e8' : '#f0f0f0', color: cRole === r ? '#fff' : '#333' }}>
+                      {r === 'all' ? 'All' : r === 'student' ? '👨‍🎓 Student' : '👩‍🏫 Teacher'}
+                    </button>
+                  ))}
+                </div>
+                {(cRole === 'student' || cRole === 'all') && (
+                  <select value={cClass} onChange={e => setCClass(e.target.value)}
+                    style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #ddd', fontSize: 12, marginBottom: 8 }}>
+                    <option value="">All Classes</option>
+                    {['10th', '11th', '12th'].map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+                <input value={cSearch} onChange={e => setCSearch(e.target.value)} placeholder="🔍 Search name or phone..."
+                  style={{ width: '100%', padding: '6px 10px', borderRadius: 8, border: '1px solid #ddd', fontSize: 12, boxSizing: 'border-box' }} />
+              </div>
+              <div style={{ padding: '8px 14px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                  <input type="checkbox" checked={recipients.length === filteredRecipients.length && filteredRecipients.length > 0} onChange={toggleAll} />
+                  Select All ({filteredRecipients.length})
+                </label>
+                {recipients.length > 0 && <span style={{ fontSize: 12, color: '#1a73e8', fontWeight: 600 }}>{recipients.length} selected</span>}
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto' }}>
+                {filteredRecipients.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                    No recipients match filters<br />
+                    <span style={{ fontSize: 11, opacity: 0.6 }}>(Loaded: {allStudents.length} students, {allTeachers.length} teachers)</span>
+                  </div>
+                ) : filteredRecipients.map(r => (
+                  <label key={r.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px', cursor: 'pointer', borderBottom: '1px solid #fafafa', background: recipients.includes(r.id) ? '#e8f0fe' : 'transparent', transition: 'background 0.2s' }}>
+                    <input type="checkbox" checked={recipients.includes(r.id)} onChange={() => toggleRecipient(r.id)} style={{ flexShrink: 0, width: 16, height: 16, cursor: 'pointer' }} />
+                    <div style={{ width: 32, height: 32, borderRadius: '50%', background: r.type === 'teacher' ? '#f3e5f5' : '#e8f4fd', color: r.type === 'teacher' ? '#7b1fa2' : '#1565C0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, flexShrink: 0 }}>
+                      {r.avatar}
+                    </div>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#202124', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div>
+                      <div style={{ fontSize: 11, color: '#5f6368', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.type === 'student' ? r.phone : `👩‍🏫 ${r.desc} • ${r.phone}`}</div>
+                    </div>
+                  </label>
+                ))}
               </div>
             </div>
-            <div className="campaign-recipient-list">
-              {filteredRecipients.map(r => (
-                <div key={r.id} className="recipient-item">
-                  <input type="checkbox" checked={recipients.includes(r.id)} onChange={() => toggleRecipient(r.id)} />
-                  <div style={{ flex: 1, minWidth: 0, marginLeft: 8 }}><div style={{ fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name}</div><div className="muted" style={{ fontSize: '11px' }}>{r.desc}</div></div>
+
+            {/* ── CENTER: Compose Panel ── */}
+            <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e0e0e0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>✉️ Compose Message</div>
+              </div>
+
+              {/* Variable tokens */}
+              <div style={{ padding: '8px 16px', borderBottom: '1px solid #f0f0f0', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {['{name}', '{phone}'].map(token => (
+                  <button key={token} type="button" onClick={() => setCMsg(m => m + token)}
+                    style={{ padding: '3px 10px', borderRadius: 20, border: '1px solid #cce5ff', background: '#e8f4fd', fontSize: 11, cursor: 'pointer', color: '#1565C0', fontWeight: 600 }}>
+                    + {token}
+                  </button>
+                ))}
+                <span style={{ fontSize: 11, color: '#999', alignSelf: 'center' }}>— click to insert variable</span>
+              </div>
+
+              <textarea
+                value={cMsg}
+                onChange={e => setCMsg(e.target.value)}
+                placeholder={`Hi {name}, this is a message from EduSolve...`}
+                style={{ flex: 1, padding: 16, border: 'none', resize: 'none', fontFamily: 'inherit', fontSize: 14, lineHeight: 1.6, outline: 'none' }}
+              />
+
+              {/* Media Preview */}
+              {campaignMedia && (
+                <div style={{ margin: '0 16px 12px', display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: '#e3f2fd', borderRadius: 8 }}>
+                  {campaignMedia.mimetype?.startsWith('image/') ? (
+                    <img src={campaignMedia.previewUrl} alt="" style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6 }} />
+                  ) : <span style={{ fontSize: 28 }}>📄</span>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#1565C0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{campaignMedia.file.name}</div>
+                    <div style={{ fontSize: 11, color: '#555' }}>{(campaignMedia.file.size / 1024).toFixed(1)} KB</div>
+                  </div>
+                  <button type="button" onClick={() => setCampaignMedia(null)}
+                    style={{ border: 'none', background: 'transparent', fontSize: 18, cursor: 'pointer', color: '#e53935' }}>✕</button>
                 </div>
-              ))}
-              {!filteredRecipients.length ? <div style={{ padding: 16, textAlign: 'center' }} className="muted">No recipients match filters.</div> : null}
-            </div>
-          </div>
-          <div className="campaign-compose-window">
-            <h3 style={{ margin: 0 }}>Compose Campaign</h3>
-            <div className="campaign-compose-area">
-              <textarea value={cMsg} onChange={e => setCMsg(e.target.value)} placeholder="Type your campaign message here..." style={{ flex: 1, padding: 16, borderRadius: 8, border: '1px solid #ddd', resize: 'none', fontFamily: 'inherit' }} />
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span className="muted">{cMsg.length} chars</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                {bulkStatus ? <span className={(bulkStatus.includes('Sent') ? 'text-success' : '')}>{bulkStatus}</span> : null}
-                <button type="button" onClick={sendCampaign} disabled={sending || !recipients.length || !cMsg.trim()} className="primary">
-                  {sending ? 'Sending...' : `Send to ${recipients.length} Recipients`}
+              )}
+
+              <div style={{ padding: '12px 16px', borderTop: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: 10 }}>
+                <input id="campaign-file" type="file" accept="image/*,video/*,audio/*,application/pdf" style={{ display: 'none' }}
+                  onChange={e => { const f = e.target.files[0]; if (f) setCampaignMedia({ file: f, previewUrl: URL.createObjectURL(f), mimetype: f.type }); e.target.value = ''; }} />
+                <button type="button" onClick={() => document.getElementById('campaign-file').click()}
+                  style={{ width: 36, height: 36, borderRadius: '50%', border: 'none', background: campaignMedia ? '#1565C0' : '#f0f0f0', color: campaignMedia ? '#fff' : '#333', cursor: 'pointer', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                  title="Attach media">📎</button>
+                <span style={{ fontSize: 12, color: '#999', flex: 1 }}>{cMsg.length} chars</span>
+                <button type="button" onClick={sendCampaign}
+                  disabled={sending || !recipients.length || !cMsg.trim()}
+                  style={{ padding: '9px 24px', borderRadius: 24, border: 'none', background: (!recipients.length || !cMsg.trim() || sending) ? '#ccc' : 'linear-gradient(135deg, #25D366, #128C7E)', color: '#fff', fontWeight: 700, fontSize: 14, cursor: sending ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
+                  {sending ? <span style={{ animation: 'spin 0.8s linear infinite', display: 'inline-block' }}>⟳</span> : `🚀 Send to ${recipients.length} recipients`}
                 </button>
               </div>
             </div>
+
+            {/* ── RIGHT: History ── */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {bulkStatus ? (
+                <div style={{ fontSize: 13, padding: '8px 12px', borderRadius: 8, background: bulkStatus.includes('✅') ? '#e8f5e9' : bulkStatus.includes('❌') ? '#fdecea' : '#fff8e1' }}>{bulkStatus}</div>
+              ) : null}
+
+              {/* History */}
+              <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #e0e0e0', padding: 14, flex: 1, overflowY: 'auto' }}>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>🕐 History</div>
+                {campaignHistory.length === 0 ? (
+                  <div style={{ color: '#bbb', fontSize: 12, textAlign: 'center', padding: '16px 0' }}>No campaigns this session</div>
+                ) : campaignHistory.map(h => (
+                  <div key={h.id} style={{ padding: '8px 0', borderBottom: '1px solid #f5f5f5' }}>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: '#333', marginBottom: 2 }}>📢 {h.count} recipients {h.hasMedia ? '· 📎' : ''}</div>
+                    <div style={{ fontSize: 11, color: '#666', marginBottom: 2 }}>{h.message}{h.message.length >= 80 ? '...' : ''}</div>
+                    <div style={{ fontSize: 10, color: '#aaa' }}>{h.sentAt}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        </>
       ) : null}
 
       {tab === 'account' ? <div className="grid-two">
-        <article className="card"><h3>WhatsApp Integration</h3><div className="detail-grid"><div><span className="eyebrow">Channel</span><p>WhatsApp (n8n + Waappa)</p></div><div><span className="eyebrow">Status</span><p><span className="status-tag success">Connected</span></p></div></div></article>
-        <article className="card"><h3>Settings</h3><div className="detail-grid"><div><span className="eyebrow">Auto-Remind</span><p>Manual. Set up n8n schedule for auto.</p></div></div></article>
+        <article className="card">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <h3 style={{ margin: 0 }}>WhatsApp Connection</h3>
+            {waLoading && <span className="muted" style={{ fontSize: 13 }}>Loading...</span>}
+          </div>
+
+          <div className="detail-grid">
+            <div>
+              <span className="eyebrow">Status</span>
+              <p>
+                {waSession ? (
+                  <span className={`status-tag ${waSession.status === 'WORKING' ? 'success' : waSession.status === 'FAILED' ? 'error' : 'warning'}`}>
+                    {waSession.status}
+                  </span>
+                ) : <span className="status-tag error">Not Configured</span>}
+              </p>
+            </div>
+            {waSession && (
+              <div><span className="eyebrow">Session</span><p>{waSession.display_name || waSession.session_name}</p></div>
+            )}
+
+            {waSession && waSession.status === 'WORKING' && (
+              <div style={{ gridColumn: '1 / -1', display: 'flex', alignItems: 'center', gap: 16, padding: '12px 0' }}>
+                {waSession.profile_pic_url ? (
+                  <img
+                    src={waSession.profile_pic_url}
+                    alt="Profile"
+                    style={{ width: 56, height: 56, borderRadius: '50%', objectFit: 'cover', border: '2px solid #25D366' }}
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                ) : (
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: '#25D366', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 22 }}>
+                    {(waSession.push_name || '?')[0].toUpperCase()}
+                  </div>
+                )}
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 15 }}>{waSession.push_name || 'Unknown'}</div>
+                  <div className="muted" style={{ fontSize: 13 }}>+{waSession.connected_phone}</div>
+                </div>
+              </div>
+            )}
+
+            {/* QR panel - shown when showQr=true and not yet WORKING */}
+            {waSession && showQr && waSession.status !== 'WORKING' && (
+              <div style={{ gridColumn: '1 / -1', textAlign: 'center', margin: '16px 0' }}>
+                <p className="muted" style={{ marginBottom: 12 }}>Scan this QR code with your WhatsApp app to link.</p>
+                <img
+                  src={`http://localhost:4000/waappa/sessions/${waSession.session_name}/qr?t=${qrKey}`}
+                  alt="WhatsApp QR Code"
+                  style={{ width: 250, height: 250, border: '1px solid #ddd', borderRadius: 8, display: 'block', margin: '0 auto' }}
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 24, flexWrap: 'wrap' }}>
+            {!waSession ? (
+              <button type="button" className="primary" onClick={() => handleWaAction('create')} disabled={waLoading}>Create Session</button>
+            ) : (
+              <>
+                {/* Get QR / Refresh QR — only when not WORKING */}
+                {waSession.status !== 'WORKING' && (
+                  <button type="button" className="primary"
+                    onClick={() => { setShowQr(true); setQrKey(Date.now()); }}
+                    disabled={waLoading}>
+                    {showQr ? 'Refresh QR' : 'Get QR'}
+                  </button>
+                )}
+                {waSession.status === 'STOPPED' || waSession.status === 'FAILED' ? (
+                  <button type="button" className="secondary" onClick={() => handleWaAction('start')} disabled={waLoading}>Start Session</button>
+                ) : (
+                  <button type="button" className="secondary" onClick={() => handleWaAction('stop')} disabled={waLoading}>Stop Session</button>
+                )}
+                <button type="button" className="secondary error" onClick={() => { handleWaAction('delete'); setShowQr(false); }} disabled={waLoading}>Delete Session</button>
+                <button type="button" className="secondary" onClick={fetchSession} disabled={waLoading}>Refresh Status</button>
+              </>
+            )}
+          </div>
+        </article>
       </div> : null}
     </section>
   );
