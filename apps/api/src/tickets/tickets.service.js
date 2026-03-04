@@ -5,14 +5,14 @@ import { getSupabaseAdminClient } from '../config/supabase.js';
  * Role-based ticket routing: which roles can each role send tickets to.
  */
 const TICKET_ROUTING = {
-    counselor:           ['counselor_head', 'hr', 'super_admin'],
-    teacher:             ['teacher_coordinator', 'hr', 'super_admin'],
-    counselor_head:      ['hr', 'super_admin'],
+    counselor: ['counselor_head', 'hr', 'super_admin'],
+    teacher: ['teacher_coordinator', 'hr', 'super_admin'],
+    counselor_head: ['hr', 'super_admin'],
     teacher_coordinator: ['hr', 'super_admin'],
-    academic_coordinator:['hr', 'super_admin'],
-    hr:                  ['super_admin'],
-    finance:             ['hr', 'super_admin'],
-    super_admin:         []
+    academic_coordinator: ['hr', 'super_admin'],
+    hr: ['super_admin'],
+    finance: ['hr', 'super_admin'],
+    super_admin: []
 };
 
 /**
@@ -118,10 +118,10 @@ export class TicketsService {
             } catch (e) { /* skip */ }
         }
 
-        const userMap = allUsers.reduce((acc, u) => { 
+        const userMap = allUsers.reduce((acc, u) => {
             u.role = u.role || roleMap[u.id] || 'unknown';
-            acc[u.id] = u; 
-            return acc; 
+            acc[u.id] = u;
+            return acc;
         }, {});
 
         // Get message counts per ticket
@@ -168,7 +168,7 @@ export class TicketsService {
 
         // Get creator info — try public users, fallback to auth
         let { data: creator } = await this.admin.from('users').select('id, full_name, email').eq('id', ticket.created_by).single();
-        
+
         // Get creator role
         let creatorRole = 'unknown';
         const { data: userRole } = await this.admin.from('user_roles').select('roles(code)').eq('user_id', ticket.created_by).limit(1).maybeSingle();
@@ -222,7 +222,7 @@ export class TicketsService {
 
             const foundIds = new Set(allSenders.map(u => u.id));
             const missingIds = senderIds.filter(id => !foundIds.has(id));
-            
+
             for (const id of missingIds) {
                 try {
                     const { data } = await this.admin.auth.admin.getUserById(id);
@@ -236,11 +236,11 @@ export class TicketsService {
                     }
                 } catch (e) { /* skip */ }
             }
-            
-            senderMap = allSenders.reduce((acc, u) => { 
+
+            senderMap = allSenders.reduce((acc, u) => {
                 u.role = u.role || sRoleMap[u.id] || 'unknown';
-                acc[u.id] = u; 
-                return acc; 
+                acc[u.id] = u;
+                return acc;
             }, {});
         }
 
@@ -430,6 +430,19 @@ export class TicketsService {
         const { error } = await this.admin
             .from('notifications')
             .update({ is_read: true })
+            .eq('id', notificationId)
+            .eq('user_id', userId);
+
+        if (error) return { error: error.message };
+        return { ok: true };
+    }
+
+    async deleteNotification(notificationId, userId) {
+        if (!this.admin) return { error: 'Admin client not available' };
+
+        const { error } = await this.admin
+            .from('notifications')
+            .delete()
             .eq('id', notificationId)
             .eq('user_id', userId);
 
