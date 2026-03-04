@@ -17,8 +17,6 @@ export const APP_PAGES = [
   { path: '/leads/converted', title: 'Converted Leads', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/leads/overdue', title: 'Overdue Leads', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/leads/payment-requests', title: 'Payment Requests', group: 'Student Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
-  /* ── Tickets (Support) ── */
-  { path: '/tickets', title: 'Tickets', group: 'Support', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.TEACHER, ROLES.TEACHER_COORDINATOR, ROLES.ACADEMIC_COORDINATOR, ROLES.HR, ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/counselors/reports', title: 'Sales Reports', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/team/counselors', title: 'Counselors (Team)', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD], showInNav: true },
  
@@ -69,7 +67,10 @@ export const APP_PAGES = [
 
   /* ── System ── */
   { path: '/admin/users', title: 'User Management', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/admin/settings', title: 'Settings', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true }
+  { path: '/admin/settings', title: 'Settings', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },
+
+  /* ── Support (always last in sidebar) ── */
+  { path: '/tickets', title: 'Tickets', group: 'Support', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.TEACHER, ROLES.TEACHER_COORDINATOR, ROLES.ACADEMIC_COORDINATOR, ROLES.HR, ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true }
 ];
 
 export function pagesForRole(role) {
@@ -77,7 +78,10 @@ export function pagesForRole(role) {
 }
 
 export function defaultPageForRole(role) {
-  return pagesForRole(role).find((page) => page.showInNav !== false) || null;
+  const pages = pagesForRole(role);
+  // Always default to a Dashboard page first
+  const dashboard = pages.find((page) => page.showInNav !== false && page.group === 'Dashboards');
+  return dashboard || pages.find((page) => page.showInNav !== false) || null;
 }
 
 export function getPageByPath(path, role) {

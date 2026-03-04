@@ -423,7 +423,7 @@ export async function handleFinance(req, res, url) {
             receivableTotals[l[idField]] = (receivableTotals[l[idField]] || 0) + Number(l.amount || 0);
           } else if (l.entry_type === 'payable') {
             payableTotals[l[idField]] = (payableTotals[l[idField]] || 0) + Number(l.amount || 0);
-          } else {
+          } else if (l.entry_type === 'income') {
             incomeTotals[l[idField]] = (incomeTotals[l[idField]] || 0) + Number(l.amount || 0);
           }
         });
@@ -462,37 +462,56 @@ export async function handleFinance(req, res, url) {
         return true;
       }
       if (type === 'teachers') {
-        // Teachers are in users table with role teacher. Quick way is get all users with teacher role.
-        const { data: role } = await adminClient.from('roles').select('id').eq('code', 'teacher').single();
+        // Use teacher_profiles table (the canonical source for teachers)
+        const { data: profiles } = await adminClient
+          .from('teacher_profiles')
+          .select('id, user_id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email, phone)')
+          .order('created_at', { ascending: false });
+
+        // teacher_id in ledger_entries/expenses may store EITHER teacher_profiles.id (from HR payroll)
+        // OR users.id (from other flows), so we must search by both sets of IDs
+        const profileIds = (profiles || []).map(p => p.id).filter(Boolean);
+        const teacherUserIds = (profiles || []).map(p => p.user_id).filter(Boolean);
+        const allIds = [...new Set([...profileIds, ...teacherUserIds])];
+
+        // Build a mapping: any ID (profile or user) → user_id (canonical key)
+        const idToUserId = {};
+        (profiles || []).forEach(p => {
+          idToUserId[p.id] = p.user_id;
+          idToUserId[p.user_id] = p.user_id;
+        });
+
         let items = [];
-        if (role) {
-          const { data: userRoles } = await adminClient.from('user_roles').select('user_id').eq('role_id', role.id);
-          const teacherIds = (userRoles || []).map(ur => ur.user_id);
-          if (teacherIds.length > 0) {
-            const [usersRes, ledgersRes, expensesRes] = await Promise.all([
-              adminClient.from('users').select('id, full_name, email, phone').in('id', teacherIds),
-              adminClient.from('ledger_entries').select('teacher_id, amount, entry_type').in('teacher_id', teacherIds),
-              adminClient.from('expenses').select('teacher_id, amount').in('teacher_id', teacherIds)
-            ]);
-            const payableTotals2 = {};
-            const expenseFromLedger = {};
-            (ledgersRes.data || []).forEach(l => {
-              if (!l.teacher_id) return;
-              if (l.entry_type === 'payable') {
-                payableTotals2[l.teacher_id] = (payableTotals2[l.teacher_id] || 0) + Number(l.amount || 0);
-              }
-            });
-            const expenseTotals = {};
-            (expensesRes.data || []).forEach(e => {
-              if (e.teacher_id) expenseTotals[e.teacher_id] = (expenseTotals[e.teacher_id] || 0) + Number(e.amount || 0);
-            });
-            items = (usersRes.data || []).map(u => ({
-              ...u,
-              total_payable: payableTotals2[u.id] || 0,
-              total_paid: expenseTotals[u.id] || 0,
-              balance_owed: (payableTotals2[u.id] || 0) - (expenseTotals[u.id] || 0)
-            }));
-          }
+        if (allIds.length > 0) {
+          const [ledgersRes, expensesRes] = await Promise.all([
+            adminClient.from('ledger_entries').select('teacher_id, amount, entry_type').in('teacher_id', allIds),
+            adminClient.from('expenses').select('teacher_id, amount').in('teacher_id', allIds)
+          ]);
+          const payableTotals2 = {};
+          (ledgersRes.data || []).forEach(l => {
+            if (!l.teacher_id) return;
+            const uid = idToUserId[l.teacher_id];
+            if (!uid) return;
+            if (l.entry_type === 'payable') {
+              payableTotals2[uid] = (payableTotals2[uid] || 0) + Number(l.amount || 0);
+            }
+          });
+          const expenseTotals = {};
+          (expensesRes.data || []).forEach(e => {
+            if (!e.teacher_id) return;
+            const uid = idToUserId[e.teacher_id];
+            if (uid) expenseTotals[uid] = (expenseTotals[uid] || 0) + Number(e.amount || 0);
+          });
+          items = (profiles || []).map(p => ({
+            id: p.user_id,
+            full_name: p.users?.full_name || 'Unknown',
+            email: p.users?.email || '',
+            phone: p.users?.phone || '',
+            teacher_code: p.teacher_code || '',
+            total_payable: payableTotals2[p.user_id] || 0,
+            total_paid: expenseTotals[p.user_id] || 0,
+            balance_owed: (payableTotals2[p.user_id] || 0) - (expenseTotals[p.user_id] || 0)
+          }));
         }
         sendJson(res, 200, { ok: true, items });
         return true;
@@ -509,15 +528,36 @@ export async function handleFinance(req, res, url) {
       const id = parts[3];
       const idField = type === 'students' ? 'student_id' : type === 'employees' ? 'employee_id' : type === 'teachers' ? 'teacher_id' : 'party_id';
 
-      const [incomeRes, expenseRes] = await Promise.all([
-        adminClient.from('ledger_entries').select('*').eq(idField, id).order('entry_date', { ascending: false }),
-        adminClient.from('expenses').select('*').eq(idField, id).order('expense_date', { ascending: false })
-      ]);
+      let incomeRes, expenseRes;
+
+      if (type === 'teachers') {
+        // teacher_id in ledger/expenses may be EITHER user_id or teacher_profiles.id
+        // Look up the teacher profile to get both IDs
+        const { data: profile } = await adminClient
+          .from('teacher_profiles')
+          .select('id, user_id')
+          .eq('user_id', id)
+          .maybeSingle();
+        const searchIds = profile ? [profile.id, profile.user_id].filter(Boolean) : [id];
+
+        [incomeRes, expenseRes] = await Promise.all([
+          adminClient.from('ledger_entries').select('*').in(idField, searchIds).order('entry_date', { ascending: false }),
+          adminClient.from('expenses').select('*').in(idField, searchIds).order('expense_date', { ascending: false })
+        ]);
+      } else {
+        [incomeRes, expenseRes] = await Promise.all([
+          adminClient.from('ledger_entries').select('*').eq(idField, id).order('entry_date', { ascending: false }),
+          adminClient.from('expenses').select('*').eq(idField, id).order('expense_date', { ascending: false })
+        ]);
+      }
 
       const history = [
         ...(incomeRes.data || []).map(i => ({
           ...i,
-          __type: i.entry_type === 'receivable' ? 'receivable' : 'income',
+          __type: i.entry_type === 'receivable' ? 'receivable'
+               : i.entry_type === 'payable' ? 'payable'
+               : i.entry_type === 'expense' ? 'expense'
+               : 'income',
           date: i.entry_date
         })),
         ...(expenseRes.data || []).map(e => ({ ...e, __type: 'expense', date: e.expense_date }))
@@ -681,18 +721,6 @@ export async function handleFinance(req, res, url) {
         created_by: actor.userId
       };
       await adminClient.from('expenses').insert([expense]);
-
-      // Add to Ledger
-      await adminClient.from('ledger_entries').insert([{
-        entry_date: nowIso().slice(0, 10),
-        entry_type: 'expense',
-        amount: request.total_amount,
-        description: `Salary Paid: ${request.year}/${String(request.month).padStart(2, '0')}`,
-        account_id: payload.account_id,
-        employee_id: request.target_type === 'employee' ? request.employee_id : null,
-        teacher_id: request.target_type === 'teacher' ? request.teacher_id : null,
-        posted_by: actor.userId
-      }]);
 
       sendJson(res, 200, { ok: true, status: 'paid' });
       return true;

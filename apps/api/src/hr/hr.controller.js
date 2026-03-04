@@ -548,8 +548,12 @@ export async function handleHR(req, res, url) {
       const attList = attRes.data || [];
 
       let workingDays = 0;
-      for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
-        if (d.getDay() !== 0) workingDays++;
+      if (payload.workingDays && Number(payload.workingDays) > 0) {
+        workingDays = Number(payload.workingDays);
+      } else {
+        for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
+          if (d.getDay() !== 0) workingDays++;
+        }
       }
 
       let present = 0, half_day = 0;
@@ -564,8 +568,15 @@ export async function handleHR(req, res, url) {
       const grossSalary = baseSalary + totalAllowances;
 
       const effectiveDays = present + (half_day * 0.5);
-      const proRatedGross = workingDays > 0 ? (grossSalary * effectiveDays / workingDays) : 0;
-      const calcNet = Math.round((proRatedGross - totalDeductions) * 100) / 100;
+      let proRatedGross = 0;
+      let calcNet = 0;
+      
+      if (effectiveDays === 0) {
+        calcNet = Math.round(grossSalary - totalDeductions);
+      } else {
+        proRatedGross = workingDays > 0 ? (grossSalary * effectiveDays / workingDays) : 0;
+        calcNet = Math.round(proRatedGross - totalDeductions);
+      }
       
       const adjustment = Number(payload.adjustment) || 0;
       const finalAmount = Math.max(0, calcNet + adjustment);

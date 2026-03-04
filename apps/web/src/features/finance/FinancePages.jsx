@@ -417,13 +417,19 @@ function LedgerModal({ type, party, onClose }) {
   const totalExpense = history.filter(r => r.__type === 'expense').reduce((s, r) => s + Number(r.amount), 0);
   const balanceOwed = totalPayable - totalExpense;
 
-  // Running balance: income credits increase balance, receivable is informational (not used in running total for non-student ledgers)
-  const chronological = [...history].reverse();
+  // Running balance: sort so payable/receivable come before expense/income on the same date
+  const typePriority = { receivable: 0, payable: 0, income: 1, expense: 1 };
+  const sorted = [...history].sort((a, b) => {
+    const dateDiff = new Date(a.date) - new Date(b.date);
+    if (dateDiff !== 0) return dateDiff;
+    return (typePriority[a.__type] || 0) - (typePriority[b.__type] || 0);
+  });
   let runningBalance = 0;
-  const rows = chronological.map(row => {
-    if (row.__type === 'income') runningBalance += Number(row.amount);
+  const rows = sorted.map(row => {
+    if (row.__type === 'income') runningBalance -= Number(row.amount);
+    else if (row.__type === 'receivable') runningBalance += Number(row.amount);
+    else if (row.__type === 'payable') runningBalance += Number(row.amount);
     else if (row.__type === 'expense') runningBalance -= Number(row.amount);
-    // receivable and payable are informational — don't move cash balance
     return { ...row, runningBalance };
   }).reverse();
 
@@ -484,8 +490,8 @@ function LedgerModal({ type, party, onClose }) {
             <tbody>
               {rows.map((r, i) => {
                 const s = typeStyle[r.__type] || { bg: '#f3f4f6', color: '#6b7280', label: r.__type };
-                const amtColor = r.__type === 'income' ? '#15803d' : r.__type === 'receivable' ? '#92400e' : '#dc2626';
-                const prefix = r.__type === 'income' ? '+' : r.__type === 'receivable' ? '' : '-';
+                const amtColor = r.__type === 'income' ? '#15803d' : (r.__type === 'receivable' || r.__type === 'payable') ? '#92400e' : '#dc2626';
+                const prefix = r.__type === 'income' ? '+' : (r.__type === 'receivable' || r.__type === 'payable') ? '+' : '-';
                 return (
                   <tr key={i}>
                     <td data-label="Date">{new Date(r.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
@@ -729,7 +735,7 @@ export function PayrollRequestsPage() {
                   </td>
                   <td data-label="HR Note" style={{ fontSize: 13, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.hr_note}>{req.hr_note || '—'}</td>
                   <td data-label="Actions" className="actions">
-                    {req.status === 'pending' ? <button className="small primary" onClick={() => viewRequest(req)}>Pay</button> : <button className="small secondary" onClick={() => viewRequest(req)}>View</button>}
+                    {req.status === 'pending' ? <button className="small primary" onClick={() => setSelectedRequest(req)}>Pay</button> : <button className="small secondary" onClick={() => setSelectedRequest(req)}>View</button>}
                   </td>
                 </tr>
               )
@@ -739,27 +745,29 @@ export function PayrollRequestsPage() {
         </table>
       </div>
 
-      {selectedRequest ? (
-        <article className="card" style={{ padding: '20px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px' }}>Process Payment</h3>
-            {selectedRequest.status === 'pending' ? (
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                <select className="input" style={{ width: 'auto', padding: '6px 12px', fontSize: '13px' }} value={selectedAccountId} onChange={e => setSelectedAccountId(e.target.value)}>
-                  <option value="">-- Select Account to Deduct --</option>
-                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name} (₹{Number(a.balance).toLocaleString()})</option>)}
-                </select>
-                <button className="primary" onClick={payRequest} disabled={paying || !selectedAccountId}>
-                  {paying ? 'Processing...' : `Pay ₹${Number(selectedRequest.total_amount).toLocaleString()}`}
-                </button>
-              </div>
-            ) : (
-              <span style={{ color: '#10b981', fontWeight: 600, fontSize: '14px' }}>Paid on: {new Date(selectedRequest.updated_at).toLocaleDateString()}</span>
-            )}
+      {selectedRequest && (
+        <div className="modal-overlay" onClick={() => setSelectedRequest(null)}>
+          <div className="modal card" onClick={e => e.stopPropagation()} style={{ padding: '24px', maxWidth: '500px', width: '90%' }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: '18px' }}>Process Payment</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              {selectedRequest.status === 'pending' ? (
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
+                  <select className="input" style={{ flex: 1, padding: '6px 12px', fontSize: '13px' }} value={selectedAccountId} onChange={e => setSelectedAccountId(e.target.value)}>
+                    <option value="">-- Select Account to Deduct --</option>
+                    {accounts.map(a => <option key={a.id} value={a.id}>{a.name} (₹{Number(a.balance).toLocaleString()})</option>)}
+                  </select>
+                  <button className="primary" onClick={payRequest} disabled={paying || !selectedAccountId}>
+                    {paying ? 'Processing...' : `Pay ₹${Number(selectedRequest.total_amount).toLocaleString()}`}
+                  </button>
+                </div>
+              ) : (
+                <span style={{ color: '#10b981', fontWeight: 600, fontSize: '14px' }}>Paid on: {new Date(selectedRequest.updated_at).toLocaleDateString()}</span>
+              )}
+            </div>
+            <p style={{ margin: '0', fontSize: '13px', color: '#4b5563' }}>Paying {selectedRequest.target_type === 'teacher' ? (selectedRequest.teacher_profiles?.users?.full_name || 'Teacher') : (selectedRequest.employees?.full_name || 'Employee')} for {MONTHS[selectedRequest.month]} {selectedRequest.year}</p>
           </div>
-          <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#4b5563' }}>Paying {selectedRequest.target_type === 'teacher' ? (selectedRequest.teacher_profiles?.users?.full_name || 'Teacher') : (selectedRequest.employees?.full_name || 'Employee')} for {MONTHS[selectedRequest.month]} {selectedRequest.year}</p>
-        </article>
-      ) : null}
+        </div>
+      )}
     </section>
   );
 }

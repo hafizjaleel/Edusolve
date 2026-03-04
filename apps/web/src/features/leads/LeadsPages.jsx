@@ -431,7 +431,6 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
                       </button>
                     )}
                     <button type="button" className="secondary small" onClick={() => onOpenDetails(lead.id)}>View</button>
-                    <button type="button" className="secondary small" onClick={() => setShowNoteModal(lead)}>📝 Note</button>
                     {lead.status !== 'dropped' && lead.status !== 'joined' && (
                       <button type="button" className="danger small" onClick={() => setShowDropModal(lead)}>Drop</button>
                     )}

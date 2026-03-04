@@ -661,6 +661,8 @@ export function SalaryCalculatorPage() {
     const [salaries, setSalaries] = useState([]);
     const [teacherReport, setTeacherReport] = useState([]);
     const [paymentRequests, setPaymentRequests] = useState([]);
+    const [attendanceMap, setAttendanceMap] = useState({});
+    const [workingDaysOverride, setWorkingDaysOverride] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [confirmSubmit, setConfirmSubmit] = useState(null); // { type, data }
     const [loading, setLoading] = useState(true);
@@ -677,18 +679,34 @@ export function SalaryCalculatorPage() {
 
     const currentMY = getMonthYearString(teacherMonthOffset);
 
+    // Auto-calculate working days (Mon-Sat) for selected month
+    const autoWorkingDays = useMemo(() => {
+        const start = new Date(currentMY.year, currentMY.month - 1, 1);
+        const end = new Date(currentMY.year, currentMY.month, 0);
+        let count = 0;
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            if (d.getDay() !== 0) count++;
+        }
+        return count;
+    }, [currentMY.month, currentMY.year]);
+
     useEffect(() => {
         setLoading(true);
         Promise.all([
             apiFetch('/hr/employees'),
             apiFetch('/hr/salary-structures'),
             apiFetch(`/hr/teachers/salary-report?month=${currentMY.month}&year=${currentMY.year}`),
-            apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`)
-        ]).then(([empRes, salRes, teachRes, prRes]) => {
+            apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`),
+            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`)
+        ]).then(([empRes, salRes, teachRes, prRes, attRes]) => {
             setEmployees(empRes.items || []);
             setSalaries(salRes.items || []);
             setTeacherReport(teachRes.items || []);
             setPaymentRequests(prRes.items || []);
+            const aMap = {};
+            (attRes.items || []).forEach(i => { aMap[i.id] = i.report; });
+            setAttendanceMap(aMap);
+            setWorkingDaysOverride(null);
         }).catch(() => { }).finally(() => setLoading(false));
     }, [currentMY.month, currentMY.year]);
 
@@ -697,12 +715,16 @@ export function SalaryCalculatorPage() {
             apiFetch('/hr/employees'),
             apiFetch('/hr/salary-structures'),
             apiFetch(`/hr/teachers/salary-report?month=${currentMY.month}&year=${currentMY.year}`),
-            apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`)
-        ]).then(([empRes, salRes, teachRes, prRes]) => {
+            apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`),
+            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`)
+        ]).then(([empRes, salRes, teachRes, prRes, attRes]) => {
             setEmployees(empRes.items || []);
             setSalaries(salRes.items || []);
             setTeacherReport(teachRes.items || []);
             setPaymentRequests(prRes.items || []);
+            const aMap = {};
+            (attRes.items || []).forEach(i => { aMap[i.id] = i.report; });
+            setAttendanceMap(aMap);
         }).catch(() => { });
     }
 
@@ -735,9 +757,10 @@ export function SalaryCalculatorPage() {
             };
 
             if (confirmSubmit.type === 'teacher') {
-                payload.teacherUserId = confirmSubmit.data.user_id; // teacher report item has user_id
+                payload.teacherUserId = confirmSubmit.data.user_id;
             } else {
                 payload.employeeId = confirmSubmit.data.id;
+                payload.workingDays = confirmSubmit.data.workingDays || 0;
             }
 
             await apiFetch(endpoint, {
@@ -785,19 +808,40 @@ export function SalaryCalculatorPage() {
             </div>
 
             {activeTab === 'employees' && (
-                <div className="card" style={{ marginBottom: 24 }}>
-                    <div className="table-wrap">
+                <>
+                    <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', marginBottom: '20px' }}>
+                        <h2 style={{ margin: 0, fontSize: '16px', color: '#10233f' }}>Employee Salaries</h2>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev - 1)} className="secondary small">←</button>
+                                <span style={{ fontSize: 14, fontWeight: 500 }}>{currentMY.label}</span>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small">→</button>
+                                {teacherMonthOffset !== 0 && (
+                                    <button onClick={() => setTeacherMonthOffset(0)} className="secondary small" style={{ marginLeft: 4 }}>Current Month</button>
+                                )}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, borderLeft: '1px solid var(--line)', paddingLeft: 12 }}>
+                                <span style={{ fontSize: 13, color: 'var(--muted)' }}>Working Days:</span>
+                                <input
+                                    type="number"
+                                    value={workingDaysOverride !== null ? workingDaysOverride : autoWorkingDays}
+                                    onChange={e => setWorkingDaysOverride(Number(e.target.value))}
+                                    style={{ width: 50, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--line)', textAlign: 'center', fontSize: 13 }}
+                                    min="0" max="31"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                    <div className="card" style={{ marginBottom: 24 }}>
                         <table>
                             <thead>
                                 <tr>
                                     <th>#</th>
                                     <th>Employee</th>
-                                    <th>Base Salary</th>
-                                    <th>HRA</th>
-                                    <th>Allowances</th>
-                                    <th>Deductions</th>
                                     <th>Gross</th>
-                                    <th>Net</th>
+                                    <th>Deductions</th>
+                                    <th style={{ textAlign: 'center' }}>Present</th>
+                                    <th>Net Salary</th>
                                     <th>Action</th>
                                 </tr>
                             </thead>
@@ -807,12 +851,26 @@ export function SalaryCalculatorPage() {
                                     const isSubmitted = !!pr;
 
                                     const sal = salaryMap[emp.id];
-                                    const base = isSubmitted && pr.breakdown && pr.breakdown.details ? Number(pr.breakdown.details.base_salary || 0) : (sal ? Number(sal.base_salary) : 0);
-                                    const hra = isSubmitted ? 0 : (sal ? Number(sal.hra) : 0);
-                                    const allowances = isSubmitted && pr.breakdown && pr.breakdown.details ? Number(pr.breakdown.details.total_allowances || 0) : (sal ? Number(sal.transport_allowance) + Number(sal.other_allowance) : 0);
-                                    const deductions = isSubmitted && pr.breakdown && pr.breakdown.details ? Number(pr.breakdown.details.total_deductions || 0) : (sal ? Number(sal.pf_deduction) + Number(sal.tax_deduction) + Number(sal.other_deduction) : 0);
-                                    const gross = isSubmitted ? (base + allowances) : (base + hra + allowances);
-                                    const net = isSubmitted ? pr.total_amount : (gross - deductions);
+                                    const base = sal ? Number(sal.base_salary) : 0;
+                                    const hra = sal ? Number(sal.hra) : 0;
+                                    const allowances = sal ? Number(sal.transport_allowance) + Number(sal.other_allowance) : 0;
+                                    const deductions = sal ? Number(sal.pf_deduction) + Number(sal.tax_deduction) + Number(sal.other_deduction) : 0;
+                                    const gross = base + hra + allowances;
+
+                                    const att = attendanceMap[emp.id] || { present: 0, half_day: 0 };
+                                    const presentDays = att.present + (att.half_day * 0.5);
+                                    const wd = workingDaysOverride !== null ? workingDaysOverride : autoWorkingDays;
+
+                                    let calcNet = 0;
+                                    if (presentDays === 0) {
+                                        // If no attendance marked, calculate full net (gross - deductions) by default for preview
+                                        calcNet = Math.round(gross - deductions);
+                                    } else {
+                                        const proRatedGross = wd > 0 ? (gross * presentDays / wd) : 0;
+                                        calcNet = Math.round(proRatedGross - deductions);
+                                    }
+
+                                    const net = isSubmitted ? pr.total_amount : Math.max(0, calcNet);
 
                                     return (
                                         <tr key={emp.id}>
@@ -821,11 +879,9 @@ export function SalaryCalculatorPage() {
                                                 <div style={{ fontWeight: 500 }}>{emp.full_name}</div>
                                                 <div style={{ fontSize: 12, color: 'var(--muted)' }}>{emp.designation || ''}</div>
                                             </td>
-                                            <td>₹{base.toLocaleString()}</td>
-                                            <td>{isSubmitted ? '-' : `₹${hra.toLocaleString()}`}</td>
-                                            <td>₹{allowances.toLocaleString()}</td>
+                                            <td>₹{gross.toLocaleString()}</td>
                                             <td>₹{deductions.toLocaleString()}</td>
-                                            <td style={{ fontWeight: 600, color: '#22c55e' }}>₹{isSubmitted && pr.breakdown ? Number(pr.breakdown.base_calculated || gross).toLocaleString() : gross.toLocaleString()}</td>
+                                            <td style={{ textAlign: 'center', fontWeight: 500 }}>{presentDays}</td>
                                             <td style={{ fontWeight: 700, color: '#10233f' }}>₹{net.toLocaleString()}</td>
                                             <td>
                                                 {isSubmitted ? (
@@ -833,7 +889,7 @@ export function SalaryCalculatorPage() {
                                                 ) : (
                                                     <div style={{ display: 'flex', gap: 6 }}>
                                                         <button onClick={() => setEditEmp(emp)} className="secondary small">{sal ? 'Edit' : 'Set'}</button>
-                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net } })} className="primary small">Submit</button>
+                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net, workingDays: wd } })} className="primary small">Submit</button>
                                                     </div>
                                                 )}
                                             </td>
@@ -843,156 +899,164 @@ export function SalaryCalculatorPage() {
                             </tbody>
                         </table>
                     </div>
-                </div>
+                </>
             )}
 
             {activeTab === 'master_rates' && <SalaryMasterRatesConfig />}
 
-            {activeTab === 'teachers' && (
-                <>
-                    <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', marginBottom: '20px' }}>
-                        <h2 style={{ margin: 0, fontSize: '16px', color: '#10233f' }}>Session-wise Salaries</h2>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                            <button onClick={() => setTeacherMonthOffset(prev => prev - 1)} className="secondary small">←</button>
-                            <span style={{ fontSize: 14, fontWeight: 500 }}>{currentMY.label}</span>
-                            <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small">→</button>
-                            {teacherMonthOffset !== 0 && (
-                                <button onClick={() => setTeacherMonthOffset(0)} className="secondary small" style={{ marginLeft: 8 }}>Current Month</button>
-                            )}
+            {
+                activeTab === 'teachers' && (
+                    <>
+                        <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px', marginBottom: '20px' }}>
+                            <h2 style={{ margin: 0, fontSize: '16px', color: '#10233f' }}>Session-wise Salaries</h2>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev - 1)} className="secondary small">←</button>
+                                <span style={{ fontSize: 14, fontWeight: 500 }}>{currentMY.label}</span>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small">→</button>
+                                {teacherMonthOffset !== 0 && (
+                                    <button onClick={() => setTeacherMonthOffset(0)} className="secondary small" style={{ marginLeft: 8 }}>Current Month</button>
+                                )}
+                            </div>
                         </div>
-                    </div>
 
-                    <div className="card">
-                        <div className="table-wrap">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>#</th>
-                                        <th>Teacher</th>
-                                        <th>Experience</th>
-                                        <th>Total Hours</th>
-                                        <th>Total Salary</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {teacherReport.map((t, idx) => {
-                                        const pr = prMap.teacher[t.id];
-                                        const isSubmitted = !!pr;
-                                        const displayVal = isSubmitted ? pr.total_amount : (t.total_salary || 0);
-
-                                        return (
-                                            <tr key={t.id} onClick={() => {
-                                                if (pr && (pr.status === 'approved' || pr.status === 'paid')) return;
-                                                setSelectedTeacher(t);
-                                            }} style={{ cursor: pr && (pr.status === 'approved' || pr.status === 'paid') ? 'default' : 'pointer' }}>
-                                                <td>{idx + 1}</td>
-                                                <td>
-                                                    <div style={{ fontWeight: 500 }}>{t.full_name}</div>
-                                                    <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t.teacher_code || 'No Code'}</div>
-                                                </td>
-                                                <td style={{ textTransform: 'capitalize' }}>{(t.experience_level || '').replace(/_/g, ' ')}</td>
-                                                <td style={{ fontWeight: 600 }}>{isSubmitted && pr.breakdown && pr.breakdown.details ? (pr.breakdown.details.total_hours || t.total_hours) : t.total_hours} hrs</td>
-                                                <td style={{ fontWeight: 700, color: '#10233f' }}>₹{displayVal.toLocaleString()}</td>
-                                                <td>
-                                                    {isSubmitted ? (
-                                                        <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
-                                                    ) : (
-                                                        <button onClick={(e) => { e.stopPropagation(); setConfirmSubmit({ type: 'teacher', data: t }); }} className="primary small">
-                                                            Submit
-                                                        </button>
-                                                    )}
-                                                </td>
-                                            </tr>
-                                        )
-                                    })}
-                                    {teacherReport.length === 0 && (
+                        <div className="card">
+                            <div className="table-wrap">
+                                <table>
+                                    <thead>
                                         <tr>
-                                            <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>No teachers found in pool</td>
+                                            <th>#</th>
+                                            <th>Teacher</th>
+                                            <th>Experience</th>
+                                            <th>Total Hours</th>
+                                            <th>Total Salary</th>
+                                            <th>Action</th>
                                         </tr>
-                                    )}
-                                </tbody>
-                            </table>
+                                    </thead>
+                                    <tbody>
+                                        {teacherReport.map((t, idx) => {
+                                            const pr = prMap.teacher[t.id];
+                                            const isSubmitted = !!pr;
+                                            const displayVal = isSubmitted ? pr.total_amount : (t.total_salary || 0);
+
+                                            return (
+                                                <tr key={t.id} onClick={() => {
+                                                    if (pr && (pr.status === 'approved' || pr.status === 'paid')) return;
+                                                    setSelectedTeacher(t);
+                                                }} style={{ cursor: pr && (pr.status === 'approved' || pr.status === 'paid') ? 'default' : 'pointer' }}>
+                                                    <td>{idx + 1}</td>
+                                                    <td>
+                                                        <div style={{ fontWeight: 500 }}>{t.full_name}</div>
+                                                        <div style={{ fontSize: 12, color: 'var(--muted)' }}>{t.teacher_code || 'No Code'}</div>
+                                                    </td>
+                                                    <td style={{ textTransform: 'capitalize' }}>{(t.experience_level || '').replace(/_/g, ' ')}</td>
+                                                    <td style={{ fontWeight: 600 }}>{isSubmitted && pr.breakdown && pr.breakdown.details ? (pr.breakdown.details.total_hours || t.total_hours) : t.total_hours} hrs</td>
+                                                    <td style={{ fontWeight: 700, color: '#10233f' }}>₹{displayVal.toLocaleString()}</td>
+                                                    <td>
+                                                        {isSubmitted ? (
+                                                            <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
+                                                        ) : (
+                                                            <button onClick={(e) => { e.stopPropagation(); setConfirmSubmit({ type: 'teacher', data: t }); }} className="primary small">
+                                                                Submit
+                                                            </button>
+                                                        )}
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                        {teacherReport.length === 0 && (
+                                            <tr>
+                                                <td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--muted)' }}>No teachers found in pool</td>
+                                            </tr>
+                                        )}
+                                    </tbody>
+                                </table>
+                            </div>
                         </div>
-                    </div>
-                </>
-            )}
+                    </>
+                )
+            }
 
-            {editEmp && (
-                <SalaryModal
-                    employee={editEmp}
-                    existing={salaryMap[editEmp.id]}
-                    onClose={() => setEditEmp(null)}
-                    onDone={() => { setEditEmp(null); reload(); }}
-                />
-            )}
+            {
+                editEmp && (
+                    <SalaryModal
+                        employee={editEmp}
+                        existing={salaryMap[editEmp.id]}
+                        onClose={() => setEditEmp(null)}
+                        onDone={() => { setEditEmp(null); reload(); }}
+                    />
+                )
+            }
 
-            {selectedTeacher && (
-                <TeacherSalaryDetail
-                    teacher={selectedTeacher}
-                    month={currentMY.month}
-                    year={currentMY.year}
-                    onClose={() => setSelectedTeacher(null)}
-                    onRatesUpdated={(closeModal = true) => { if (closeModal) setSelectedTeacher(null); reload(); }}
-                />
-            )}
+            {
+                selectedTeacher && (
+                    <TeacherSalaryDetail
+                        teacher={selectedTeacher}
+                        month={currentMY.month}
+                        year={currentMY.year}
+                        onClose={() => setSelectedTeacher(null)}
+                        onRatesUpdated={(closeModal = true) => { if (closeModal) setSelectedTeacher(null); reload(); }}
+                    />
+                )
+            }
 
             {/* Confirm Submit Modal */}
-            {confirmSubmit && (
-                <div className="modal-overlay" onClick={() => setConfirmSubmit(null)}>
-                    <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
-                        <h3 style={{ marginTop: 0 }}>Confirm Payment Submission</h3>
-                        <p style={{ fontSize: 14 }}>
-                            You are submitting a payment request to Finance for <strong>{confirmSubmit.data.full_name}</strong> for {currentMY.label}.
-                        </p>
-                        <div style={{ background: 'var(--bg)', padding: '12px 16px', borderRadius: 8, marginBottom: 16 }}>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                                <span style={{ color: 'var(--muted)', fontSize: 13 }}>Calculated Value:</span>
-                                <strong style={{ color: '#10233f', fontSize: 14 }}>
-                                    ₹{Number(confirmSubmit.type === 'teacher' ? confirmSubmit.data.total_salary : confirmSubmit.data.calcNet).toLocaleString()}
-                                </strong>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ color: 'var(--muted)', fontSize: 13 }}>Adjustment (₹):</span>
-                                <input
-                                    type="number"
-                                    value={confirmSubmit.adjustment || ''}
-                                    onChange={e => setConfirmSubmit({ ...confirmSubmit, adjustment: Number(e.target.value) })}
-                                    style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line)', textAlign: 'right' }}
-                                    placeholder="0"
-                                />
-                            </div>
-                            {confirmSubmit.adjustment ? (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
-                                    <span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 500 }}>Final Amount:</span>
-                                    <strong style={{ color: '#22c55e', fontSize: 15 }}>
-                                        ₹{Math.max(0, Number(confirmSubmit.type === 'teacher' ? confirmSubmit.data.total_salary : confirmSubmit.data.calcNet) + (confirmSubmit.adjustment || 0)).toLocaleString()}
+            {
+                confirmSubmit && (
+                    <div className="modal-overlay" onClick={() => setConfirmSubmit(null)}>
+                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 400 }}>
+                            <h3 style={{ marginTop: 0 }}>Confirm Payment Submission</h3>
+                            <p style={{ fontSize: 14 }}>
+                                You are submitting a payment request to Finance for <strong>{confirmSubmit.data.full_name}</strong> for {currentMY.label}.
+                            </p>
+                            <div style={{ background: 'var(--bg)', padding: '12px 16px', borderRadius: 8, marginBottom: 16 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                                    <span style={{ color: 'var(--muted)', fontSize: 13 }}>Calculated Value:</span>
+                                    <strong style={{ color: '#10233f', fontSize: 14 }}>
+                                        ₹{Number(confirmSubmit.type === 'teacher' ? confirmSubmit.data.total_salary : confirmSubmit.data.calcNet).toLocaleString()}
                                     </strong>
                                 </div>
-                            ) : null}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ color: 'var(--muted)', fontSize: 13 }}>Adjustment (₹):</span>
+                                    <input
+                                        type="number"
+                                        value={confirmSubmit.adjustment || ''}
+                                        onChange={e => setConfirmSubmit({ ...confirmSubmit, adjustment: Number(e.target.value) })}
+                                        style={{ width: 80, padding: '4px 8px', borderRadius: 6, border: '1px solid var(--line)', textAlign: 'right' }}
+                                        placeholder="0"
+                                    />
+                                </div>
+                                {confirmSubmit.adjustment ? (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+                                        <span style={{ color: 'var(--muted)', fontSize: 13, fontWeight: 500 }}>Final Amount:</span>
+                                        <strong style={{ color: '#22c55e', fontSize: 15 }}>
+                                            ₹{Math.max(0, Number(confirmSubmit.type === 'teacher' ? confirmSubmit.data.total_salary : confirmSubmit.data.calcNet) + (confirmSubmit.adjustment || 0)).toLocaleString()}
+                                        </strong>
+                                    </div>
+                                ) : null}
+                            </div>
+                            <div style={{ marginBottom: 16 }}>
+                                <label style={{ display: 'block', fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>HR Note (Optional):</label>
+                                <textarea
+                                    value={confirmSubmit.hr_note || ''}
+                                    onChange={e => setConfirmSubmit({ ...confirmSubmit, hr_note: e.target.value })}
+                                    style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', minHeight: 60, fontSize: 14 }}
+                                    placeholder="Any specific reason for adjustment or note for finance..."
+                                />
+                            </div>
+                            <p style={{ fontSize: 13, color: 'var(--warning)', margin: '0 0 20px', lineHeight: 1.4 }}>
+                                Warning: This snapshot will be frozen in history. Future rate changes will not alter this month's submitted amount.
+                            </p>
+                            <form onSubmit={handleSubmitRequest} style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                                <button type="button" onClick={() => setConfirmSubmit(null)} className="secondary" style={{ padding: '8px 16px' }}>Cancel</button>
+                                <button type="submit" className="primary" disabled={submitting} style={{ padding: '8px 16px', background: '#22c55e', borderColor: '#22c55e', color: '#fff' }}>
+                                    {submitting ? 'Submitting...' : 'Confirm & Submit'}
+                                </button>
+                            </form>
                         </div>
-                        <div style={{ marginBottom: 16 }}>
-                            <label style={{ display: 'block', fontSize: 13, color: 'var(--muted)', marginBottom: 4 }}>HR Note (Optional):</label>
-                            <textarea
-                                value={confirmSubmit.hr_note || ''}
-                                onChange={e => setConfirmSubmit({ ...confirmSubmit, hr_note: e.target.value })}
-                                style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg)', minHeight: 60, fontSize: 14 }}
-                                placeholder="Any specific reason for adjustment or note for finance..."
-                            />
-                        </div>
-                        <p style={{ fontSize: 13, color: 'var(--warning)', margin: '0 0 20px', lineHeight: 1.4 }}>
-                            Warning: This snapshot will be frozen in history. Future rate changes will not alter this month's submitted amount.
-                        </p>
-                        <form onSubmit={handleSubmitRequest} style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                            <button type="button" onClick={() => setConfirmSubmit(null)} className="secondary" style={{ padding: '8px 16px' }}>Cancel</button>
-                            <button type="submit" className="primary" disabled={submitting} style={{ padding: '8px 16px', background: '#22c55e', borderColor: '#22c55e', color: '#fff' }}>
-                                {submitting ? 'Submitting...' : 'Confirm & Submit'}
-                            </button>
-                        </form>
                     </div>
-                </div>
-            )}
-        </section>
+                )
+            }
+        </section >
     );
 }
 
