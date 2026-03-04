@@ -102,7 +102,7 @@ export class LeadsService {
     return data || [];
   }
 
-  async list({ scope, actor, page, limit }) {
+  async list({ scope, actor, page, limit, status, counselor_id, lead_type }) {
     const adminClient = getSupabaseAdminClient();
 
     if (!isCounselor(actor) && !isCounselorHead(actor) && !isSuperAdmin(actor)) {
@@ -138,7 +138,23 @@ export class LeadsService {
 
     if (resolvedScope === 'mine') {
       query = query.eq('counselor_id', actor.userId);
-    } else if (resolvedScope === 'joined') {
+    } else if (counselor_id && counselor_id !== 'all') {
+      query = query.eq('counselor_id', counselor_id);
+    }
+
+    if (status && status !== 'all') {
+      if (status.includes(',')) {
+        query = query.in('status', status.split(',').map(s => s.trim()));
+      } else {
+        query = query.eq('status', status);
+      }
+    }
+
+    if (lead_type && lead_type !== 'all') {
+      query = query.eq('lead_type', lead_type);
+    }
+
+    if (resolvedScope === 'joined') {
       // Fetch leads without any ambiguous joins
       let joinedQuery = adminClient
         .from('leads')
@@ -146,6 +162,9 @@ export class LeadsService {
         .is('deleted_at', null)
         .eq('status', 'joined')
         .order('updated_at', { ascending: false });
+
+      if (counselor_id && counselor_id !== 'all') joinedQuery = joinedQuery.eq('counselor_id', counselor_id);
+      if (lead_type && lead_type !== 'all') joinedQuery = joinedQuery.eq('lead_type', lead_type);
 
       if (page && limit) {
         const from = (page - 1) * limit;
@@ -561,6 +580,7 @@ export class LeadsService {
     let query = adminClient
       .from('payment_requests')
       .select('*, leads(student_name, subject, class_level, contact_number, counselor_id)', { count: 'exact' })
+      .order('status', { ascending: true })
       .order('created_at', { ascending: false });
 
     // Counselors see only their own requests

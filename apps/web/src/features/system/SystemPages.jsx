@@ -8,6 +8,7 @@ export function UsersPage() {
     const [loading, setLoading] = useState(true);
     const [editingUser, setEditingUser] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
+    const [deleteConfirm, setDeleteConfirm] = useState(null); // user object to delete
 
     async function load() {
         try {
@@ -69,11 +70,7 @@ export function UsersPage() {
                                                 <button className="secondary small" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => setEditingUser(u)}>
                                                     Edit
                                                 </button>
-                                                <button className="text-danger" style={{ fontSize: '12px' }} onClick={() => {
-                                                    if (confirm('Are you sure you want to remove this user?')) {
-                                                        apiFetch(`/admin/users/${u.id}`, { method: 'DELETE' }).then(load);
-                                                    }
-                                                }}>Remove</button>
+                                                <button className="text-danger" style={{ fontSize: '12px' }} onClick={() => setDeleteConfirm(u)}>Remove</button>
                                             </div>
                                         </td>
                                     </tr>
@@ -87,7 +84,73 @@ export function UsersPage() {
 
             {showAdd && <UserModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); load(); }} />}
             {editingUser && <UserModal user={editingUser} onClose={() => setEditingUser(null)} onDone={() => { setEditingUser(null); load(); }} />}
+            {deleteConfirm && <DeleteConfirmModal user={deleteConfirm} onClose={() => setDeleteConfirm(null)} onDone={() => { setDeleteConfirm(null); load(); }} />}
         </section>
+    );
+}
+
+function DeleteConfirmModal({ user, onClose, onDone }) {
+    const [typed, setTyped] = useState('');
+    const [deleting, setDeleting] = useState(false);
+    const match = typed === user.email;
+
+    async function handleDelete() {
+        setDeleting(true);
+        try {
+            await apiFetch(`/admin/users/${user.id}`, { method: 'DELETE' });
+            onDone();
+        } catch (err) {
+            alert(err.message);
+            setDeleting(false);
+        }
+    }
+
+    return (
+        <div className="modal-overlay">
+            <div className="modal" style={{ maxWidth: 420 }}>
+                <div style={{ textAlign: 'center', marginBottom: 16 }}>
+                    <div style={{ width: 48, height: 48, borderRadius: '50%', background: '#fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px', fontSize: 24 }}>⚠️</div>
+                    <h3 style={{ margin: '0 0 6px', color: '#dc2626' }}>Delete User Permanently</h3>
+                    <p style={{ margin: 0, fontSize: 13, color: '#6b7280' }}>
+                        This will permanently remove <strong>{user.name || user.email}</strong> and all their associated data including employee records, attendance, and role assignments.
+                    </p>
+                </div>
+
+                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
+                    <p style={{ margin: 0, fontSize: 12, color: '#991b1b', fontWeight: 600, marginBottom: 8 }}>
+                        To confirm, type the user's email below:
+                    </p>
+                    <code style={{ display: 'block', fontSize: 13, color: '#dc2626', marginBottom: 8, wordBreak: 'break-all' }}>{user.email}</code>
+                    <input
+                        type="text"
+                        value={typed}
+                        onChange={e => setTyped(e.target.value)}
+                        placeholder="Type email to confirm..."
+                        autoFocus
+                        style={{
+                            width: '100%', padding: '8px 12px', borderRadius: 6,
+                            border: `1px solid ${match ? '#22c55e' : '#d1d5db'}`,
+                            fontSize: 14, outline: 'none'
+                        }}
+                    />
+                </div>
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={onClose} className="secondary" style={{ flex: 1 }}>Cancel</button>
+                    <button
+                        onClick={handleDelete}
+                        disabled={!match || deleting}
+                        style={{
+                            flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none', cursor: match ? 'pointer' : 'not-allowed',
+                            background: match ? '#dc2626' : '#e5e7eb', color: match ? '#fff' : '#9ca3af',
+                            fontWeight: 600, fontSize: 14, transition: 'all 0.15s'
+                        }}
+                    >
+                        {deleting ? 'Deleting...' : 'Delete Permanently'}
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -197,8 +260,6 @@ function UserModal({ user, onClose, onDone }) {
 export function SystemSettingsPage() {
     return (
         <section className="panel">
-            <h2>System Settings</h2>
-            <p style={{ marginBottom: '24px' }}>Configure global system behaviors.</p>
 
             <div className="grid-two">
                 <div className="card">

@@ -89,6 +89,7 @@ export async function handleFinance(req, res, url) {
       let query = adminClient
         .from('payment_requests')
         .select('*, leads(*), users!payment_requests_requested_by_fkey(full_name)')
+        .order('status', { ascending: true })
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
       const { data, error } = await query;
@@ -104,6 +105,7 @@ export async function handleFinance(req, res, url) {
       let query = adminClient
         .from('student_topups')
         .select('*, students(student_code,student_name), users!student_topups_requested_by_fkey(full_name)')
+        .order('status', { ascending: true })
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
       const { data, error } = await query;

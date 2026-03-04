@@ -3,9 +3,69 @@ import { apiFetch } from '../../lib/api.js';
 import { PhoneInput, isValidEmail } from '../../components/PhoneInput.jsx';
 
 /* ═══════ HR DASHBOARD ═══════ */
+
+/** Tiny SVG donut chart — no external dependencies */
+function DonutChart({ segments, size = 120, thickness = 22 }) {
+    const r = (size - thickness) / 2;
+    const cx = size / 2;
+    const cy = size / 2;
+    const circumference = 2 * Math.PI * r;
+
+    const total = segments.reduce((sum, s) => sum + s.value, 0);
+    if (total === 0) {
+        return (
+            <svg width={size} height={size}>
+                <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e2e8f0" strokeWidth={thickness} />
+                <text x={cx} y={cy + 5} textAnchor="middle" fill="#94a3b8" fontSize={13}>—</text>
+            </svg>
+        );
+    }
+
+    let offset = 0;
+    const slices = segments.map(seg => {
+        const dash = (seg.value / total) * circumference;
+        const gap = circumference - dash;
+        const slice = { ...seg, dash, gap, offset };
+        offset += dash;
+        return slice;
+    });
+
+    const centerVal = segments[0]?.value ?? 0;
+
+    return (
+        <svg width={size} height={size} style={{ transform: 'rotate(-90deg)' }}>
+            <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e2e8f0" strokeWidth={thickness} />
+            {slices.map((s, i) => (
+                <circle key={i} cx={cx} cy={cy} r={r} fill="none"
+                    stroke={s.color} strokeWidth={thickness}
+                    strokeDasharray={`${s.dash} ${s.gap}`}
+                    strokeDashoffset={-s.offset}
+                    strokeLinecap="butt"
+                />
+            ))}
+            <text x={cx} y={cy + 5} textAnchor="middle"
+                style={{ transform: 'rotate(90deg)', transformOrigin: `${cx}px ${cy}px` }}
+                fill="#334155" fontSize={22} fontWeight={700}>
+                {centerVal}
+            </text>
+        </svg>
+    );
+}
+
+/** Horizontal mini progress bar */
+function MiniBar({ value, max, color }) {
+    const pct = max > 0 ? Math.min(100, (value / max) * 100) : 0;
+    return (
+        <div style={{ marginTop: 10, height: 5, borderRadius: 99, background: '#e9ecef', overflow: 'hidden' }}>
+            <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 99, transition: 'width 0.6s ease' }} />
+        </div>
+    );
+}
+
 export function HRDashboardPage() {
     const [stats, setStats] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [period, setPeriod] = useState('today');
 
     useEffect(() => {
         apiFetch('/hr/stats').then(r => setStats(r.stats)).catch(() => { }).finally(() => setLoading(false));
@@ -14,44 +74,187 @@ export function HRDashboardPage() {
     if (loading) return <section className="panel"><p>Loading system overview...</p></section>;
 
     const s = stats || {};
+    const total = s.totalEmployees || 0;
+    const totalStaff = s.totalStaff || 0;
+    const pending = s.pendingPaymentRequests || 0;
+
+    // Top cards always show today
+    const present = s.todayPresent || 0;
+    const absent = s.todayAbsent || 0;
+    const halfDay = s.todayHalfDay || 0;
+    const attendanceRate = totalStaff > 0 ? Math.round((present / totalStaff) * 100) : 0;
+
+    // Period-based breakdown (staff only)
+    const periodData = s.periods?.[period] || { present: 0, absent: 0, half_day: 0, total_staff: totalStaff };
+    const pPresent = periodData.present || 0;
+    const pAbsent = periodData.absent || 0;
+    const pHalfDay = periodData.half_day || 0;
+    // For week/month we compare against total possible days × staff
+    const periodMax = Math.max(pPresent + pAbsent + pHalfDay, 1);
+
+    const donutSegments = [
+        { value: pPresent, color: 'var(--success)', label: 'Present' },
+        { value: pAbsent, color: 'var(--danger)', label: 'Absent' },
+        { value: pHalfDay, color: '#e8a000', label: 'Half Day' },
+    ];
+
+    const periods = [
+        { key: 'today', label: 'Today' },
+        { key: 'week', label: 'This Week' },
+        { key: 'month', label: 'This Month' },
+        { key: 'last_month', label: 'Last Month' },
+    ];
+
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 20px', fontSize: '20px', fontWeight: 700 }}>HR Dashboard</h2>
-            <div className="grid-four">
-                <article className="card stat-card">
-                    <p className="eyebrow">Total Employees</p>
-                    <h3>{s.totalEmployees || 0}</h3>
-                </article>
-                <article className="card stat-card success">
-                    <p className="eyebrow">Present Today</p>
-                    <h3>{s.todayPresent || 0}</h3>
-                </article>
-                <article className="card stat-card danger">
-                    <p className="eyebrow">Absent Today</p>
-                    <h3>{s.todayAbsent || 0}</h3>
-                </article>
-                <article className="card stat-card warning">
-                    <p className="eyebrow">Half Day</p>
-                    <h3>{s.todayHalfDay || 0}</h3>
+            {/* Top stat cards — always today */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14 }}>
+
+                {/* Total Employees */}
+                <article className="card" style={{ padding: '16px 18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <p className="eyebrow">Total Staff</p>
+                        <span style={{ fontSize: 18 }}>👥</span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: 'var(--primary)' }}>{totalStaff}</h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>of {total} employees</p>
+                    <MiniBar value={totalStaff} max={Math.max(total, 1)} color="var(--primary)" />
                 </article>
 
-                <article className="card stat-card">
-                    <p className="eyebrow">On Leave</p>
-                    <h3>{s.todayLeave || 0}</h3>
-                </article>
-                <article className="card stat-card info">
-                    <p className="eyebrow">Attendance Marked</p>
-                    <h3>{s.todayMarked || 0}</h3>
+                {/* Present Today */}
+                <article className="card stat-card success" style={{ padding: '16px 18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <p className="eyebrow" style={{ color: 'var(--success)' }}>Present Today</p>
+                        <span style={{ fontSize: 18 }}>✅</span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: 'var(--success)' }}>{present}</h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>of {totalStaff} staff</p>
+                    <MiniBar value={present} max={totalStaff} color="var(--success)" />
                 </article>
 
-                <article className="card stat-card danger">
-                    <p className="eyebrow">Pending Requests</p>
-                    <h3>{s.pendingPaymentRequests || 0}</h3>
+                {/* Absent Today */}
+                <article className="card stat-card danger" style={{ padding: '16px 18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <p className="eyebrow" style={{ color: 'var(--danger)' }}>Absent Today</p>
+                        <span style={{ fontSize: 18 }}>❌</span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: 'var(--danger)' }}>{absent}</h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>of {totalStaff} staff</p>
+                    <MiniBar value={absent} max={totalStaff} color="var(--danger)" />
                 </article>
+
+                {/* Half Day */}
+                <article className="card" style={{ padding: '16px 18px', borderColor: '#fde68a' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <p className="eyebrow" style={{ color: '#b45309' }}>Half Day</p>
+                        <span style={{ fontSize: 18 }}>🌗</span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: '#b45309' }}>{halfDay}</h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>partial</p>
+                    <MiniBar value={halfDay} max={totalStaff} color="#e8a000" />
+                </article>
+
+                {/* Pending Requests */}
+                <article className={`card ${pending > 0 ? 'stat-card danger' : 'stat-card success'}`} style={{ padding: '16px 18px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                        <p className="eyebrow" style={{ color: pending > 0 ? 'var(--danger)' : 'var(--success)' }}>Pending Requests</p>
+                        <span style={{ fontSize: 18 }}>📋</span>
+                    </div>
+                    <h3 style={{ margin: 0, fontSize: 30, fontWeight: 800, color: pending > 0 ? 'var(--danger)' : 'var(--success)' }}>{pending}</h3>
+                    <p style={{ margin: '3px 0 0', fontSize: 12, color: 'var(--muted)' }}>payment requests</p>
+                    <MiniBar value={pending} max={Math.max(pending, 5)} color={pending > 0 ? 'var(--danger)' : 'var(--success)'} />
+                </article>
+
+            </div>
+
+            {/* Bottom row: donut + staff attendance breakdown with period tabs */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14 }}>
+
+                {/* Donut */}
+                <article className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+                    <p className="eyebrow" style={{ alignSelf: 'flex-start' }}>Staff Attendance</p>
+                    <DonutChart segments={donutSegments} size={128} thickness={22} />
+                    <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center' }}>
+                        {donutSegments.map(seg => (
+                            <div key={seg.label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12 }}>
+                                <span style={{ width: 9, height: 9, borderRadius: '50%', background: seg.color, display: 'inline-block' }} />
+                                <span style={{ color: 'var(--muted)' }}>{seg.label}</span>
+                                <span style={{ fontWeight: 700, color: 'var(--text)' }}>{seg.value}</span>
+                            </div>
+                        ))}
+                    </div>
+                    <p style={{ margin: 0, fontSize: 11, color: 'var(--muted)', textAlign: 'center' }}>
+                        {s.periods?.[period]?.label || 'Today'} · Staff only
+                    </p>
+                </article>
+
+                {/* Breakdown with period tabs */}
+                <article className="card" style={{ padding: '18px 20px' }}>
+                    {/* Period tab selector */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+                        <p className="eyebrow">Attendance Breakdown</p>
+                        <div className="tabs-row" style={{ gap: 6 }}>
+                            {periods.map(p => (
+                                <button key={p.key}
+                                    onClick={() => setPeriod(p.key)}
+                                    className={`tab-btn${period === p.key ? ' active' : ''}`}
+                                    style={{ padding: '4px 12px', fontSize: 12, borderRadius: 8 }}>
+                                    {p.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                        {[
+                            { label: 'Present', value: pPresent, color: 'var(--success)', trackColor: '#b7efcc', textColor: 'var(--success)' },
+                            { label: 'Absent', value: pAbsent, color: 'var(--danger)', trackColor: '#f4c0c0', textColor: 'var(--danger)' },
+                            { label: 'Half Day', value: pHalfDay, color: '#e8a000', trackColor: '#fde68a', textColor: '#b45309' },
+                        ].map(row => {
+                            const pct = periodMax > 0 ? Math.round((row.value / periodMax) * 100) : 0;
+                            return (
+                                <div key={row.label}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }}>
+                                        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={{ width: 8, height: 8, borderRadius: '50%', background: row.color, display: 'inline-block' }} />
+                                            <span style={{ color: 'var(--text)', fontWeight: 500 }}>{row.label}</span>
+                                        </span>
+                                        <span style={{ fontWeight: 700, color: row.textColor }}>
+                                            {row.value} <span style={{ color: 'var(--muted)', fontWeight: 400, fontSize: 11 }}>({pct}%)</span>
+                                        </span>
+                                    </div>
+                                    <div className="bar-track">
+                                        <div style={{
+                                            width: `${pct}%`, height: '100%', borderRadius: 999,
+                                            background: row.color,
+                                            transition: 'width 0.6s ease'
+                                        }} />
+                                    </div>
+                                </div>
+                            );
+                        })}
+
+                        {/* Summary row */}
+                        <div style={{
+                            marginTop: 4, padding: '10px 14px', borderRadius: 10,
+                            background: 'var(--surface-soft)', border: '1px solid var(--line)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between'
+                        }}>
+                            <span style={{ fontSize: 13, color: 'var(--muted)' }}>
+                                Staff tracked · {s.periods?.[period]?.label || 'Today'}
+                            </span>
+                            <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--primary)' }}>
+                                {totalStaff} staff
+                            </span>
+                        </div>
+                    </div>
+                </article>
+
             </div>
         </section>
     );
 }
+
 
 /* ═══════ ATTENDANCE PAGE ═══════ */
 export function AttendancePage() {
@@ -190,16 +393,16 @@ export function AttendancePage() {
             <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
                 <span style={{ fontSize: 13, color: '#64748b', marginRight: 4 }}>Quick:</span>
                 <button onClick={() => markAllAs('present')}
-                    style={{ padding: '4px 12px', borderRadius: 6, background: '#064e3b', color: '#22c55e', border: 'none', cursor: 'pointer', fontSize: 12 }}>
+                    style={{ padding: '4px 12px', borderRadius: 6, background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', cursor: 'pointer', fontSize: 12 }}>
                     Mark all Present
                 </button>
                 <button onClick={() => markAllAs('absent')}
-                    style={{ padding: '4px 12px', borderRadius: 6, background: '#7f1d1d', color: '#ef4444', border: 'none', cursor: 'pointer', fontSize: 12 }}>
+                    style={{ padding: '4px 12px', borderRadius: 6, background: '#fee2e2', color: '#991b1b', border: '1px solid #fecaca', cursor: 'pointer', fontSize: 12 }}>
                     Mark all Absent
                 </button>
                 {filter !== 'all' && (
                     <button onClick={() => setFilter('all')}
-                        style={{ padding: '4px 12px', borderRadius: 6, background: '#334155', color: '#e2e8f0', border: 'none', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
+                        style={{ padding: '4px 12px', borderRadius: 6, background: '#dbeafe', color: '#1d4ed8', border: '1px solid #bfdbfe', cursor: 'pointer', fontSize: 12, marginLeft: 'auto' }}>
                         Show All
                     </button>
                 )}
@@ -233,14 +436,14 @@ export function AttendancePage() {
                                             <td>
                                                 <span style={{
                                                     padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
-                                                    background: emp.employee_type === 'student' ? '#1e3a5f' : '#1e293b',
-                                                    color: emp.employee_type === 'student' ? '#60a5fa' : '#94a3b8'
+                                                    background: emp.employee_type === 'student' ? '#dbeafe' : '#eff6ff',
+                                                    color: emp.employee_type === 'student' ? '#1d4ed8' : '#3b82f6'
                                                 }}>
                                                     {emp.employee_type}
                                                 </span>
                                             </td>
                                             <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                                <div style={{ display: 'inline-flex', gap: 4, background: '#0f172a', borderRadius: 8, padding: 3 }}>
+                                                <div style={{ display: 'inline-flex', gap: 4, background: '#eff6ff', borderRadius: 8, padding: 3, border: '1px solid #bfdbfe' }}>
                                                     {statuses.map(s => {
                                                         const isActive = currentStatus === s;
                                                         return (
@@ -250,7 +453,7 @@ export function AttendancePage() {
                                                                     padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
                                                                     fontSize: 12, fontWeight: isActive ? 700 : 400,
                                                                     background: isActive ? statusColors[s] : 'transparent',
-                                                                    color: isActive ? '#fff' : '#64748b',
+                                                                    color: isActive ? '#fff' : '#6b7280',
                                                                     transition: 'all 0.15s', minWidth: 70
                                                                 }}>
                                                                 <span style={{ marginRight: 4 }}>{statusIcons[s]}</span>
@@ -277,13 +480,13 @@ export function AttendancePage() {
             {changesCount > 0 && (
                 <div style={{
                     position: 'fixed', bottom: 0, left: 0, right: 0, padding: '12px 24px',
-                    background: '#0f172af0', backdropFilter: 'blur(10px)',
+                    background: '#eff6fff0', backdropFilter: 'blur(10px)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 16,
-                    borderTop: '1px solid #334155', zIndex: 100
+                    borderTop: '1px solid #bfdbfe', zIndex: 100
                 }}>
-                    <span style={{ color: '#94a3b8', fontSize: 14 }}>{changesCount} unsaved change{changesCount > 1 ? 's' : ''}</span>
+                    <span style={{ color: '#3b82f6', fontSize: 14 }}>{changesCount} unsaved change{changesCount > 1 ? 's' : ''}</span>
                     <button onClick={() => setChanges({})}
-                        style={{ padding: '8px 20px', borderRadius: 8, background: '#334155', color: '#e2e8f0', border: 'none', cursor: 'pointer', fontSize: 14 }}>
+                        style={{ padding: '8px 20px', borderRadius: 8, background: '#dbeafe', color: '#1d4ed8', border: '1px solid #bfdbfe', cursor: 'pointer', fontSize: 14 }}>
                         Discard
                     </button>
                     <button onClick={saveAll} disabled={saving}

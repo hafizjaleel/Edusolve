@@ -67,6 +67,43 @@ export async function handleTeachers(req, res, url) {
       return true;
     }
 
+    // ── GET /admin/tcs — list all teacher coordinators (super_admin only) ──
+    if (req.method === 'GET' && url.pathname === '/admin/tcs') {
+      if (actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'forbidden' });
+        return true;
+      }
+      const { data: { users }, error } = await adminClient.auth.admin.listUsers();
+      if (error) throw new Error(error.message);
+      const tcs = (users || [])
+        .filter(u => (u.user_metadata?.role || u.app_metadata?.role) === 'teacher_coordinator')
+        .map(u => ({ id: u.id, full_name: u.user_metadata?.full_name || u.user_metadata?.name || u.email, email: u.email }));
+      sendJson(res, 200, { ok: true, items: tcs });
+      return true;
+    }
+
+
+    // ── PATCH /teachers/:id/assign-tc — reassign teacher coordinator (super_admin only) ──
+    const assignTcMatch = url.pathname.match(/^\/teachers\/([0-9a-fA-F-]+)\/assign-tc$/);
+    if (req.method === 'PATCH' && assignTcMatch) {
+      if (actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'super_admin role required' });
+        return true;
+      }
+      const teacherId = assignTcMatch[1];
+      const body = await readJson(req);
+      const teacher_coordinator_id = body?.teacher_coordinator_id ?? null;
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .update({ teacher_coordinator_id, updated_at: nowIso() })
+        .eq('id', teacherId)
+        .select('*, coordinator:users!teacher_coordinator_id(id,full_name)')
+        .single();
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
+
     // ── PATCH /teachers/:id/pool-status — toggle is_in_pool ──
     const poolStatusMatch = url.pathname.match(/^\/teachers\/([0-9a-fA-F-]+)\/pool-status$/);
     if (req.method === 'PATCH' && poolStatusMatch) {
@@ -84,7 +121,7 @@ export async function handleTeachers(req, res, url) {
         .eq('id', teacherId)
         .select()
         .single();
-        
+
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, item: data });
       return true;
@@ -120,12 +157,12 @@ export async function handleTeachers(req, res, url) {
           .select('id, teacher_id, scheduled_at, ends_at, status, leads(student_name, subject)')
           .in('teacher_id', teacherUserIds)
           .in('status', ['scheduled', 'rescheduled']);
-          
+
         if (startDate && endDate) {
-            demosQuery = demosQuery.gte('scheduled_at', `${startDate}T00:00:00.000Z`)
-                                   .lte('scheduled_at', `${endDate}T23:59:59.999Z`);
+          demosQuery = demosQuery.gte('scheduled_at', `${startDate}T00:00:00.000Z`)
+            .lte('scheduled_at', `${endDate}T23:59:59.999Z`);
         } else {
-            demosQuery = demosQuery.gte('scheduled_at', new Date().toISOString());
+          demosQuery = demosQuery.gte('scheduled_at', new Date().toISOString());
         }
 
         const { data: demos } = await demosQuery;
@@ -136,13 +173,13 @@ export async function handleTeachers(req, res, url) {
           .select('id, teacher_id, session_date, started_at, duration_hours, status')
           .in('teacher_id', teacherUserIds)
           .in('status', ['scheduled', 'rescheduled', 'completed']);
-          
+
         if (startDate && endDate) {
-            sessionsQuery = sessionsQuery.gte('session_date', startDate)
-                                         .lte('session_date', endDate);
+          sessionsQuery = sessionsQuery.gte('session_date', startDate)
+            .lte('session_date', endDate);
         } else {
-            const todayStr = new Date().toISOString().slice(0, 10);
-            sessionsQuery = sessionsQuery.gte('session_date', todayStr);
+          const todayStr = new Date().toISOString().slice(0, 10);
+          sessionsQuery = sessionsQuery.gte('session_date', todayStr);
         }
 
         const { data: sessions } = await sessionsQuery;

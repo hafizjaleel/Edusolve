@@ -44,19 +44,64 @@ export async function handleStudents(req, res, url) {
         return true;
       }
 
+      const acIdFilter = url.searchParams.get('ac_id') || '';
+
       let query = adminClient
         .from('students')
-        .select('*, student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
+        .select('*, ac_user:academic_coordinator_id(id, full_name), student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       if (isAC(actor)) {
         query = query.eq('academic_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && acIdFilter) {
+        query = query.eq('academic_coordinator_id', acIdFilter);
       }
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+
+      const students = data || [];
+
+      // Determine outstanding balance per student (total_amount > amount = outstanding)
+      if (students.length > 0) {
+        const studentIds = students.map(s => s.id);
+        const leadIds = students.map(s => s.lead_id).filter(Boolean);
+
+        const [topupRes, prRes] = await Promise.all([
+          adminClient
+            .from('student_topups')
+            .select('student_id, total_amount, amount')
+            .in('student_id', studentIds)
+            .neq('status', 'rejected'),
+          leadIds.length > 0
+            ? adminClient
+              .from('payment_requests')
+              .select('lead_id, total_amount, amount')
+              .in('lead_id', leadIds)
+              .neq('status', 'rejected')
+            : Promise.resolve({ data: [] })
+        ]);
+
+        const topupOutstandingMap = {};
+        for (const t of (topupRes.data || [])) {
+          const out = Number(t.total_amount || 0) - Number(t.amount || 0);
+          if (out > 0) topupOutstandingMap[t.student_id] = (topupOutstandingMap[t.student_id] || 0) + out;
+        }
+        const prOutstandingMap = {};
+        for (const p of (prRes.data || [])) {
+          const out = Number(p.total_amount || 0) - Number(p.amount || 0);
+          if (out > 0) prOutstandingMap[p.lead_id] = (prOutstandingMap[p.lead_id] || 0) + out;
+        }
+
+        for (const s of students) {
+          const hasTopupOut = (topupOutstandingMap[s.id] || 0) > 0;
+          const hasInitialOut = s.lead_id && (prOutstandingMap[s.lead_id] || 0) > 0;
+          s.pending_payment = hasTopupOut ? 'topup' : hasInitialOut ? 'initial' : null;
+        }
+      }
+
+      sendJson(res, 200, { ok: true, items: students });
       return true;
     }
 
@@ -132,6 +177,22 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── GET /students/coordinators ──────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/students/coordinators') {
+      if (!['super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'only super admin can list coordinators' });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('users')
+        .select('id, full_name, email')
+        .eq('role', 'academic_coordinator')
+        .order('full_name', { ascending: true });
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
     // ─── GET /students/teacher-availability ─────────────────
     if (req.method === 'GET' && url.pathname === '/students/teacher-availability') {
       if (!['academic_coordinator', 'teacher_coordinator', 'super_admin'].includes(actor.role)) {
@@ -190,6 +251,7 @@ export async function handleStudents(req, res, url) {
         .select('*, users!academic_sessions_teacher_id_fkey(id,full_name)')
         .eq('student_id', studentId)
         .eq('status', 'completed')
+        .eq('verification_status', 'approved')
         .order('session_date', { ascending: false })
         .order('started_at', { ascending: false });
 
@@ -242,6 +304,15 @@ export async function handleStudents(req, res, url) {
 
       let demoSessions = [];
       let paymentRequests = [];
+      let topupRequests = [];
+
+      // Always fetch topups by student id
+      const { data: topups } = await adminClient
+        .from('student_topups')
+        .select('*')
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false });
+      if (topups) topupRequests = topups;
 
       if (data.lead_id) {
         // Fetch demo sessions
@@ -268,7 +339,8 @@ export async function handleStudents(req, res, url) {
         sessions: sessions || [],
         messages: messages || [],
         demoSessions,
-        paymentRequests
+        paymentRequests,
+        topupRequests
       });
       return true;
     }

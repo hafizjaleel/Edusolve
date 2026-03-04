@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef, Fragment } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { SearchSelect } from '../../components/ui/SearchSelect.jsx';
+import { Pagination } from '../../components/ui/Pagination.jsx';
 
 
 /* ═══════ AC Dashboard ═══════ */
@@ -192,6 +193,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   const [fSubject, setFSubject] = useState('');
   const [fTime, setFTime] = useState('');
   const [fEndTime, setFEndTime] = useState('');
+  const [logPage, setLogPage] = useState(1);
 
   const [teacherAvail, setTeacherAvail] = useState(null);
   const [studentAvail, setStudentAvail] = useState(null);
@@ -926,6 +928,7 @@ function StudentDetailPage({ studentId, onBack }) {
   const [messages, setMessages] = useState([]);
   const [demoSessions, setDemoSessions] = useState([]);
   const [paymentRequests, setPaymentRequests] = useState([]);
+  const [topupRequests, setTopupRequests] = useState([]);
   const [verifiedSessions, setVerifiedSessions] = useState([]);
   const [teachers, setTeachers] = useState([]);
   const [error, setError] = useState('');
@@ -966,6 +969,7 @@ function StudentDetailPage({ studentId, onBack }) {
       setMessages(d.messages || []);
       setDemoSessions(d.demoSessions || []);
       setPaymentRequests(d.paymentRequests || []);
+      setTopupRequests(d.topupRequests || []);
 
       const vRes = await apiFetch(`/students/${studentId}/sessions/verified`);
       setVerifiedSessions(vRes.items || []);
@@ -1098,6 +1102,44 @@ function StudentDetailPage({ studentId, onBack }) {
             <div className="stat-card card" style={{ textAlign: 'center' }}><p className="eyebrow">Total</p><h3>{student.total_hours}</h3></div>
             <div className={`stat-card card ${Number(student.remaining_hours) <= 5 ? 'danger' : 'success'}`} style={{ textAlign: 'center' }}><p className="eyebrow">Left</p><h3>{student.remaining_hours}</h3></div>
           </div>
+          {(() => {
+            // Initial payment (from payment_requests)
+            // total_amount = full bill, amount = paid so far, outstanding = bill - paid
+            const initBill = paymentRequests.reduce((s, p) => s + Number(p.total_amount || 0), 0);
+            const initPaid = paymentRequests.reduce((s, p) => s + Number(p.amount || 0), 0);
+            const initOutstanding = initBill - initPaid;
+            // Topup (from student_topups)
+            const topupBill = topupRequests.reduce((s, t) => s + Number(t.total_amount || 0), 0);
+            const topupPaid = topupRequests.reduce((s, t) => s + Number(t.amount || 0), 0);
+            const topupOutstanding = topupBill - topupPaid;
+
+            const row = (label, amount, variant) => {
+              const bg = variant === 'paid' ? '#f0fdf4' : variant === 'due' ? '#fef2f2' : '#f9fafb';
+              const color = variant === 'paid' ? '#15803d' : variant === 'due' ? '#dc2626' : '#374151';
+              return (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 12px', background: bg, borderRadius: '7px' }}>
+                  <span style={{ fontSize: '12px', color: '#6b7280', fontWeight: 500 }}>{label}</span>
+                  <span style={{ fontWeight: 700, fontSize: '14px', color }}>{amount > 0 ? `₹${amount.toLocaleString('en-IN')}` : '—'}</span>
+                </div>
+              );
+            };
+
+            return (
+              <div style={{ marginBottom: '20px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <p style={{ margin: '0 0 4px', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Initial Payment</p>
+                {row('Bill (Total)', initBill, 'neutral')}
+                {row('Paid', initPaid, 'paid')}
+                {initOutstanding > 0 && row('Outstanding', initOutstanding, 'due')}
+                {topupBill > 0 && <>
+                  <p style={{ margin: '8px 0 4px', fontSize: '11px', fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Topup</p>
+                  {row('Bill (Total)', topupBill, 'neutral')}
+                  {row('Paid', topupPaid, 'paid')}
+                  {topupOutstanding > 0 && row('Outstanding', topupOutstanding, 'due')}
+                </>}
+              </div>
+            );
+          })()}
+
           <h4 style={{ margin: '0 0 12px 0' }}>Teachers & Sessions</h4>
           <div className="detail-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
             {teacherSessionCounts.length ? teacherSessionCounts.map(([name, count]) => (
@@ -1197,7 +1239,7 @@ function StudentDetailPage({ studentId, onBack }) {
                 </tr>
               </thead>
               <tbody>
-                {verifiedSessions.map(vs => (
+                {verifiedSessions.slice((logPage - 1) * 10, logPage * 10).map(vs => (
                   <tr key={vs.id}>
                     <td data-label="Date">{vs.session_date} {vs.started_at ? vs.started_at.slice(11, 16) : ''}</td>
                     <td data-label="Teacher">{vs.users?.full_name || vs.teacher_id}</td>
@@ -1212,6 +1254,9 @@ function StudentDetailPage({ studentId, onBack }) {
               </tbody>
             </table>
           </div>
+          {verifiedSessions.length > 10 && (
+            <Pagination page={logPage} limit={10} total={verifiedSessions.length} onPageChange={setLogPage} />
+          )}
         </article>
       ) : null}
 
@@ -1389,14 +1434,18 @@ export function StudentsHubPage({ role }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [classFilter, setClassFilter] = useState('');
+  const [acFilter, setAcFilter] = useState(''); // super_admin filter by AC
+  const [paymentFilter, setPaymentFilter] = useState(''); // initial / topup / clear
   const [minHours, setMinHours] = useState('');
   const [maxHours, setMaxHours] = useState('');
   const isAC = role === 'academic_coordinator';
+  const isSuperAdmin = role === 'super_admin';
 
   const loadData = useCallback(async () => {
     setError('');
     try {
-      const d = await apiFetch('/students'); setStudents(d.items || []);
+      const d = await apiFetch('/students');
+      setStudents(d.items || []);
       if (isAC && teachers.length === 0) {
         const [tp, subjs] = await Promise.all([
           apiFetch('/teachers/pool'),
@@ -1407,16 +1456,30 @@ export function StudentsHubPage({ role }) {
       }
     } catch (e) { setError(e.message); }
   }, [isAC, teachers.length]);
+
   useEffect(() => { loadData(); }, [loadData]);
 
   const uniqueClasses = useMemo(() => {
     return [...new Set(students.map(s => s.class_level).filter(Boolean))].sort();
   }, [students]);
 
+  // Derive unique ACs from loaded students (ac_user is already joined)
+  const uniqueAcs = useMemo(() => {
+    const seen = {};
+    for (const s of students) {
+      if (s.ac_user?.id) seen[s.ac_user.id] = s.ac_user.full_name;
+    }
+    return Object.entries(seen).map(([id, full_name]) => ({ id, full_name })).sort((a, b) => a.full_name.localeCompare(b.full_name));
+  }, [students]);
+
   const filtered = useMemo(() => {
     let items = students;
     if (statusFilter) items = items.filter(s => s.status === statusFilter);
     if (classFilter) items = items.filter(s => s.class_level === classFilter);
+    if (acFilter) items = items.filter(s => s.academic_coordinator_id === acFilter);
+    if (paymentFilter === 'initial') items = items.filter(s => s.pending_payment === 'initial');
+    else if (paymentFilter === 'topup') items = items.filter(s => s.pending_payment === 'topup');
+    else if (paymentFilter === 'clear') items = items.filter(s => !s.pending_payment);
     if (minHours !== '') items = items.filter(s => Number(s.remaining_hours) >= Number(minHours));
     if (maxHours !== '') items = items.filter(s => Number(s.remaining_hours) <= Number(maxHours));
     if (search.trim()) {
@@ -1427,7 +1490,7 @@ export function StudentsHubPage({ role }) {
       );
     }
     return items;
-  }, [students, statusFilter, classFilter, minHours, maxHours, search]);
+  }, [students, statusFilter, classFilter, acFilter, paymentFilter, minHours, maxHours, search]);
 
   async function quickStatusChange(studentId, newStatus, e) {
     e.stopPropagation();
@@ -1448,15 +1511,15 @@ export function StudentsHubPage({ role }) {
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
       <article className="card">
-        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'end' }}>
-          <label style={{ flex: '1.5', margin: 0 }}>Search
+        <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'end', flexWrap: 'wrap' }}>
+          <label style={{ flex: '1.5', margin: 0, minWidth: '140px' }}>Search
             <input
               type="text" placeholder="Search name or code..." value={search}
               onChange={e => setSearch(e.target.value)}
               style={{ marginTop: '4px' }}
             />
           </label>
-          <label style={{ flex: '1', margin: 0 }}>Status
+          <label style={{ flex: '1', margin: 0, minWidth: '110px' }}>Status
             <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ marginTop: '4px' }}>
               <option value="">All Statuses</option>
               <option value="active">Active</option>
@@ -1464,13 +1527,29 @@ export function StudentsHubPage({ role }) {
               <option value="inactive">Inactive</option>
             </select>
           </label>
-          <label style={{ flex: '1', margin: 0 }}>Class / Level
+          <label style={{ flex: '1', margin: 0, minWidth: '110px' }}>Class / Level
             <select value={classFilter} onChange={e => setClassFilter(e.target.value)} style={{ marginTop: '4px' }}>
               <option value="">All Classes</option>
               {uniqueClasses.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </label>
-          <label style={{ flex: '1.5', margin: 0 }}>Hours Left
+          {isSuperAdmin && uniqueAcs.length > 0 && (
+            <label style={{ flex: '1', margin: 0, minWidth: '130px' }}>Coordinator
+              <select value={acFilter} onChange={e => setAcFilter(e.target.value)} style={{ marginTop: '4px' }}>
+                <option value="">All Coordinators</option>
+                {uniqueAcs.map(ac => <option key={ac.id} value={ac.id}>{ac.full_name}</option>)}
+              </select>
+            </label>
+          )}
+          <label style={{ flex: '1', margin: 0, minWidth: '120px' }}>Payment
+            <select value={paymentFilter} onChange={e => setPaymentFilter(e.target.value)} style={{ marginTop: '4px' }}>
+              <option value="">All Payments</option>
+              <option value="initial">Initial Pending</option>
+              <option value="topup">Topup Pending</option>
+              <option value="clear">Clear</option>
+            </select>
+          </label>
+          <label style={{ flex: '1.5', margin: 0, minWidth: '140px' }}>Hours Left
             <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
               <input type="number" placeholder="Min" value={minHours} onChange={e => setMinHours(e.target.value)} style={{ width: '50%' }} />
               <input type="number" placeholder="Max" value={maxHours} onChange={e => setMaxHours(e.target.value)} style={{ width: '50%' }} />
@@ -1479,8 +1558,10 @@ export function StudentsHubPage({ role }) {
         </div>
         <div className="table-wrap mobile-friendly-table"><table><thead><tr>
           <th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th>
+          {isSuperAdmin && <th>Coordinator</th>}
+          <th>Payment</th>
         </tr></thead><tbody>
-            {filtered.map(s => <tr key={s.id} onClick={() => isAC && setSelId(s.id)} className={isAC ? 'clickable-row' : ''}>
+            {filtered.map(s => <tr key={s.id} onClick={() => setSelId(s.id)} className="clickable-row" style={{ cursor: 'pointer' }}>
               <td data-label="ID" style={{ padding: '16px 12px' }}>{s.student_code || '—'}</td>
               <td data-label="Name" style={{ padding: '16px 12px', fontWeight: '600', color: '#0f172a' }}>{s.student_name}</td>
               <td data-label="Class" style={{ padding: '16px 12px' }}>{s.class_level || '—'}</td>
@@ -1488,8 +1569,14 @@ export function StudentsHubPage({ role }) {
                 <span className={`status-tag ${statusColor[s.status] || ''}`}>{s.status}</span>
               </td>
               <td data-label="Hours Left" style={{ padding: '16px 12px' }}><span className={Number(s.remaining_hours) <= 5 ? 'text-danger' : ''}>{s.remaining_hours}</span></td>
+              {isSuperAdmin && <td data-label="Coordinator" style={{ padding: '16px 12px', fontSize: '13px', color: '#4b5563' }}>{s.ac_user?.full_name || '—'}</td>}
+              <td data-label="Payment" style={{ padding: '16px 12px' }}>
+                {s.pending_payment === 'topup' && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: '#fef3c7', color: '#92400e' }}>Topup Pending</span>}
+                {s.pending_payment === 'initial' && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: '#fce7f3', color: '#9d174d' }}>Initial Pending</span>}
+                {!s.pending_payment && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: '#d1fae5', color: '#065f46' }}>✓ Clear</span>}
+              </td>
             </tr>)}
-            {!filtered.length ? <tr><td colSpan="5">No students match filters.</td></tr> : null}
+            {!filtered.length ? <tr><td colSpan={isSuperAdmin ? 7 : 6}>No students match filters.</td></tr> : null}
           </tbody></table></div>
       </article>
     </section>
@@ -1504,6 +1591,7 @@ export function TodayClassesPage() {
   const [fStudent, setFStudent] = useState('');
   const [fStatus, setFStatus] = useState('');
   const [allTeachers, setAllTeachers] = useState([]);
+  const [page, setPage] = useState(1);
 
   // Reschedule
   const [rescheduleData, setRescheduleData] = useState(null);
@@ -1671,7 +1759,7 @@ export function TodayClassesPage() {
               <th>Time</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Hrs</th><th>Status</th><th>Actions</th>
             </tr></thead>
             <tbody>
-              {filtered.map(s => {
+              {filtered.slice((page - 1) * 10, page * 10).map(s => {
                 const isUpcoming = s.status === 'scheduled';
                 return (
                   <tr key={s.id}>
@@ -1710,6 +1798,9 @@ export function TodayClassesPage() {
             </tbody>
           </table>
         </div>
+        {filtered.length > 10 && (
+          <Pagination page={page} limit={10} total={filtered.length} onPageChange={setPage} />
+        )}
       </article>
 
       {/* Reschedule Modal */}
@@ -1894,6 +1985,7 @@ export function SessionsManagePage() {
   const [fTeacher, setFTeacher] = useState('');
   const [fStudent, setFStudent] = useState('');
   const [fStatus, setFStatus] = useState('');
+  const [page, setPage] = useState(1);
 
   // Reschedule Modal
   const [rescheduleData, setRescheduleData] = useState(null);
@@ -1948,9 +2040,7 @@ export function SessionsManagePage() {
 
       if (start) url += `start_date=${start}&`;
       if (end) url += `end_date=${end}&`;
-      if (fTeacher) url += `teacher_id=${fTeacher}&`;
-      if (fStudent) url += `student_id=${fStudent}&`;
-      if (fStatus) url += `status=${fStatus}&`;
+      // Filters are applied on frontend, so we don't need to append them to the URL anymore
       const res = await apiFetch(url);
       setAllSessions(res.items || []);
     } catch (e) { setError(e.message); }
@@ -2126,6 +2216,15 @@ export function SessionsManagePage() {
   const allStudentOpts = useMemo(() => allStudents.map(s => ({ value: s.id, label: s.student_name || s.id })), [allStudents]);
   const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+  const filteredSessions = useMemo(() => {
+    return allSessions.filter(s => {
+      if (fTeacher && s.teacher_id !== fTeacher) return false;
+      if (fStudent && s.student_id !== fStudent) return false;
+      if (fStatus && s.status !== fStatus) return false;
+      return true;
+    });
+  }, [allSessions, fTeacher, fStudent, fStatus]);
+
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
@@ -2168,7 +2267,7 @@ export function SessionsManagePage() {
               </tr>
             </thead>
             <tbody>
-              {allSessions.map(s => {
+              {filteredSessions.slice((page - 1) * 10, page * 10).map(s => {
                 const dayName = s.session_date ? DAY_MAP[new Date(s.session_date).getUTCDay()] : '—';
                 const isUpcoming = s.status === 'scheduled';
                 return (
@@ -2224,10 +2323,13 @@ export function SessionsManagePage() {
                   </tr>
                 );
               })}
-              {!allSessions.length ? <tr><td colSpan="9">No sessions match filters.</td></tr> : null}
+              {!filteredSessions.length ? <tr><td colSpan="9">No sessions match filters.</td></tr> : null}
             </tbody>
           </table>
         </div>
+        {filteredSessions.length > 10 && (
+          <Pagination page={page} limit={10} total={filteredSessions.length} onPageChange={setPage} />
+        )}
       </article>
 
       {rescheduleData && (() => {
@@ -2371,6 +2473,7 @@ export function SessionsManagePage() {
 /* ═══════ Verifications (separate page — only teacher-submitted approvals) ═══════ */
 function ApprovalTable({ items, fTeacher, fStudent, onVerify }) {
   const [durationOverrides, setDurationOverrides] = useState({});
+  const [page, setPage] = useState(1);
 
   const filtered = items.filter(s => {
     if (fTeacher && s.teacher_id !== fTeacher) return false;
@@ -2385,7 +2488,7 @@ function ApprovalTable({ items, fTeacher, fStudent, onVerify }) {
           <tr><th>Requested At</th><th>Date</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Note / Reason</th><th>Duration (Override)</th><th>Actions</th></tr>
         </thead>
         <tbody>
-          {filtered.map((item) => {
+          {filtered.slice((page - 1) * 10, page * 10).map((item) => {
             const pendingV = Array.isArray(item.session_verifications)
               ? item.session_verifications.find(v => v.status === 'pending' && v.type === 'approval')
               : item.session_verifications;
@@ -2428,11 +2531,15 @@ function ApprovalTable({ items, fTeacher, fStudent, onVerify }) {
           ) : null}
         </tbody>
       </table>
+      {filtered.length > 10 && (
+        <Pagination page={page} limit={10} total={filtered.length} onPageChange={setPage} />
+      )}
     </div>
   );
 }
 
 function RescheduleTable({ items, fTeacher, fStudent, onVerify }) {
+  const [page, setPage] = useState(1);
   const filtered = items.filter(item => {
     const s = item.academic_sessions || {};
     if (fTeacher && s.teacher_id !== fTeacher) return false;
@@ -2449,7 +2556,7 @@ function RescheduleTable({ items, fTeacher, fStudent, onVerify }) {
           </tr>
         </thead>
         <tbody>
-          {filtered.map((item) => {
+          {filtered.slice((page - 1) * 10, page * 10).map((item) => {
             const session = item.academic_sessions || {};
             const requestedAt = item.created_at
               ? new Date(item.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'short', timeStyle: 'short' })
@@ -2488,6 +2595,9 @@ function RescheduleTable({ items, fTeacher, fStudent, onVerify }) {
           ) : null}
         </tbody>
       </table>
+      {filtered.length > 10 && (
+        <Pagination page={page} limit={10} total={filtered.length} onPageChange={setPage} />
+      )}
     </div>
   );
 }
@@ -2854,6 +2964,10 @@ export function TeacherPoolPage() {
   const [selectedMapDay, setSelectedMapDay] = useState(new Date().getDay()); // Default to today
   const [viewTeacher, setViewTeacher] = useState(null);
   const [showSlotsFor, setShowSlotsFor] = useState(null);
+  const [page, setPage] = useState(1);
+
+  // Reset page when filters or view changes
+  useEffect(() => { setPage(1); }, [fExp, fLang, fSubj, fSyllabus, fStartTime, fEndTime, view]);
 
   const [weekOffsetMap, setWeekOffsetMap] = useState(0);
   const [weekStartMap, setWeekStartMap] = useState('');
@@ -2994,7 +3108,7 @@ export function TeacherPoolPage() {
         </div>
       </div>
 
-      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th></tr></thead><tbody>{filtered.map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">
+      {view === 'table' ? <article className="card"><div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Code</th><th>Name</th><th>Exp</th><th>Rate</th><th>Subjects</th><th>Languages</th><th>Syllabus</th><th>Pref. Time</th></tr></thead><tbody>{filtered.slice((page - 1) * 10, page * 10).map(t => <tr key={t.id}><td data-label="Code">{t.teacher_code}</td><td data-label="Name">{t.users?.full_name || '—'}</td><td data-label="Exp">{t.experience_level || '—'}</td><td data-label="Rate">{t.per_hour_rate ? `₹${t.per_hour_rate}` : '—'}</td><td data-label="Subjects">{(t.subjects_taught || []).join(', ') || '—'}</td><td data-label="Languages">{(t.languages || []).join(', ') || '—'}</td><td data-label="Syllabus">{(t.syllabus || []).join(', ') || '—'}</td><td data-label="Pref. Time">
         <div style={{ position: 'relative', display: 'inline-block' }}>
           <button
             type="button"
@@ -3033,7 +3147,9 @@ export function TeacherPoolPage() {
             </div>
           )}
         </div>
-      </td></tr>)}{!filtered.length ? <tr><td colSpan="8">No teachers match filters.</td></tr> : null}</tbody></table></div></article> : null}
+      </td></tr>)}{!filtered.length ? <tr><td colSpan="8">No teachers match filters.</td></tr> : null}</tbody></table></div>
+        {filtered.length > 10 && <Pagination page={page} limit={10} total={filtered.length} onPageChange={setPage} />}
+      </article> : null}
 
       {view === 'map' ? <article className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 12 }}>
@@ -3071,7 +3187,7 @@ export function TeacherPoolPage() {
                 ))}
               </tr>
             </thead>
-            <tbody>{filtered.map(t => {
+            <tbody>{filtered.slice((page - 1) * 10, page * 10).map(t => {
               const slots = (t.teacher_availability || []);
               const demos = (t.booked_demos || []);
               return <tr key={t.id}>
@@ -3180,6 +3296,7 @@ export function TeacherPoolPage() {
             })}</tbody>
           </table>
         </div>
+        {filtered.length > 10 && <Pagination page={page} limit={10} total={filtered.length} onPageChange={setPage} />}
       </article> : null}
 
       {viewTeacher && <ViewTeacherModal teacher={viewTeacher} onClose={() => setViewTeacher(null)} />}
@@ -4111,13 +4228,27 @@ export function ViewTeacherModal({ teacher, onClose }) {
   const [activeTab, setActiveTab] = useState('details');
   const [isEditing, setIsEditing] = useState(false);
 
-  // Adapt teacher object to lead structure if needed or use as is
-  // The teacher object from pool has users.full_name, phone, etc.
+  const [isActive, setIsActive] = useState(!!teacher.is_in_pool);
+
+  const toggleStatus = async () => {
+    const nextStatus = !isActive;
+    setIsActive(nextStatus);
+    try {
+      await apiFetch(`/teachers/${teacher.id}/pool-status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ is_in_pool: nextStatus })
+      });
+    } catch (e) {
+      setIsActive(!nextStatus);
+      alert('Failed to change status: ' + e.message);
+    }
+  };
+
   const lead = {
     ...teacher,
     full_name: teacher.users?.full_name || 'Unknown',
     email: teacher.users?.email,
-    status: 'approved' // Teachers are approved
+    status: 'approved'
   };
 
   const subjects = parseSubjects(teacher.subjects_taught);
@@ -4159,7 +4290,7 @@ export function ViewTeacherModal({ teacher, onClose }) {
   );
 
   if (isEditing) {
-    return <EditTeacherModal teacher={teacher} onClose={() => setIsEditing(false)} onSave={() => { setIsEditing(false); onClose(); /* Refresh triggers parent re-render? No, need to trigger reload or refetch */ window.location.reload(); }} />;
+    return <EditTeacherModal teacher={teacher} onClose={() => setIsEditing(false)} onSave={() => { setIsEditing(false); onClose(); window.location.reload(); }} />;
   }
 
   return (
@@ -4168,7 +4299,12 @@ export function ViewTeacherModal({ teacher, onClose }) {
         <div style={{ padding: '24px 24px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#111827' }}>{lead.full_name}</h3>
-            <Badge color="#10b981">Active Teacher</Badge>
+            <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px', background: isActive ? '#10b98115' : '#f3f4f6', padding: '4px 12px', borderRadius: '16px', border: isActive ? '1px solid #10b98150' : '1px solid #d1d5db' }}>
+              <input type="checkbox" checked={isActive} onChange={toggleStatus} style={{ width: 16, height: 16, accentColor: '#10b981', cursor: 'pointer', margin: 0 }} />
+              <span style={{ fontSize: '13px', fontWeight: 600, color: isActive ? '#10b981' : '#6b7280' }}>
+                {isActive ? 'Active Teacher' : 'Inactive Teacher'}
+              </span>
+            </label>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', padding: '4px' }}>
             <Icon d={ICONS.x} size={20} />
