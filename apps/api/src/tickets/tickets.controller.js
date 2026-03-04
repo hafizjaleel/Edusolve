@@ -153,6 +153,15 @@ export async function handleTickets(req, res, url) {
             return true;
         }
 
+        // DELETE /notifications/:id — dismiss notification
+        if (req.method === 'DELETE' && parts[0] === 'notifications' && parts.length === 2) {
+            const notifId = parts[1];
+            const result = await ticketsService.deleteNotification(notifId, userId);
+            if (result.error) { sendJson(res, 500, { error: result.error }); return true; }
+            sendJson(res, 200, result);
+            return true;
+        }
+
         sendJson(res, 404, { error: 'Not found' });
         return true;
 

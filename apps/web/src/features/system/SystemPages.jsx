@@ -25,8 +25,7 @@ export function UsersPage() {
 
     return (
         <section className="panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-                <h2>User Management</h2>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '16px' }}>
                 <button className="primary" onClick={() => setShowAdd(true)}>+ Add User</button>
             </div>
 

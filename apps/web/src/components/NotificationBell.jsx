@@ -70,6 +70,17 @@ export function NotificationBell({ onNavigateToTicket }) {
         }
     }
 
+    async function handleDismiss(e, item) {
+        e.stopPropagation(); // Prevent triggering the item click
+        try {
+            await apiFetch(`/notifications/${item.id}`, { method: 'DELETE' });
+            setItems(prev => prev.filter(i => i.id !== item.id));
+            if (!item.is_read) {
+                setCount(c => Math.max(0, c - 1));
+            }
+        } catch (err) { /* silent */ }
+    }
+
     function timeAgo(dateStr) {
         const now = new Date();
         const date = new Date(dateStr);
@@ -88,69 +99,102 @@ export function NotificationBell({ onNavigateToTicket }) {
                 onClick={handleToggle}
                 title="Notifications"
                 style={{
-                    background: 'none', border: 'none', cursor: 'pointer', position: 'relative',
-                    fontSize: '20px', padding: '6px 8px', color: '#94a3b8'
+                    background: open ? '#f1f5f9' : 'transparent',
+                    border: 'none', cursor: 'pointer', position: 'relative',
+                    width: '36px', height: '36px', borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: open ? '#0f172a' : '#64748b', transition: 'all 0.2s'
                 }}
+                onMouseEnter={e => !open && (e.currentTarget.style.background = '#f1f5f9')}
+                onMouseLeave={e => !open && (e.currentTarget.style.background = 'transparent')}
             >
-                🔔
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                    <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+                </svg>
                 {count > 0 && (
                     <span style={{
-                        position: 'absolute', top: 2, right: 2,
+                        position: 'absolute', top: 0, right: 0,
                         background: '#ef4444', color: '#fff', borderRadius: '50%',
-                        fontSize: '10px', fontWeight: 700, minWidth: '16px', height: '16px',
+                        fontSize: '11px', fontWeight: 700, minWidth: '16px', height: '16px',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        padding: '0 4px', lineHeight: 1
+                        padding: '0 4px', lineHeight: 1, border: '2px solid #ffffff',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                     }}>{count > 9 ? '9+' : count}</span>
                 )}
             </button>
 
             {open && (
                 <div className="notification-dropdown" style={{
-                    position: 'absolute', top: '100%', right: 0, width: '340px',
-                    background: '#1e293b', border: '1px solid #334155', borderRadius: '10px',
-                    boxShadow: '0 8px 32px rgba(0,0,0,.4)', zIndex: 9999,
-                    maxHeight: '420px', display: 'flex', flexDirection: 'column'
+                    position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: '340px',
+                    background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '12px',
+                    boxShadow: '0 10px 25px rgba(0,0,0,0.08)', zIndex: 9999,
+                    maxHeight: '420px', display: 'flex', flexDirection: 'column',
+                    overflow: 'hidden'
                 }}>
                     <div style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '12px 16px', borderBottom: '1px solid #334155'
+                        padding: '14px 16px', borderBottom: '1px solid #e2e8f0', background: '#f8fafc'
                     }}>
-                        <span style={{ fontWeight: 600, fontSize: '14px', color: '#f1f5f9' }}>Notifications</span>
+                        <span style={{ fontWeight: 600, fontSize: '14px', color: '#0f172a' }}>Notifications</span>
                         {count > 0 && (
                             <button onClick={handleMarkAllRead} style={{
-                                background: 'none', border: 'none', color: '#818cf8',
-                                cursor: 'pointer', fontSize: '12px'
-                            }}>Mark all read</button>
+                                background: 'none', border: 'none', color: '#3b82f6',
+                                cursor: 'pointer', fontSize: '12px', fontWeight: 500
+                            }}
+                                onMouseEnter={e => e.currentTarget.style.textDecoration = 'underline'}
+                                onMouseLeave={e => e.currentTarget.style.textDecoration = 'none'}
+                            >Mark all read</button>
                         )}
                     </div>
 
                     <div style={{ overflowY: 'auto', flex: 1 }}>
-                        {loading && <div style={{ padding: '16px', textAlign: 'center', color: '#94a3b8' }}>Loading...</div>}
+                        {loading && <div style={{ padding: '16px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>Loading...</div>}
                         {!loading && items.length === 0 && (
-                            <div style={{ padding: '24px', textAlign: 'center', color: '#64748b' }}>No notifications</div>
+                            <div style={{ padding: '32px 24px', textAlign: 'center', color: '#64748b', fontSize: '13px' }}>
+                                <div style={{ fontSize: '24px', marginBottom: '8px', opacity: 0.5 }}>📭</div>
+                                No new notifications
+                            </div>
                         )}
                         {items.map(item => (
                             <div
                                 key={item.id}
                                 onClick={() => handleClick(item)}
                                 style={{
-                                    padding: '10px 16px', cursor: 'pointer',
-                                    borderBottom: '1px solid #334155',
-                                    background: item.is_read ? 'transparent' : 'rgba(99,102,241,.08)',
+                                    padding: '12px 16px', cursor: 'pointer',
+                                    borderBottom: '1px solid #f1f5f9',
+                                    background: item.is_read ? '#ffffff' : '#eff6ff',
                                     transition: 'background .15s'
                                 }}
-                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,.15)'}
-                                onMouseLeave={e => e.currentTarget.style.background = item.is_read ? 'transparent' : 'rgba(99,102,241,.08)'}
+                                onMouseEnter={e => e.currentTarget.style.background = item.is_read ? '#f8fafc' : '#dbeafe'}
+                                onMouseLeave={e => e.currentTarget.style.background = item.is_read ? '#ffffff' : '#eff6ff'}
                             >
                                 <div style={{
-                                    fontSize: '13px', fontWeight: item.is_read ? 400 : 600,
-                                    color: '#f1f5f9', marginBottom: '2px'
+                                    fontSize: '13px', fontWeight: item.is_read ? 500 : 700,
+                                    color: item.is_read ? '#334155' : '#0f172a', marginBottom: '4px',
+                                    display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between'
                                 }}>
-                                    {!item.is_read && <span style={{ color: '#818cf8', marginRight: '6px' }}>●</span>}
-                                    {item.title}
+                                    <div style={{ display: 'flex', alignItems: 'flex-start' }}>
+                                        {!item.is_read && <span style={{ color: '#3b82f6', marginRight: '6px', fontSize: '8px', marginTop: '4px' }}>●</span>}
+                                        <span style={{ lineHeight: 1.4 }}>{item.title}</span>
+                                    </div>
+                                    <button
+                                        onClick={(e) => handleDismiss(e, item)}
+                                        style={{
+                                            background: 'transparent', border: 'none', cursor: 'pointer',
+                                            color: '#94a3b8', fontSize: '14px', padding: '0 4px',
+                                            lineHeight: 1, marginTop: '2px', marginLeft: '8px',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                        }}
+                                        title="Dismiss notification"
+                                        onMouseEnter={e => e.currentTarget.style.color = '#ef4444'}
+                                        onMouseLeave={e => e.currentTarget.style.color = '#94a3b8'}
+                                    >
+                                        ×
+                                    </button>
                                 </div>
-                                <div style={{ fontSize: '12px', color: '#94a3b8', marginBottom: '2px' }}>{item.message}</div>
-                                <div style={{ fontSize: '11px', color: '#64748b' }}>{timeAgo(item.created_at)}</div>
+                                <div style={{ fontSize: '12.5px', color: item.is_read ? '#64748b' : '#475569', marginBottom: '6px', paddingLeft: item.is_read ? 0 : '14px', lineHeight: 1.4, paddingRight: '20px' }}>{item.message}</div>
+                                <div style={{ fontSize: '11px', color: '#94a3b8', paddingLeft: item.is_read ? 0 : '14px' }}>{timeAgo(item.created_at)}</div>
                             </div>
                         ))}
                     </div>
