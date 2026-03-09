@@ -345,6 +345,162 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── POST /students/:id/messages/send-reminder ──────────
+    const srMatch = url.pathname.match(/^\/students\/([^\/]+)\/messages\/send-reminder$/);
+    if (req.method === 'POST' && srMatch) {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only ac and admin can send reminders' });
+        return true;
+      }
+      const studentId = srMatch[1];
+      const { data: st } = await adminClient.from('students').select('student_name, contact_number, alternative_number, parent_phone').eq('id', studentId).maybeSingle();
+      if (!st) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+
+      const phoneRaw = st.contact_number || st.alternative_number || st.parent_phone;
+      if (!phoneRaw) {
+        sendJson(res, 400, { ok: false, error: 'student has no phone number on record' });
+        return true;
+      }
+      const phone = phoneRaw.replace(/[^0-9]/g, '');
+
+      const body = await readJson(req).catch(() => ({}));
+      const text = body.text || `Hello ${st.student_name}, this is a gentle reminder regarding your upcoming classes.`;
+
+      const { data: sessRow } = await adminClient.from('whatsapp_sessions').select('session_name, api_key').eq('status', 'WORKING').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+      if (!sessRow) {
+        sendJson(res, 500, { ok: false, error: 'No active WhatsApp session found' });
+        return true;
+      }
+
+      const waappaUrl = process.env.WAAPPA_BASE_URL || 'http://localhost:3001';
+      const sendRes = await fetch(`${waappaUrl}/api/sendText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': sessRow.api_key, 'Accept': 'application/json' },
+        body: JSON.stringify({ session: sessRow.session_name, chatId: `${phone}@c.us`, text })
+      });
+      if (!sendRes.ok) {
+        const errText = await sendRes.text();
+        sendJson(res, 500, { ok: false, error: `Waappa send failed: ${errText}` });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true, message: 'Reminder sent via WhatsApp' });
+      return true;
+    }
+
+    // ─── POST /students/:id/whatsapp-group ──────────────────
+    const waGroupMatch = url.pathname.match(/^\/students\/([^\/]+)\/whatsapp-group$/);
+    if (req.method === 'POST' && waGroupMatch) {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only ac and admin can create groups' });
+        return true;
+      }
+      const studentId = waGroupMatch[1];
+
+      const { data: st, error: stErr } = await adminClient
+        .from('students')
+        .select('student_name, contact_number, alternative_number, parent_phone, group_jid')
+        .eq('id', studentId)
+        .maybeSingle();
+
+      if (stErr || !st) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+      if (st.group_jid) {
+        sendJson(res, 400, { ok: false, error: 'group already exists' });
+        return true;
+      }
+
+      const { data: sessRow } = await adminClient
+        .from('whatsapp_sessions')
+        .select('session_name, api_key, connected_phone')
+        .eq('status', 'WORKING')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!sessRow || !sessRow.api_key) {
+        sendJson(res, 500, { ok: false, error: 'No active WhatsApp session found' });
+        return true;
+      }
+
+      const session = sessRow.session_name;
+      const apiKey = sessRow.api_key;
+
+      const phones = [st.contact_number, st.alternative_number, st.parent_phone]
+        .filter(Boolean)
+        .map(p => {
+          let num = p.replace(/[^0-9]/g, '');
+          // If starting with 0, remove it
+          if (num.startsWith('0') && num.length === 11) num = num.substring(1);
+          // If 10 digits, assume India (+91)
+          if (num.length === 10) num = `91${num}`;
+          return num;
+        })
+        .filter(p => p.length >= 12);
+
+      const uniquePhones = [...new Set(phones)].map(p => ({ id: `${p}@c.us` }));
+      if (uniquePhones.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'No valid phone numbers to add' });
+        return true;
+      }
+
+      const body = await readJson(req).catch(() => ({}));
+      const groupName = body.name || (st.student_name ? `Edusolve - ${st.student_name}` : 'Edusolve Group');
+
+      const waappaUrl = process.env.WAAPPA_BASE_URL || 'http://localhost:3001';
+
+      const payload = {
+        name: groupName,
+        participants: uniquePhones
+      };
+
+      const response = await fetch(`${waappaUrl}/api/${session}/groups`, {
+        method: 'POST',
+        headers: {
+          'Authorization': apiKey,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        sendJson(res, 500, { ok: false, error: `Waappa error: ${response.status} ${errText}` });
+        return true;
+      }
+
+      const groupInfo = await response.json();
+
+      let jid = groupInfo.JID || groupInfo.id || groupInfo.group_id;
+      if (!jid && Array.isArray(groupInfo) && groupInfo.length > 0) {
+        jid = groupInfo[0].JID || groupInfo[0].id;
+      }
+
+      if (!jid) {
+        sendJson(res, 500, { ok: false, error: 'Waappa returned missing JID' });
+        return true;
+      }
+
+      const { error: updateErr } = await adminClient
+        .from('students')
+        .update({ group_jid: jid, group_name: groupName })
+        .eq('id', studentId);
+
+      if (updateErr) {
+        sendJson(res, 500, { ok: false, error: updateErr.message });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true, group_jid: jid, group_name: groupName });
+      return true;
+    }
+
     // ─── PUT /students/:id ──────────────────────────────────
     if (req.method === 'PUT' && parts.length === 2 && parts[0] === 'students') {
       if (!isAC(actor)) {

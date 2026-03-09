@@ -1438,6 +1438,12 @@ export function StudentsHubPage({ role }) {
   const [paymentFilter, setPaymentFilter] = useState(''); // initial / topup / clear
   const [minHours, setMinHours] = useState('');
   const [maxHours, setMaxHours] = useState('');
+
+  // Group creation modal
+  const [groupModal, setGroupModal] = useState(null);
+  const [groupName, setGroupName] = useState('');
+  const [creatingGroup, setCreatingGroup] = useState(false);
+
   const isAC = role === 'academic_coordinator';
   const isSuperAdmin = role === 'super_admin';
 
@@ -1557,13 +1563,20 @@ export function StudentsHubPage({ role }) {
           </label>
         </div>
         <div className="table-wrap mobile-friendly-table"><table><thead><tr>
-          <th>ID</th><th>Name</th><th>Class</th><th>Status</th><th>Hours Left</th>
+          <th>ID</th><th>Name</th><th>Group</th><th>Class</th><th>Status</th><th>Hours Left</th>
           {isSuperAdmin && <th>Coordinator</th>}
           <th>Payment</th>
         </tr></thead><tbody>
             {filtered.map(s => <tr key={s.id} onClick={() => setSelId(s.id)} className="clickable-row" style={{ cursor: 'pointer' }}>
               <td data-label="ID" style={{ padding: '16px 12px' }}>{s.student_code || '—'}</td>
               <td data-label="Name" style={{ padding: '16px 12px', fontWeight: '600', color: '#0f172a' }}>{s.student_name}</td>
+              <td data-label="Group" style={{ padding: '16px 12px' }}>
+                {s.group_jid ? (
+                  <span style={{ color: '#10b981', fontWeight: '600', fontSize: '13px' }} title={s.group_jid}>✅ {s.group_name || 'Group'}</span>
+                ) : (
+                  <button type="button" className="secondary small" onClick={(e) => { e.stopPropagation(); setGroupModal(s); setGroupName(s.student_name ? `Edusolve - ${s.student_name}` : 'Edusolve Group'); }}>Create Group</button>
+                )}
+              </td>
               <td data-label="Class" style={{ padding: '16px 12px' }}>{s.class_level || '—'}</td>
               <td data-label="Status" style={{ padding: '16px 12px' }}>
                 <span className={`status-tag ${statusColor[s.status] || ''}`}>{s.status}</span>
@@ -1576,9 +1589,59 @@ export function StudentsHubPage({ role }) {
                 {!s.pending_payment && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: '#d1fae5', color: '#065f46' }}>✓ Clear</span>}
               </td>
             </tr>)}
-            {!filtered.length ? <tr><td colSpan={isSuperAdmin ? 7 : 6}>No students match filters.</td></tr> : null}
+            {!filtered.length ? <tr><td colSpan={isSuperAdmin ? 8 : 7}>No students match filters.</td></tr> : null}
           </tbody></table></div>
       </article>
+
+      {/* Create Group Modal */}
+      {groupModal && (
+        <div className="modal-overlay" onClick={() => !creatingGroup && setGroupModal(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+            <h3>Create WhatsApp Group</h3>
+            <div style={{ marginBottom: '16px', background: '#f8fafc', padding: '12px', borderRadius: '8px', fontSize: '14px' }}>
+              <p style={{ margin: '0 0 8px 0' }}><strong>Student Details:</strong></p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: '#4b5563' }}>
+                <li><strong>ID:</strong> {groupModal.student_code || 'N/A'}</li>
+                <li><strong>Name:</strong> {groupModal.student_name || 'N/A'}</li>
+              </ul>
+              <p style={{ margin: '12px 0 8px 0' }}><strong>Numbers to be added:</strong></p>
+              <ul style={{ margin: 0, paddingLeft: '20px', color: '#4b5563' }}>
+                {groupModal.contact_number && <li><strong>Student:</strong> {groupModal.contact_number}</li>}
+                {groupModal.alternative_number && <li><strong>Alternative:</strong> {groupModal.alternative_number}</li>}
+                {groupModal.parent_phone && <li><strong>Parent:</strong> {groupModal.parent_phone}</li>}
+              </ul>
+            </div>
+            <p className="muted" style={{ marginBottom: '16px', fontSize: '13px' }}>
+              This will create a WhatsApp group with the coordinator and all registered numbers above.
+            </p>
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setCreatingGroup(true);
+              try {
+                const res = await apiFetch(`/students/${groupModal.id}/whatsapp-group`, {
+                  method: 'POST',
+                  body: JSON.stringify({ name: groupName })
+                });
+                setStudents(prev => prev.map(s => s.id === groupModal.id ? { ...s, group_jid: res.group_jid, group_name: res.group_name } : s));
+                setGroupModal(null);
+                setGroupName('');
+              } catch (err) {
+                alert(err.message);
+              } finally {
+                setCreatingGroup(false);
+              }
+            }}>
+              <label>Group Name
+                <input type="text" value={groupName} onChange={e => setGroupName(e.target.value)} required disabled={creatingGroup} />
+              </label>
+              <div style={{ display: 'flex', gap: '8px', marginTop: '24px', justifyContent: 'flex-end' }}>
+                <button type="button" className="secondary" onClick={() => setGroupModal(null)} disabled={creatingGroup}>Cancel</button>
+                <button type="submit" disabled={creatingGroup}>{creatingGroup ? 'Creating...' : 'Create Group'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -3412,30 +3475,18 @@ export function AutomationPage() {
 
   // Build contacts from students + teachers always
   useEffect(() => {
-    // Helper: resolve which phone number to use for a student
-    const resolveStudentPhone = (s) => {
-      const pref = s.messaging_number; // 'contact' | 'alternative' | 'parent'
-      if (pref === 'alternative' && s.alternative_number) return s.alternative_number;
-      if (pref === 'parent' && s.parent_phone) return s.parent_phone;
-      return s.contact_number || s.alternative_number || s.parent_phone;
-    };
-
+    // Only include students who have a WhatsApp group created
     const sList = allStudents
-      .map(s => {
-        const rawPhone = resolveStudentPhone(s);
-        const cleanPhone = rawPhone ? String(rawPhone).replace(/\D/g, '') : null;
-        return { ...s, _phone: cleanPhone };
-      })
-      .filter(s => s._phone)
+      .filter(s => s.group_jid)
       .map(s => ({
         ...s,
-        id: s._phone,
-        chatId: `${s._phone}@c.us`,
-        name: s.student_name || s._phone,
-        role: 'Student',
+        id: s.group_jid.split('@')[0], // UI usually expects an ID string without domain or just pure numbers, but it's safe as string
+        chatId: s.group_jid,
+        name: s.group_name || `Edusolve - ${s.student_name}`,
+        role: 'Student Group',
         type: 'student',
-        phone: s._phone,
-        avatar: (s.student_name || 'S').charAt(0).toUpperCase()
+        phone: s.group_jid,
+        avatar: (s.group_name || s.student_name || 'G').charAt(0).toUpperCase()
       }));
 
     // allTeachers are teacher_profiles rows with users join
@@ -3468,8 +3519,10 @@ export function AutomationPage() {
   const loadChat = useCallback(async (contact) => {
     if (!contact) return;
     try {
-      const raw = (contact.phone || contact.id || '').replace(/[^0-9]/g, '');
-      const phone = raw.slice(-10);
+      let phone = contact.chatId || contact.phone || contact.id || '';
+      if (phone && !phone.includes('@g.us')) {
+        phone = phone.replace(/[^0-9]/g, '').slice(-10);
+      }
       if (!phone) { setMessages([]); return; }
       const d = await apiFetch(`/waappa/messages?phone=${encodeURIComponent(phone)}&limit=15&offset=0`);
       if (d.ok) {
@@ -3496,8 +3549,10 @@ export function AutomationPage() {
     if (!selContact || loadingMore || !hasMoreMsgs) return;
     setLoadingMore(true);
     try {
-      const raw = (selContact.phone || selContact.id || '').replace(/[^0-9]/g, '');
-      const phone = raw.slice(-10);
+      let phone = selContact.chatId || selContact.phone || selContact.id || '';
+      if (phone && !phone.includes('@g.us')) {
+        phone = phone.replace(/[^0-9]/g, '').slice(-10);
+      }
       const d = await apiFetch(`/waappa/messages?phone=${encodeURIComponent(phone)}&limit=15&offset=${msgOffset}`);
       if (d.ok) {
         const older = d.messages.map(m => ({
