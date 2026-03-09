@@ -88,18 +88,65 @@ export class LeadsService {
   async getTeacherDemos(teacherId, date) {
     const adminClient = getSupabaseAdminClient();
     if (!adminClient) return [];
-    const startOfDay = new Date(`${date}T00:00:00+05:30`).toISOString();
-    const endOfDay = new Date(`${date}T23:59:59+05:30`).toISOString();
-    const { data, error } = await adminClient
-      .from('leads')
-      .select('id, student_name, demo_scheduled_at, demo_ends_at, status')
-      .eq('demo_teacher_id', teacherId)
-      .eq('status', 'demo_scheduled')
-      .gte('demo_scheduled_at', startOfDay)
-      .lte('demo_scheduled_at', endOfDay)
-      .is('deleted_at', null);
-    if (error) throw new Error(error.message);
-    return data || [];
+    const startOfDay = `${date}T00:00:00+05:30`;
+    const endOfDay = `${date}T23:59:59+05:30`;
+
+    // 1. Query demo_sessions for scheduled demos
+    const { data: demoData, error: demoError } = await adminClient
+      .from('demo_sessions')
+      .select('id, lead_id, teacher_id, scheduled_at, ends_at, status, subject')
+      .eq('teacher_id', teacherId)
+      .in('status', ['scheduled', 'rescheduled'])
+      .gte('scheduled_at', new Date(startOfDay).toISOString())
+      .lte('scheduled_at', new Date(endOfDay).toISOString());
+    if (demoError) throw new Error(demoError.message);
+
+    // 2. Query academic_sessions for scheduled/rescheduled classes
+    const { data: sessionData, error: sessionError } = await adminClient
+      .from('academic_sessions')
+      .select('id, student_id, teacher_id, started_at, duration_hours, status, subject, students(student_name)')
+      .eq('teacher_id', teacherId)
+      .in('status', ['scheduled', 'rescheduled', 'completed', 'verified'])
+      .eq('session_date', date);
+    if (sessionError) throw new Error(sessionError.message);
+
+    // 3. Get student names for demos
+    const leadIds = [...new Set((demoData || []).map(d => d.lead_id))];
+    let leadMap = {};
+    if (leadIds.length > 0) {
+      const { data: leads } = await adminClient
+        .from('leads')
+        .select('id, student_name')
+        .in('id', leadIds);
+      (leads || []).forEach(l => { leadMap[l.id] = l.student_name; });
+    }
+
+    // Combine both
+    const demos = (demoData || []).map(d => ({
+      id: d.id,
+      student_name: leadMap[d.lead_id] || 'Unknown Lead',
+      demo_scheduled_at: d.scheduled_at,
+      demo_ends_at: d.ends_at,
+      status: d.status,
+      subject: d.subject,
+      type: 'demo'
+    }));
+
+    const classes = (sessionData || []).map(s => {
+      const start = new Date(s.started_at);
+      const end = new Date(start.getTime() + (s.duration_hours || 1) * 3600000);
+      return {
+        id: s.id,
+        student_name: s.students?.student_name || 'Academic Student',
+        demo_scheduled_at: s.started_at,
+        demo_ends_at: end.toISOString(),
+        status: s.status,
+        subject: s.subject,
+        type: 'class'
+      };
+    });
+
+    return [...demos, ...classes];
   }
 
   async list({ scope, actor, page, limit, status, counselor_id, lead_type }) {
@@ -458,35 +505,55 @@ export class LeadsService {
       });
     }
 
-    // Auto-create/update demo_sessions when a demo is scheduled with a teacher
+    // Always insert a new demo_session row (supports multiple demos per lead)
     if (updated.demo_teacher_id && updated.demo_scheduled_at) {
-      // Check if a demo_session already exists for this lead
-      const { data: existingDemo } = await adminClient
+      // Resolve teacher user_id if demo_teacher_id is a profile ID
+      let teacherUserId = updated.demo_teacher_id;
+      const { data: profile } = await adminClient
+        .from('teacher_profiles')
+        .select('user_id')
+        .eq('id', updated.demo_teacher_id)
+        .maybeSingle();
+      if (profile?.user_id) {
+        teacherUserId = profile.user_id;
+      }
+
+      // Calculate next demo_number
+      const { data: existingDemos } = await adminClient
+        .from('demo_sessions')
+        .select('demo_number')
+        .eq('lead_id', id)
+        .order('demo_number', { ascending: false })
+        .limit(1);
+      const nextNum = (existingDemos && existingDemos.length > 0) ? (existingDemos[0].demo_number || 0) + 1 : 1;
+
+      await adminClient
+        .from('demo_sessions')
+        .insert({
+          lead_id: id,
+          teacher_id: teacherUserId,
+          scheduled_at: updated.demo_scheduled_at,
+          ends_at: updated.demo_ends_at || null,
+          subject: updated.subject || null,
+          status: 'scheduled',
+          demo_number: nextNum
+        });
+    }
+
+    // When lead status changes to demo_done, also mark the latest scheduled demo_session as done
+    if (updated.status === 'demo_done' && current.status === 'demo_scheduled') {
+      const { data: latestDemo } = await adminClient
         .from('demo_sessions')
         .select('id')
         .eq('lead_id', id)
-        .maybeSingle();
-
-      if (existingDemo) {
+        .eq('status', 'scheduled')
+        .order('demo_number', { ascending: false })
+        .limit(1);
+      if (latestDemo && latestDemo.length > 0) {
         await adminClient
           .from('demo_sessions')
-          .update({
-            teacher_id: updated.demo_teacher_id,
-            scheduled_at: updated.demo_scheduled_at,
-            ends_at: updated.demo_ends_at || null,
-            status: 'scheduled'
-          })
-          .eq('id', existingDemo.id);
-      } else {
-        await adminClient
-          .from('demo_sessions')
-          .insert({
-            lead_id: id,
-            teacher_id: updated.demo_teacher_id,
-            scheduled_at: updated.demo_scheduled_at,
-            ends_at: updated.demo_ends_at || null,
-            status: 'scheduled'
-          });
+          .update({ status: 'done', completed_at: nowIso() })
+          .eq('id', latestDemo[0].id);
       }
     }
 
@@ -812,6 +879,37 @@ export class LeadsService {
     return (data || []).map(h => ({
       ...h,
       changed_by_name: userMap[h.changed_by] || 'System'
+    }));
+  }
+
+  async getLeadDemos(leadId, actor) {
+    const adminClient = getSupabaseAdminClient();
+    if (!isCounselor(actor) && !isCounselorHead(actor) && !isSuperAdmin(actor)) {
+      return { error: 'access not allowed' };
+    }
+    if (!adminClient) return [];
+
+    const { data, error } = await adminClient
+      .from('demo_sessions')
+      .select('*')
+      .eq('lead_id', leadId)
+      .order('demo_number', { ascending: true });
+    if (error) throw new Error(error.message);
+
+    // Resolve teacher names
+    const teacherIds = [...new Set((data || []).map(d => d.teacher_id).filter(Boolean))];
+    let teacherMap = {};
+    if (teacherIds.length > 0) {
+      const { data: teachers } = await adminClient
+        .from('users')
+        .select('id, full_name')
+        .in('id', teacherIds);
+      (teachers || []).forEach(t => { teacherMap[t.id] = t.full_name; });
+    }
+
+    return (data || []).map(d => ({
+      ...d,
+      teacher_name: teacherMap[d.teacher_id] || 'Unknown'
     }));
   }
   async bulkAssign(leadIds, counselorId, actor) {

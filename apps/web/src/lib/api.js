@@ -24,6 +24,30 @@ export async function apiFetch(path, options = {}) {
   });
 
   const data = await response.json().catch(() => ({}));
+
+  if (response.status === 401 && !options._isRetry && session?.refreshToken && path !== '/auth/refresh') {
+    try {
+      const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: session.refreshToken })
+      });
+      const refreshData = await refreshRes.json().catch(() => ({}));
+      if (refreshRes.ok && refreshData.ok) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(refreshData));
+        return apiFetch(path, { ...options, _isRetry: true });
+      } else {
+        localStorage.removeItem(STORAGE_KEY);
+        if (typeof window !== 'undefined') window.location.href = '/login';
+        throw new Error('Session expired. Please log in again.');
+      }
+    } catch (e) {
+      localStorage.removeItem(STORAGE_KEY);
+      if (typeof window !== 'undefined') window.location.href = '/login';
+      throw new Error('Session expired. Please log in again.');
+    }
+  }
+
   if (!response.ok) throw new Error(data.error || 'request failed');
   return data;
 }

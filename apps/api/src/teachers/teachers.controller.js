@@ -159,8 +159,8 @@ export async function handleTeachers(req, res, url) {
           .in('status', ['scheduled', 'rescheduled']);
 
         if (startDate && endDate) {
-          demosQuery = demosQuery.gte('scheduled_at', `${startDate}T00:00:00.000Z`)
-            .lte('scheduled_at', `${endDate}T23:59:59.999Z`);
+            demosQuery = demosQuery.gte('scheduled_at', `${startDate}T00:00:00+05:30`)
+                                   .lte('scheduled_at', `${endDate}T23:59:59+05:30`);
         } else {
           demosQuery = demosQuery.gte('scheduled_at', new Date().toISOString());
         }

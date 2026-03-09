@@ -6,12 +6,14 @@ import { PhoneInput, isValidEmail } from '../../../components/PhoneInput.jsx';
 export function AddLeadModal({ onClose, onSuccess }) {
     const [studentName, setStudentName] = useState('');
     const [contactNumber, setContactNumber] = useState('');
+    const [classLevel, setClassLevel] = useState('');
     const [subject, setSubject] = useState('');
     const [leadType, setLeadType] = useState('');
     const [email, setEmail] = useState('');
     const [error, setError] = useState('');
     const [saving, setSaving] = useState(false);
     const [leadTypes, setLeadTypes] = useState([]);
+    const [subjects, setSubjects] = useState([]);
 
     async function fetchLeadTypes() {
         const res = await apiFetch('/leads/types');
@@ -30,8 +32,26 @@ export function AddLeadModal({ onClose, onSuccess }) {
         }
     }
 
+    async function fetchSubjects() {
+        const res = await apiFetch('/subjects');
+        if (res.ok) setSubjects(res.subjects ? res.subjects.map(s => s.name).sort() : []);
+    }
+
+    async function handleAddSubject(name) {
+        const res = await apiFetch('/subjects', {
+            method: 'POST',
+            body: JSON.stringify({ name })
+        });
+        if (res.ok) {
+            setSubjects(prev => [...prev, name].sort());
+        } else {
+            console.error('Failed to save subject:', res.error);
+        }
+    }
+
     useEffect(() => {
         fetchLeadTypes();
+        fetchSubjects();
     }, []);
 
     async function onSubmit(e) {
@@ -55,6 +75,7 @@ export function AddLeadModal({ onClose, onSuccess }) {
                 body: JSON.stringify({
                     student_name: safeStudentName,
                     contact_number: safeContact,
+                    class_level: classLevel,
                     subject,
                     lead_type: leadType,
                     email: safeEmail
@@ -82,9 +103,19 @@ export function AddLeadModal({ onClose, onSuccess }) {
                         <PhoneInput value={contactNumber} onChange={setContactNumber} required={true} />
                     </label>
                     <label>
-                        Subject
-                        <input value={subject} onChange={(e) => setSubject(e.target.value)} />
+                        Class
+                        <input value={classLevel} onChange={(e) => setClassLevel(e.target.value)} />
                     </label>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        <CreatableSelect
+                            label="Subject"
+                            value={subject}
+                            onChange={setSubject}
+                            options={subjects}
+                            placeholder="Select or Add New"
+                            onAdd={handleAddSubject}
+                        />
+                    </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                         <CreatableSelect
                             label="Lead Type"
