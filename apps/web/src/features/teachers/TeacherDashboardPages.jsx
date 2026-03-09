@@ -376,9 +376,9 @@ function RescheduleModal({ session, onClose, onDone }) {
         return ts.slice(0, 5);
     }
 
-    // Generate 15-minute interval time slots from 6:00 AM to 10:00 PM
+    // Generate 15-minute interval time slots from 6:00 AM to 12:00 AM (midnight)
     const timeSlots = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
         for (let m = 0; m < 60; m += 15) {
             const hh = String(h).padStart(2, '0');
             const mm = String(m).padStart(2, '0');
@@ -387,6 +387,7 @@ function RescheduleModal({ session, onClose, onDone }) {
             timeSlots.push({ value: `${hh}:${mm}`, label: `${hr12}:${mm} ${ampm}` });
         }
     }
+    timeSlots.push({ value: '24:00', label: '12:00 AM' });
 
     const [reason, setReason] = useState('');
     const [newDate, setNewDate] = useState(session.session_date || '');
@@ -1348,7 +1349,7 @@ function CustomDropdown({ value, onChange, options, placeholder }) {
 function generateTimeOptions() {
     const options = [];
     const startHour = 6; // 6 AM
-    const endHour = 22; // 10 PM
+    const endHour = 23; // 11 PM
     for (let h = startHour; h <= endHour; h++) {
         for (let m = 0; m < 60; m += 15) {
             const hh = h.toString().padStart(2, '0');
@@ -1363,6 +1364,8 @@ function generateTimeOptions() {
             options.push({ value: time24, label });
         }
     }
+    // Add midnight (12:00 AM)
+    options.push({ value: '24:00', label: '12:00 AM' });
     return options;
 }
 

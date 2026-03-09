@@ -269,12 +269,12 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
     if (!teacherAvail || !studentAvail || !fDays.length) return { allStarts: [], slotChecks: {} };
 
     const times = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
       for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) break;
         times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }
     }
+    times.push('24:00');
 
     const targetDates = [];
     const startObj = new Date(fStart + 'T00:00:00Z');
@@ -346,13 +346,12 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
 
     // Find the fTime in the base times
     const times = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
       for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) break;
         times.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
       }
     }
-    times.push("22:00"); // Add terminal end if needed, actually loop above handles break at 22:00. Let's fix above perfectly.
+    times.push('24:00'); // Midnight
 
     const targetDates = [];
     for (let d = new Date(fStart + 'T00:00:00Z'); d <= new Date(fEnd + 'T00:00:00Z'); d.setDate(d.getDate() + 1)) {
@@ -424,9 +423,8 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
 
   // 15-min time slots for reschedule modal
   const rescheduleTimeSlots = [];
-  for (let h = 6; h <= 22; h++) {
+  for (let h = 6; h <= 23; h++) {
     for (let m = 0; m < 60; m += 15) {
-      if (h === 22 && m > 0) break;
       const hh = String(h).padStart(2, '0');
       const mm = String(m).padStart(2, '0');
       const hr12 = h % 12 || 12;
@@ -434,6 +432,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
       rescheduleTimeSlots.push({ value: `${hh}:${mm}`, label: `${hr12}:${mm} ${ampm}` });
     }
   }
+  rescheduleTimeSlots.push({ value: '24:00', label: '12:00 AM' });
 
   function isRescheduleSlotOverlapping(slotValue) {
     if (!rescheduleData?.duration || Number(rescheduleData.duration) <= 0) return false;
@@ -557,12 +556,12 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   }
 
   const editTimeSlots = [];
-  for (let h = 6; h <= 22; h++) {
+  for (let h = 6; h <= 23; h++) {
     for (let m = 0; m < 60; m += 15) {
-      if (h === 22 && m > 0) break;
       editTimeSlots.push({ value: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`, label: `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}` });
     }
   }
+  editTimeSlots.push({ value: '24:00', label: '12:00 AM' });
 
   function isEditSlotOverlapping(slotValue) {
     if (!sessionEditData?.duration || Number(sessionEditData.duration) <= 0) return false;
@@ -945,15 +944,15 @@ function StudentDetailPage({ studentId, onBack }) {
   const dayOptions = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   const timeOptions = useMemo(() => {
     const times = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
       for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) break; // Ends exactly at 10:00 PM
         const ampm = h >= 12 ? 'PM' : 'AM';
         const hour12 = h > 12 ? h - 12 : (h === 0 ? 12 : h);
         const mins = m.toString().padStart(2, '0');
         times.push(`${hour12}:${mins} ${ampm}`);
       }
     }
+    times.push('12:00 AM');
     return times;
   }, []);
 
@@ -2951,19 +2950,28 @@ export function TeacherPoolPage() {
   }, [weekStartMap, dayLabels]);
 
   const fullDayLabels = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const hours = Array.from({ length: 17 }, (_, i) => i + 6); // 6 AM to 10 PM (22)
+  
+  const targetDateStr = useMemo(() => {
+    if (!weekStartMap) return '';
+    const parts = weekStartMap.split('-');
+    const targetDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
+    targetDateObj.setDate(targetDateObj.getDate() + selectedMapDay);
+    return `${targetDateObj.getFullYear()}-${String(targetDateObj.getMonth() + 1).padStart(2, '0')}-${String(targetDateObj.getDate()).padStart(2, '0')}`;
+  }, [weekStartMap, selectedMapDay]);
+
+  const hours = Array.from({ length: 19 }, (_, i) => i + 6); // 6 AM to 12 AM (24)
 
   const timeOptions = useMemo(() => {
     const opts = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
       for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) continue; // max 10:00 PM
         const hh = String(h).padStart(2, '0');
         const mm = String(m).padStart(2, '0');
         const val = `${hh}:${mm}`;
         opts.push({ value: val, label: formatTime12(val) });
       }
     }
+    opts.push({ value: '24:00', label: '12:00 AM' });
     return opts;
   }, []);
 
@@ -3054,7 +3062,7 @@ export function TeacherPoolPage() {
             <thead>
               <tr>
                 <th style={{ width: '150px', position: 'sticky', left: 0, zIndex: 10, background: 'white' }}>Teacher</th>
-                {hours.map(h => <th key={h} colSpan={4} className="avail-map-th" style={{ textAlign: 'center', borderLeft: '1px solid #e5e7eb', fontSize: '10px', padding: '4px 0' }}>{h > 12 ? h - 12 : h}{h >= 12 ? 'p' : 'a'}</th>)}
+                {hours.map(h => <th key={h} colSpan={4} className="avail-map-th" style={{ textAlign: 'center', borderLeft: '1px solid #e5e7eb', fontSize: '10px', padding: '4px 0' }}>{h === 24 ? 12 : (h > 12 ? h - 12 : h)}{h >= 12 && h < 24 ? 'p' : 'a'}</th>)}
               </tr>
               <tr>
                 <th style={{ position: 'sticky', left: 0, zIndex: 10, background: 'white', height: '12px' }}></th>
@@ -3072,8 +3080,20 @@ export function TeacherPoolPage() {
               </tr>
             </thead>
             <tbody>{filtered.map(t => {
-              const slots = (t.teacher_availability || []);
-              const demos = (t.booked_demos || []);
+              const slots = (t.teacher_availability || []).filter(s => s.day_of_week === fullDayLabels[selectedMapDay]);
+              
+              // Pre-filter demos and classes for the selected day to avoid repeated calculations
+              const demosForDay = (t.booked_demos || []).filter(d => {
+                if (!d.scheduled_at || !targetDateStr) return false;
+                const dDate = new Date(d.scheduled_at);
+                const dDateStr = `${dDate.getFullYear()}-${String(dDate.getMonth() + 1).padStart(2, '0')}-${String(dDate.getDate()).padStart(2, '0')}`;
+                return dDateStr === targetDateStr;
+              });
+
+              const classesForDay = (t.assigned_classes || []).filter(a => {
+                return a.session_date === targetDateStr;
+              });
+
               return <tr key={t.id}>
                 <td style={{ width: '150px', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 13, textAlign: 'left', padding: '4px 8px', position: 'sticky', left: 0, background: 'white', zIndex: 9, borderRight: '1px solid #eee', overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.users?.full_name}>
                   {t.users?.full_name || t.teacher_code}
@@ -3085,7 +3105,6 @@ export function TeacherPoolPage() {
                     const cellEnd = cellStart + 15;
 
                     const isAvail = slots.some(s => {
-                      if (s.day_of_week !== fullDayLabels[selectedMapDay]) return false;
                       const [sh, sm] = s.start_time.split(':').map(Number);
                       const [eh, em] = s.end_time.split(':').map(Number);
                       const startMins = sh * 60 + sm;
@@ -3094,54 +3113,23 @@ export function TeacherPoolPage() {
                     });
 
                     // Check if a demo is booked in this cell
-                    const isDemo = demos.some(d => {
-                      if (!d.scheduled_at) return false;
+                    const isDemo = demosForDay.some(d => {
                       const dDate = new Date(d.scheduled_at);
-
-                      // Match exactly with the selected date tab within the week
-                      if (!weekStartMap) return false;
-                      const parts = weekStartMap.split('-');
-                      const targetDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
-                      targetDateObj.setDate(targetDateObj.getDate() + selectedMapDay);
-
-                      const fDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-                      const targetDateStr = fDate(targetDateObj);
-                      const dDateStr = fDate(dDate);
-
-                      if (dDateStr !== targetDateStr) return false;
-
                       const dStartMins = dDate.getHours() * 60 + dDate.getMinutes();
-                      const dEndMins = d.ends_at ? new Date(d.ends_at).getHours() * 60 + new Date(d.ends_at).getMinutes() : dStartMins + 60;
+                      const dEndMins = d.ends_at 
+                        ? (new Date(d.ends_at).getHours() * 60 + new Date(d.ends_at).getMinutes())
+                        : dStartMins + 60;
                       return dStartMins <= cellStart && dEndMins > cellStart;
                     });
 
                     // Check if a regular class is scheduled
-                    const isScheduled = (t.assigned_classes || []).some(a => {
-                      if (!a.session_date || !a.started_at) {
-                        return false;
-                      }
-
-                      // Match exactly with the selected date tab within the week
-                      if (!weekStartMap) return false;
-                      const parts = weekStartMap.split('-');
-                      const targetDateObj = new Date(parts[0], parts[1] - 1, parts[2]);
-                      targetDateObj.setDate(targetDateObj.getDate() + selectedMapDay);
-
-                      const fDate = (dt) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-                      const targetDateStr = fDate(targetDateObj);
-
-                      if (a.session_date !== targetDateStr) return false;
-
+                    const isScheduled = classesForDay.some(a => {
+                      if (!a.started_at) return false;
                       const dDate = new Date(a.started_at);
-                      // Use local timezone hours/minutes for the match
                       const startMins = dDate.getHours() * 60 + dDate.getMinutes();
-
-                      // academic_sessions may have duration_hours
                       const dur = a.duration_hours ? Number(a.duration_hours) * 60 : 60;
                       const endMins = startMins + dur;
-
-                      const isMatch = startMins <= cellStart && endMins > cellStart;
-                      return isMatch;
+                      return startMins <= cellStart && endMins > cellStart;
                     });
 
                     const cellClass = isScheduled ? 'avail-cell avail-no' : (isDemo ? 'avail-cell avail-demo' : (isAvail ? 'avail-cell avail-yes' : 'avail-cell'));

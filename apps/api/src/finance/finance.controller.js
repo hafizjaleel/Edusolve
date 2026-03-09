@@ -159,17 +159,77 @@ export async function handleFinance(req, res, url) {
         return true;
       }
 
+      // --- Auto-Assign AC (Round Robin) ---
+      const { data: { users: authUsers }, error: authError } = await adminClient.auth.admin.listUsers();
+      if (authError) throw new Error(authError.message);
+
+      // Get users who have AC role in user_roles table
+      const { data: roleAcData } = await adminClient
+        .from('user_roles')
+        .select('user_id, roles!inner(code)')
+        .eq('roles.code', 'academic_coordinator');
+
+      const roleAcIds = new Set((roleAcData || []).map(r => r.user_id));
+
+      const acAuthUsers = (authUsers || []).filter(u => {
+        const metarole = u.app_metadata?.role || u.user_metadata?.role;
+        return metarole === 'academic_coordinator' || roleAcIds.has(u.id);
+      });
+
+      let acUsers = [];
+      if (acAuthUsers.length > 0) {
+        const { data: dbUsers } = await adminClient
+            .from('users')
+            .select('id, full_name, email')
+            .in('id', acAuthUsers.map(u => u.id));
+        
+        const dbUserMap = {};
+        (dbUsers || []).forEach(u => dbUserMap[u.id] = u);
+
+        acUsers = acAuthUsers.map(u => ({
+            id: u.id,
+            email: u.email,
+            name: dbUserMap[u.id]?.full_name || u.user_metadata?.name || u.user_metadata?.full_name || u.email
+        }));
+      }
+
+      let assignedAcId = null;
+      let assignedAcName = null;
+
+      if (acUsers.length > 0) {
+        const { data: lastAssigned } = await adminClient
+          .from('students')
+          .select('academic_coordinator_id')
+          .not('academic_coordinator_id', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (lastAssigned && lastAssigned.length > 0 && lastAssigned[0].academic_coordinator_id) {
+          const lastAcId = lastAssigned[0].academic_coordinator_id;
+          const lastIndex = acUsers.findIndex(u => u.id === lastAcId);
+          const nextIndex = lastIndex >= 0 ? (lastIndex + 1) % acUsers.length : 0;
+          assignedAcId = acUsers[nextIndex].id;
+          assignedAcName = acUsers[nextIndex].name;
+        } else {
+          assignedAcId = acUsers[0].id;
+          assignedAcName = acUsers[0].name;
+        }
+      }
+
       const studentCode = await generateStudentCode(adminClient);
 
       const { data: student, error: studentError } = await adminClient
         .from('students')
         .insert({
           lead_id: lead.id,
+          academic_coordinator_id: assignedAcId,
           student_name: lead.student_name,
           parent_name: lead.parent_name,
           contact_number: lead.contact_number,
           class_level: lead.class_level,
           package_name: lead.package_name,
+          total_hours: request.hours || 0,
+          remaining_hours: request.hours || 0,
           status: 'active',
           joined_at: nowIso(),
           student_code: studentCode
@@ -206,7 +266,7 @@ export async function handleFinance(req, res, url) {
         from_status: lead.status,
         to_status: 'joined',
         changed_by: actor.userId,
-        reason: 'payment verified and student created'
+        reason: assignedAcId ? `payment verified, student created, and auto-assigned to AC (${assignedAcName})` : 'payment verified and student created'
       });
 
       // Insert receivable entry (total owed) and income entry (amount paid)
@@ -377,7 +437,7 @@ export async function handleFinance(req, res, url) {
       if (!payload.name) { sendJson(res, 400, { ok: false, error: 'name required' }); return true; }
       const { data, error } = await adminClient.from('finance_accounts').insert({
         name: payload.name, type: payload.type || 'bank', is_main: payload.is_main || false,
-        balance: payload.balance || 0, description: payload.description || null, created_by: actor.userId
+        balance: payload.balance || 0, description: payload.description || null, category: payload.category || null, created_by: actor.userId
       }).select('*').single();
       if (error) throw new Error(error.message);
       sendJson(res, 201, { ok: true, account: data });
@@ -870,8 +930,23 @@ export async function handleFinance(req, res, url) {
         if (st) studentName = st.student_name;
       }
 
+      const newPaidAmount = Number(parent.amount || 0) + Number(inst.amount);
+      const totalRequestedAmount = Number(parent.total_amount || 0);
+      let excessAmount = 0;
+      let extraHours = 0;
+
+      // Check for overpayment against payment request
+      if (table === 'payment_requests' && totalRequestedAmount > 0 && newPaidAmount > totalRequestedAmount) {
+        excessAmount = newPaidAmount - totalRequestedAmount;
+        const reqHours = Number(parent.hours || 0);
+        if (reqHours > 0) {
+          const ratePerHour = totalRequestedAmount / reqHours;
+          extraHours = Number((excessAmount / ratePerHour).toFixed(2)); 
+        }
+      }
+
       // Update Parent Paid Amount
-      await adminClient.from(table).update({ amount: Number(parent.amount || 0) + Number(inst.amount) }).eq('id', parent.id);
+      await adminClient.from(table).update({ amount: newPaidAmount }).eq('id', parent.id);
 
       // Verify Installment
       await adminClient.from('installment_payments').update({
@@ -879,16 +954,67 @@ export async function handleFinance(req, res, url) {
         verified_by: actor.userId, verified_at: nowIso(), updated_at: nowIso()
       }).eq('id', instId);
 
-      // Add to Ledger
-      await adminClient.from('ledger_entries').insert({
-        entry_date: nowIso().slice(0, 10),
-        entry_type: 'income',
-        amount: inst.amount,
-        description: `Installment Payment: ${studentName}`,
-        student_id: studentId,
-        account_id: payload.account_id,
-        posted_by: actor.userId
-      });
+      // Handle overpayment: create verified top-up, add hours, and log receivable + income
+      if (excessAmount > 0 && studentId) {
+
+        // 1. Create Verified Top-up
+        await adminClient.from('student_topups').insert({
+          student_id: studentId,
+          amount: excessAmount,
+          hours_added: extraHours,
+          status: 'verified',
+          finance_note: 'Auto top-up from initial installment overpayment',
+          requested_by: actor.userId,
+          verified_by: actor.userId,
+          verified_at: nowIso(),
+          account_id: payload.account_id
+        });
+
+        // 2. Add extra hours to the student record automatically
+        const { data: stData } = await adminClient.from('students').select('total_hours, remaining_hours').eq('id', studentId).single();
+        if (stData) {
+          await adminClient.from('students').update({
+            total_hours: Number(stData.total_hours || 0) + extraHours,
+            remaining_hours: Number(stData.remaining_hours || 0) + extraHours,
+            updated_at: nowIso()
+          }).eq('id', studentId);
+        }
+
+        // 3. Add Ledger Entries (Receivable for the new hours, Income for the actual cash)
+        await adminClient.from('ledger_entries').insert([
+          {
+            entry_date: nowIso().slice(0, 10),
+            entry_type: 'receivable',
+            amount: excessAmount,
+            description: `Receivable: Auto Top-Up Fee — ${studentName}`,
+            student_id: studentId,
+            posted_by: actor.userId
+          },
+          {
+            entry_date: nowIso().slice(0, 10),
+            entry_type: 'income',
+            amount: excessAmount,
+            description: `Auto Top-up Income: Overpayment by ${studentName}`,
+            student_id: studentId,
+            account_id: payload.account_id,
+            posted_by: actor.userId
+          }
+        ]);
+      }
+
+      // Add to Ledger for the base installment amount
+      const baseInstallmentAmount = Number(inst.amount) - excessAmount;
+      if (baseInstallmentAmount > 0) {
+        await adminClient.from('ledger_entries').insert({
+          entry_date: nowIso().slice(0, 10),
+          entry_type: 'income',
+          amount: baseInstallmentAmount,
+          description: `Installment Payment: ${studentName}`,
+          student_id: studentId,
+          account_id: payload.account_id,
+          posted_by: actor.userId
+        });
+      }
 
       // Update Bank Balance
       const { data: acc } = await adminClient.from('finance_accounts').select('balance').eq('id', payload.account_id).single();

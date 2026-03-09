@@ -107,4 +107,29 @@ export class AuthService {
       return { ok: false, error: 'invalid token' };
     }
   }
+  async refresh(refreshToken) {
+    if (!refreshToken) return { ok: false, error: 'missing refresh token' };
+
+    const authClient = getSupabaseAuthClient();
+    if (authClient) {
+      const { data, error } = await authClient.auth.refreshSession({ refresh_token: refreshToken });
+      if (error) return { ok: false, error: error.message };
+
+      const resolvedRole = roleFromUser(data.user) || (await resolveRoleFromDb(data.user?.id));
+      if (!resolvedRole) return { ok: false, error: 'user role is missing or invalid' };
+
+      return {
+        ok: true,
+        token: data.session?.access_token,
+        refreshToken: data.session?.refresh_token,
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          role: resolvedRole
+        }
+      };
+    }
+
+    return { ok: false, error: 'auth provider is not configured for refresh' };
+  }
 }

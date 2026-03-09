@@ -47,13 +47,13 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'POST' && url.pathname === '/upload/presigned-url') {
     const token = getBearerToken(req);
-    console.log('[DEBUG UPLOAD] Parsed token:', token ? `${token.slice(0, 15)}...` : 'NONE');
-    if (!token) return sendJson(res, 401, { error: 'Unauthorized' });
+    console.log('[DEBUG UPLOAD] Parsed token:', token ? `${token.slice(0, 15)}... len:${token.length}` : 'NONE');
+    if (!token) return sendJson(res, 401, { error: 'Unauthorized - No token provided' });
 
     const user = await authService.me(token);
-    console.log('[DEBUG UPLOAD] authService result:', user);
+    console.log('[DEBUG UPLOAD] authService result:', JSON.stringify(user));
 
-    if (!user.ok) return sendJson(res, 401, { error: 'Invalid token' });
+    if (!user.ok) return sendJson(res, 401, { error: `Invalid token: ${user.error}` });
     return generatePresignedUrl(req, res);
   }
 

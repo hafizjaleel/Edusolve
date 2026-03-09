@@ -673,19 +673,28 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
   const [conflictSlots, setConflictSlots] = useState([]); // list of {start, end, studentName}
   const [checkingConflict, setCheckingConflict] = useState(false);
 
-  // Generate 15-min time slots 06:00–22:00
+  // Generate 15-min time slots 06:00–00:00 (midnight)
   const timeSlots = useMemo(() => {
     const slots = [];
-    for (let h = 6; h <= 22; h++) {
+    for (let h = 6; h <= 23; h++) {
       for (let m = 0; m < 60; m += 15) {
-        if (h === 22 && m > 0) break;
         const hour = String(h).padStart(2, '0');
         const min = String(m).padStart(2, '0');
         slots.push(`${hour}:${min}`);
       }
     }
+    slots.push('24:00'); // Midnight
     return slots;
   }, []);
+
+  // Format 24h time to 12h AM/PM for display
+  const format12h = (t) => {
+    if (t === '24:00') return '12:00 AM';
+    const [h, m] = t.split(':').map(Number);
+    const period = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${String(hour12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${period}`;
+  };
 
   // IST "now" helpers
   const nowIST = () => new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
@@ -707,7 +716,10 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
     for (const c of conflictSlots) {
       const cStart = c.startH * 60 + c.startM;
       const cEnd = c.endH * 60 + c.endM;
-      if (slotMins >= cStart && slotMins < cEnd) return c.studentName;
+      if (slotMins >= cStart && slotMins < cEnd) {
+        const typeLabel = c.type === 'class' ? 'Class' : 'Demo';
+        return `${typeLabel}: ${c.studentName}`;
+      }
     }
     return null;
   };
@@ -730,7 +742,8 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
           return {
             startH: sIST.getHours(), startM: sIST.getMinutes(),
             endH: eIST.getHours(), endM: eIST.getMinutes(),
-            studentName: b.student_name || 'another lead'
+            studentName: b.student_name || 'another lead',
+            type: b.type || 'demo'
           };
         }));
       })
@@ -739,11 +752,26 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
   }, [selectedTeacherId, date]);
 
   const teacherOptions = useMemo(() => {
-    return teachers.map(t => ({
+    let filtered = teachers;
+    if (subject) {
+      filtered = teachers.filter(t => {
+        const subjects = t.subjects_taught;
+        if (Array.isArray(subjects)) return subjects.some(s => s.toLowerCase() === subject.toLowerCase());
+        if (typeof subjects === 'string') return subjects.toLowerCase().includes(subject.toLowerCase());
+        return false;
+      });
+    }
+    return filtered.map(t => ({
       value: t.id,
       label: `${t.users?.full_name || t.full_name || 'Unknown'} (${t.teacher_code || 'N/A'})`
     }));
-  }, [teachers]);
+  }, [teachers, subject]);
+
+  // Reset teacher selection when subject changes
+  useEffect(() => {
+    setSelectedTeacherId('');
+    setConflictSlots([]);
+  }, [subject]);
 
   useEffect(() => {
     setLoadingTeachers(true);
@@ -762,8 +790,10 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
     for (const c of conflictSlots) {
       const cStart = c.startH * 60 + c.startM;
       const cEnd = c.endH * 60 + c.endM;
-      if (selStart < cEnd && selEnd > cStart)
-        return `${c.studentName} (${String(c.startH).padStart(2, '0')}:${String(c.startM).padStart(2, '0')}–${String(c.endH).padStart(2, '0')}:${String(c.endM).padStart(2, '0')})`;
+      if (selStart < cEnd && selEnd > cStart) {
+        const typeLabel = c.type === 'class' ? 'Class' : 'Demo';
+        return `${typeLabel} with ${c.studentName} (${String(c.startH).padStart(2, '0')}:${String(c.startM).padStart(2, '0')}–${String(c.endH).padStart(2, '0')}:${String(c.endM).padStart(2, '0')})`;
+      }
     }
     return null;
   }, [startTime, endTime, conflictSlots]);
@@ -791,7 +821,7 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
           subject: subject,
           demo_teacher_id: selectedTeacherId,
           status: 'demo_scheduled',
-          reason: `Demo scheduled with ${teacherName} for ${subject} on ${date} ${startTime}-${endTime}`
+          reason: `Demo scheduled with ${teacherName} for ${subject} on ${date} ${format12h(startTime)}-${format12h(endTime)}`
         })
       });
 
@@ -848,7 +878,7 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
                   return (
                     <option key={t} value={t} disabled={past || !!conflict}
                       style={{ color: conflict ? '#dc2626' : past ? '#9ca3af' : undefined }}>
-                      {t}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
+                      {format12h(t)}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
                     </option>
                   );
                 })}
@@ -864,7 +894,7 @@ function ScheduleDemoModal({ lead, onClose, onSuccess }) {
                   return (
                     <option key={t} value={t} disabled={past || !!conflict}
                       style={{ color: conflict ? '#dc2626' : past ? '#9ca3af' : undefined }}>
-                      {t}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
+                      {format12h(t)}{conflict ? ` ⚠ ${conflict}` : past ? ' (past)' : ''}
                     </option>
                   );
                 })}
@@ -1028,42 +1058,65 @@ function StudentLeadCard({ lead, onStatusChange, onDrop, onView, onVerifyPayment
 
           {/* Actions */}
           {lead.status !== 'joined' && lead.status !== 'dropped' ? (
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              {lead.status === 'demo_done' ? (
-                <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                  onClick={() => onStatusChange(lead.id, 'payment_pending')}>
-                  💰 Requested payment
+            lead.status === 'demo_done' ? (
+              <>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button className="small secondary" style={{ flex: 1, fontSize: '12px' }}
+                    onClick={() => onStatusChange(lead.id, 'demo_scheduled')}>
+                    📅 Another Demo
+                  </button>
+                  <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                    onClick={() => onView(lead.id)}>
+                    <Icon d={ICONS.eye} size={14} /> View
+                  </button>
+                  <button type="button" className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                    onClick={(e) => { e.stopPropagation(); onAddNote && onAddNote(lead); }}>
+                    📝 Note
+                  </button>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
+                    onClick={() => onStatusChange(lead.id, 'payment_pending')}>
+                    💰 Requested payment
+                  </button>
+                  <button className="small danger" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                    onClick={() => onDrop(lead)}>
+                    <Icon d={ICONS.x} size={12} /> Drop
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {lead.status === 'payment_pending' ? (
+                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
+                    onClick={() => onVerifyPayment && onVerifyPayment(lead.id)}>
+                    ⏳ Verify Payment
+                  </button>
+                ) : nextStatus && lead.status !== 'payment_verification' ? (
+                  <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
+                    onClick={() => onStatusChange(lead.id, nextStatus)}>
+                    {getNextLabel(nextStatus)}
+                  </button>
+                ) : null}
+                {lead.status === 'payment_verification' && (
+                  <span style={{ flex: 1, fontSize: '12px', textAlign: 'center', padding: '6px', background: '#f3f4f6', borderRadius: '4px', color: '#6b7280' }}>
+                    Verification in process
+                  </span>
+                )}
+                <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                  onClick={() => onView(lead.id)}>
+                  <Icon d={ICONS.eye} size={14} /> View
                 </button>
-              ) : null}
-              {lead.status === 'payment_pending' ? (
-                <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                  onClick={() => onVerifyPayment && onVerifyPayment(lead.id)}>
-                  ⏳ Verify Payment
+                <button type="button" className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                  onClick={(e) => { e.stopPropagation(); onAddNote && onAddNote(lead); }}>
+                  📝 Note
                 </button>
-              ) : nextStatus && lead.status !== 'demo_done' && lead.status !== 'payment_verification' ? (
-                <button className="small primary" style={{ flex: 1, fontSize: '12px' }}
-                  onClick={() => onStatusChange(lead.id, nextStatus)}>
-                  {getNextLabel(nextStatus)}
+                <button className="small danger" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
+                  onClick={() => onDrop(lead)}>
+                  <Icon d={ICONS.x} size={12} /> Drop
                 </button>
-              ) : null}
-              {lead.status === 'payment_verification' && (
-                <span style={{ flex: 1, fontSize: '12px', textAlign: 'center', padding: '6px', background: '#f3f4f6', borderRadius: '4px', color: '#6b7280' }}>
-                  Verification in process
-                </span>
-              )}
-              <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
-                onClick={() => onView(lead.id)}>
-                <Icon d={ICONS.eye} size={14} /> View
-              </button>
-              <button type="button" className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
-                onClick={(e) => { e.stopPropagation(); onAddNote && onAddNote(lead); }}>
-                📝 Note
-              </button>
-              <button className="small danger" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center' }}
-                onClick={() => onDrop(lead)}>
-                <Icon d={ICONS.x} size={12} /> Drop
-              </button>
-            </div>
+              </div>
+            )
           ) : (
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <button className="small secondary" style={{ fontSize: '12px', display: 'flex', alignItems: 'center', gap: '4px', justifyContent: 'center', flex: 1 }}
@@ -1301,6 +1354,71 @@ export function MyLeadsPage({ onOpenDetails, initialLeadId = '', onPipelineReady
         ))}
       </div>
     </section>
+  );
+}
+
+/* ─── Demo History Section (reusable) ─── */
+function DemoHistorySection({ leadId }) {
+  const [demos, setDemos] = useState([]);
+  const [loadingDemos, setLoadingDemos] = useState(true);
+
+  useEffect(() => {
+    if (!leadId) return;
+    setLoadingDemos(true);
+    apiFetch(`/leads/${leadId}/demos`)
+      .then(res => setDemos(res.items || []))
+      .catch(() => setDemos([]))
+      .finally(() => setLoadingDemos(false));
+  }, [leadId]);
+
+  if (loadingDemos) return <p style={{ fontSize: '13px', color: '#9ca3af', marginTop: '16px' }}>Loading demo history...</p>;
+  if (!demos.length) return null;
+
+  const statusStyle = (status) => ({
+    padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
+    background: status === 'done' ? '#dcfce7' : status === 'scheduled' ? '#fef3c7' : '#f3f4f6',
+    color: status === 'done' ? '#15803d' : status === 'scheduled' ? '#d97706' : '#6b7280',
+    textTransform: 'capitalize'
+  });
+
+  return (
+    <>
+      <div style={{ height: '1px', background: '#e5e7eb', margin: '24px 0' }} />
+      <div className="flex-between">
+        <h3 style={{ margin: 0 }}>Demo History ({demos.length})</h3>
+      </div>
+      <div style={{ marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        {demos.map((d, i) => (
+          <div key={d.id} style={{
+            padding: '12px 16px', borderRadius: '8px',
+            background: i === demos.length - 1 ? '#eff6ff' : '#f9fafb',
+            border: `1px solid ${i === demos.length - 1 ? '#bfdbfe' : '#e5e7eb'}`,
+            display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: '12px', alignItems: 'center'
+          }}>
+            <div style={{
+              width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+              background: d.status === 'done' ? '#dcfce7' : '#fef3c7',
+              color: d.status === 'done' ? '#15803d' : '#d97706',
+              fontWeight: 700, fontSize: '13px'
+            }}>
+              #{d.demo_number || i + 1}
+            </div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: '#111827' }}>
+                {d.subject || 'No subject'} — {d.teacher_name || 'Unknown Teacher'}
+              </div>
+              <div style={{ fontSize: '12px', color: '#6b7280', marginTop: '2px' }}>
+                {d.scheduled_at
+                  ? new Date(d.scheduled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })
+                  : 'Not scheduled'}
+                {d.ends_at && ` — ${new Date(d.ends_at).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })}`}
+              </div>
+            </div>
+            <span style={statusStyle(d.status)}>{d.status}</span>
+          </div>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -1615,38 +1733,8 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
                 </div>
               </div>
 
-              {lead.demo_scheduled_at && (
-                <>
-                  <div style={{ height: '1px', background: '#e5e7eb', margin: '24px 0' }} />
-                  <div className="flex-between">
-                    <h3>Demo Details</h3>
-                  </div>
-                  <div className="form-grid grid-2" style={{ marginTop: '16px' }}>
-                    <div>
-                      <label>Scheduled Date & Time</label>
-                      <p>{new Date(lead.demo_scheduled_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' })}</p>
-                    </div>
-                    <div>
-                      <label>Ends At</label>
-                      <p>{lead.demo_ends_at ? new Date(lead.demo_ends_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' }) : '-'}</p>
-                    </div>
-                    {lead.subject && (
-                      <div>
-                        <label>Demo Subject</label>
-                        <p>{lead.subject}</p>
-                      </div>
-                    )}
-                    {lead.teacher_profiles && (
-                      <div>
-                        <label>Demo Teacher</label>
-                        <p style={{ fontWeight: 500 }}>
-                          {lead.teacher_profiles?.users?.full_name || 'Unknown Teacher'} ({lead.teacher_profiles?.teacher_code || 'N/A'})
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
+              {/* Demo History Section */}
+              <DemoHistorySection leadId={leadId} />
             </div>
           ) : (
             <form className="card" onSubmit={onSave} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1739,7 +1827,7 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
                   <p className="timeline-meta">
                     <strong>{item.changed_by_name || 'System'}</strong>
                     {' · '}
-                    {item.created_at ? new Date(item.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : '-'}
+                    {item.created_at ? new Date(item.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: true, dateStyle: 'short', timeStyle: 'short' }) : '-'}
                   </p>
                   {isStatusChange && item.reason ? <p className="muted">{item.reason}</p> : null}
                 </div>
@@ -2274,7 +2362,7 @@ function UploadInstallmentModal({ item, onClose, onSuccess }) {
         </p>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <label style={{ fontSize: '13px', fontWeight: 600 }}>Amount (₹) *
-            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required min="1" max={remaining}
+            <input type="number" value={amount} onChange={e => setAmount(e.target.value)} required min="1"
               style={{ width: '100%', padding: '8px 12px', marginTop: '4px', border: '1px solid #d1d5db', borderRadius: '6px' }} />
           </label>
           <label style={{ fontSize: '13px', fontWeight: 600 }}>Payment Screenshot *

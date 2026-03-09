@@ -1522,16 +1522,37 @@ function AddExpenseModal({ accounts, categories, onClose, onDone }) {
 }
 
 function AddAccountModal({ onClose, onDone }) {
-  const [form, setForm] = useState({ name: '', type: 'bank', is_main: false, balance: '', description: '' });
+  const [form, setForm] = useState({ name: '', type: 'bank', is_main: false, balance: '', description: '', category: '', customCategory: '' });
   const [err, setErr] = useState('');
+  const [categories, setCategories] = useState([]);
+
+  useEffect(() => {
+    apiFetch('/finance/categories?type=account').then(d => {
+      setCategories(d.items || []);
+    }).catch(e => console.error(e));
+  }, []);
+
   function upd(k, v) { setForm(f => ({ ...f, [k]: v })); }
+
   async function submit(e) {
     e.preventDefault(); setErr('');
     try {
-      await apiFetch('/finance/accounts', { method: 'POST', body: JSON.stringify({ ...form, balance: Number(form.balance || 0) }) });
+      let finalCategory = form.category;
+      if (form.category === 'custom') {
+        finalCategory = form.customCategory.toLowerCase().trim();
+        if (!finalCategory) { setErr('Custom Category is required'); return; }
+        // Auto-add the new category so it appears everywhere
+        await apiFetch('/finance/categories', { method: 'POST', body: JSON.stringify({ name: finalCategory, type: 'account' }) }).catch(() => { });
+      }
+
+      await apiFetch('/finance/accounts', { method: 'POST', body: JSON.stringify({ ...form, category: finalCategory || null, balance: Number(form.balance || 0) }) });
       onDone();
     } catch (e) { setErr(e.message); }
   }
+
+  const defaultOpts = ['operations', 'payroll', 'marketing', 'sales', 'tax', 'other'];
+  const allOpts = [...new Set([...defaultOpts, ...categories.map(c => c.name.toLowerCase())])];
+
   return (
     <div className="modal-overlay"><div className="modal card" style={{ maxWidth: '420px' }}>
       <h3>Add Account</h3>
@@ -1539,6 +1560,21 @@ function AddAccountModal({ onClose, onDone }) {
         <label>Name *<input value={form.name} onChange={e => upd('name', e.target.value)} required placeholder="e.g. HDFC Business" /></label>
         <label>Type<select value={form.type} onChange={e => upd('type', e.target.value)}><option value="bank">Bank</option><option value="cash">Cash</option><option value="upi">UPI</option><option value="wallet">Wallet</option><option value="other">Other</option></select></label>
         <label>Opening Balance<input type="number" value={form.balance} onChange={e => upd('balance', e.target.value)} placeholder="0" /></label>
+        
+        <label>Category
+          <select value={form.category} onChange={e => upd('category', e.target.value)}>
+            <option value="">— None —</option>
+            {allOpts.map(opt => <option key={opt} value={opt} style={{ textTransform: 'capitalize' }}>{opt}</option>)}
+            <option value="custom">-- Add Custom Category --</option>
+          </select>
+        </label>
+
+        {form.category === 'custom' && (
+          <label>Custom Category *
+            <input value={form.customCategory} onChange={e => upd('customCategory', e.target.value)} required placeholder="Enter new category..." autoFocus />
+          </label>
+        )}
+
         <label>Description<input value={form.description} onChange={e => upd('description', e.target.value)} /></label>
         <label style={{ flexDirection: 'row', gap: '8px', alignItems: 'center' }}>
           <input type="checkbox" checked={form.is_main} onChange={e => upd('is_main', e.target.checked)} style={{ width: 'auto' }} />

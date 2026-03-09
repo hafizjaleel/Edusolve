@@ -83,8 +83,8 @@ export async function handleLeads(req, res, url) {
     }
 
     if (req.method === 'GET' && url.pathname === '/leads/counselors') {
-      if (actor.role !== 'counselor_head' && actor.role !== 'super_admin') {
-        sendJson(res, 403, { ok: false, error: 'only counselor head or super admin can list counselors' });
+      if (actor.role !== 'counselor_head' && actor.role !== 'super_admin' && actor.role !== 'counselor') {
+        sendJson(res, 403, { ok: false, error: 'only counselor head, super admin, or counselor can list counselors' });
         return true;
       }
       const items = await leadsService.listCounselors();
@@ -197,6 +197,16 @@ export async function handleLeads(req, res, url) {
         return true;
       }
       sendJson(res, 200, { ok: true, items: history });
+      return true;
+    }
+
+    if (req.method === 'GET' && parts.length === 3 && parts[2] === 'demos') {
+      const demos = await leadsService.getLeadDemos(leadId, actor);
+      if (demos?.error) {
+        sendJson(res, 403, { ok: false, error: demos.error });
+        return true;
+      }
+      sendJson(res, 200, { ok: true, items: demos });
       return true;
     }
 
