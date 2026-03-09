@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { getSessionDisplayStatus } from '../teachers/TeacherDashboardPages.jsx';
+import { Pagination } from '../../components/ui/Pagination.jsx';
+import { SearchSelect } from '../../components/ui/SearchSelect.jsx';
 
 function ApprovalTable({ items, onVerify }) {
   return (
@@ -151,6 +153,32 @@ export function VerificationQueuePage() {
 export function SessionLogsPage() {
   const [items, setItems] = useState([]);
   const [error, setError] = useState('');
+  const [page, setPage] = useState(1);
+
+  const [fTeacher, setFTeacher] = useState('');
+  const [fStudent, setFStudent] = useState('');
+  const [fStart, setFStart] = useState('');
+  const [fEnd, setFEnd] = useState('');
+  const [fSubject, setFSubject] = useState('');
+
+  const [allTeachers, setAllTeachers] = useState([]);
+  const [allStudents, setAllStudents] = useState([]);
+  const [subjectsList, setSubjectsList] = useState([]);
+
+  const loadMasterData = useCallback(async () => {
+    try {
+      const [tRes, sRes, subRes] = await Promise.all([
+        apiFetch('/teachers/pool'),
+        apiFetch('/students'),
+        apiFetch('/subjects')
+      ]);
+      setAllTeachers(tRes.items || []);
+      setAllStudents(sRes.items || []);
+      setSubjectsList(subRes.subjects || []);
+    } catch (e) { console.error('Error loading master data', e); }
+  }, []);
+
+  useEffect(() => { loadMasterData(); }, [loadMasterData]);
 
   useEffect(() => {
     apiFetch('/sessions/logs')
@@ -158,23 +186,52 @@ export function SessionLogsPage() {
       .catch((err) => setError(err.message));
   }, []);
 
+  const filteredItems = useMemo(() => {
+    return items.filter(s => {
+      if (fTeacher && s.teacher_id !== fTeacher) return false;
+      if (fStudent && s.student_id !== fStudent) return false;
+      if (fSubject && s.subject !== fSubject) return false;
+      if (fStart && (!s.session_date || s.session_date < fStart)) return false;
+      if (fEnd && (!s.session_date || s.session_date > fEnd)) return false;
+      return true;
+    });
+  }, [items, fTeacher, fStudent, fSubject, fStart, fEnd]);
+
+  const allTeacherOpts = useMemo(() => allTeachers.map(t => ({ value: t.user_id, label: t.users?.full_name || t.user_id })), [allTeachers]);
+  const allStudentOpts = useMemo(() => allStudents.map(s => ({ value: s.id, label: s.student_name || s.id })), [allStudents]);
+  const allSubjectOpts = useMemo(() => subjectsList.map(s => ({ value: s.name, label: s.name })), [subjectsList]);
+
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
       <article className="card">
+        <div className="filter-bar" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px', alignItems: 'end', marginBottom: '16px' }}>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '4px' }}>Start Date</label>
+            <input type="date" value={fStart} onChange={e => setFStart(e.target.value)} style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 600, color: '#374151', display: 'block', marginBottom: '4px' }}>End Date</label>
+            <input type="date" value={fEnd} onChange={e => setFEnd(e.target.value)} style={{ padding: '8px', border: '1px solid #d1d5db', borderRadius: '4px', width: '100%', boxSizing: 'border-box' }} />
+          </div>
+          <SearchSelect label="Teacher" value={fTeacher} onChange={setFTeacher} options={allTeacherOpts} placeholder="All Teachers" />
+          <SearchSelect label="Student" value={fStudent} onChange={setFStudent} options={allStudentOpts} placeholder="All Students" />
+          <SearchSelect label="Subject" value={fSubject} onChange={setFSubject} options={allSubjectOpts} placeholder="All Subjects" />
+        </div>
         <div className="table-wrap mobile-friendly-table">
           <table>
             <thead>
-              <tr><th>Date</th><th>Student</th><th>Teacher</th><th>Status</th></tr>
+              <tr><th>Date</th><th>Student</th><th>Teacher</th><th>Subject</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {items.map((item) => {
+              {filteredItems.slice((page - 1) * 10, page * 10).map((item) => {
                 const st = getSessionDisplayStatus(item);
                 return (
                   <tr key={item.id}>
                     <td data-label="Date">{item.session_date || '-'}</td>
                     <td data-label="Student">{item.students?.student_name || item.student_id}</td>
                     <td data-label="Teacher">{item.users?.full_name || item.teacher_id}</td>
+                    <td data-label="Subject">{item.subject || '—'}</td>
                     <td data-label="Status">
                       <span style={{
                         padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
@@ -184,12 +241,15 @@ export function SessionLogsPage() {
                   </tr>
                 );
               })}
-              {!items.length ? (
-                <tr><td colSpan="4">No records found.</td></tr>
+              {!filteredItems.length ? (
+                <tr><td colSpan="5">No records found.</td></tr>
               ) : null}
             </tbody>
           </table>
         </div>
+        {filteredItems.length > 10 && (
+          <Pagination page={page} limit={10} total={filteredItems.length} onPageChange={setPage} />
+        )}
       </article>
     </section>
   );

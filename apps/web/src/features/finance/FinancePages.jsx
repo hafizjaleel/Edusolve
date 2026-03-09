@@ -11,17 +11,17 @@ export function FinanceDashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([
+    Promise.allSettled([
       apiFetch('/finance/stats'),
       apiFetch('/finance/accounts'),
       apiFetch('/finance/income'),
       apiFetch('/finance/expenses')
     ]).then(([s, a, i, e]) => {
-      setStats(s.stats);
-      setAccounts(a.items || []);
-      setRecentIncome((i.items || []).slice(0, 5));
-      setRecentExpenses((e.items || []).slice(0, 5));
-    }).catch(() => { }).finally(() => setLoading(false));
+      if (s.status === 'fulfilled') setStats(s.value.stats);
+      if (a.status === 'fulfilled') setAccounts(a.value.items || []);
+      if (i.status === 'fulfilled') setRecentIncome((i.value.items || []).slice(0, 5));
+      if (e.status === 'fulfilled') setRecentExpenses((e.value.items || []).slice(0, 5));
+    }).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <section className="panel"><p>Loading dashboard...</p></section>;

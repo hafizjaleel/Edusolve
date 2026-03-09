@@ -25,7 +25,7 @@ async function generateTeacherCode(adminClient) {
     const { count, error } = await adminClient
         .from('teacher_profiles')
         .select('*', { count: 'exact', head: true });
-    
+
     if (error) throw new Error(error.message);
     const sequence = (count || 0) + 1;
     return `T${yy}${mmm}${String(sequence).padStart(3, '0')}`; // e.g., T26FEB042
@@ -251,6 +251,8 @@ export async function handleTeacherLeads(req, res, url) {
             if (payload.communication_level !== undefined) updates.communication_level = payload.communication_level;
             if (payload.current_note !== undefined) updates.current_note = payload.current_note;
             if (payload.status) updates.status = payload.status;
+            // Admin-only: reassign TC
+            if (payload.coordinator_id !== undefined && actor.role === 'super_admin') updates.coordinator_id = payload.coordinator_id;
 
             // Clear current_note if status changes
             if (payload.status && payload.status !== current.status) {
@@ -354,11 +356,11 @@ export async function handleTeacherLeads(req, res, url) {
                     created_at: nowIso(),
                     updated_at: nowIso()
                 });
-            
+
             if (publicUserError) {
                 // Ignore if already exists (dublicate key) but log if other error
                 if (!publicUserError.message.includes('duplicate key')) {
-                     console.error('Failed to create public user:', publicUserError);
+                    console.error('Failed to create public user:', publicUserError);
                 }
             }
 
@@ -407,14 +409,14 @@ export async function handleTeacherLeads(req, res, url) {
 
             console.log('Converting Lead:', lead.id, lead.full_name);
             console.log('Lead Data:', { subjects: lead.subjects, boards: lead.boards, mediums: lead.mediums });
-            
+
             // Mark lead as converted and closed
             await adminClient
                 .from('teacher_leads')
-                .update({ 
-                    converted_teacher_id: teacherProfile.id, 
+                .update({
+                    converted_teacher_id: teacherProfile.id,
                     status: 'closed', // Move to closed tab
-                    updated_at: nowIso() 
+                    updated_at: nowIso()
                 })
                 .eq('id', id);
 

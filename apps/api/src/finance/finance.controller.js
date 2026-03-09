@@ -61,26 +61,25 @@ export async function handleFinance(req, res, url) {
   try {
     // ═══════ STATS ═══════
     if (req.method === 'GET' && url.pathname === '/finance/stats') {
-      // 1. Total Income
-      const { data: incomeData } = await adminClient.from('ledger_entries').select('amount').eq('entry_type', 'income');
-      const totalIncome = (incomeData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+      const results = await Promise.all([
+        adminClient.from('ledger_entries').select('amount').eq('entry_type', 'income'),
+        adminClient.from('expenses').select('amount'),
+        adminClient.from('finance_accounts').select('balance'),
+        adminClient.from('payment_requests').select('status'),
+        adminClient.from('student_topups').select('status')
+      ]);
+      const income = results[0]?.data || [];
+      const expenses = results[1]?.data || [];
+      const accounts = results[2]?.data || [];
+      const payReqs = results[3]?.data || [];
+      const topups = results[4]?.data || [];
 
-      // 2. Total Expenses
-      const { data: expenseData } = await adminClient.from('expenses').select('amount');
-      const totalExpenses = (expenseData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-      // 3. Total Balance (Sum of all accounts)
-      const { data: accounts } = await adminClient.from('finance_accounts').select('balance');
-      const totalBalance = (accounts || []).reduce((sum, item) => sum + Number(item.balance || 0), 0);
-
-      const stats = {
-        totalIncome,
-        totalExpenses,
-        netProfit: totalIncome - totalExpenses,
-        totalBalance
-      };
-
-      sendJson(res, 200, { ok: true, stats });
+      const totalIncome = income.reduce((s, r) => s + Number(r.amount || 0), 0);
+      const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount || 0), 0);
+      const totalBalance = accounts.reduce((s, r) => s + Number(r.balance || 0), 0);
+      const pendingPayments = payReqs.filter(r => r.status === 'pending').length;
+      const pendingTopups = topups.filter(r => r.status === 'pending_finance').length;
+      sendJson(res, 200, { ok: true, stats: { totalIncome, totalExpenses, totalBalance, pendingPayments, pendingTopups, netProfit: totalIncome - totalExpenses } });
       return true;
     }
 
@@ -89,6 +88,7 @@ export async function handleFinance(req, res, url) {
       let query = adminClient
         .from('payment_requests')
         .select('*, leads(*), users!payment_requests_requested_by_fkey(full_name)')
+        .order('status', { ascending: true })
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
       const { data, error } = await query;
@@ -104,6 +104,7 @@ export async function handleFinance(req, res, url) {
       let query = adminClient
         .from('student_topups')
         .select('*, students(student_code,student_name), users!student_topups_requested_by_fkey(full_name)')
+        .order('status', { ascending: true })
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
       const { data, error } = await query;
@@ -401,29 +402,7 @@ export async function handleFinance(req, res, url) {
       return true;
     }
 
-    // ═══════ FINANCE DASHBOARD STATS ═══════
-    if (req.method === 'GET' && url.pathname === '/finance/stats') {
-      const results = await Promise.all([
-        adminClient.from('ledger_entries').select('amount').eq('entry_type', 'income'),
-        adminClient.from('expenses').select('amount'),
-        adminClient.from('finance_accounts').select('balance'),
-        adminClient.from('payment_requests').select('status'),
-        adminClient.from('student_topups').select('status')
-      ]);
-      const income = results[0]?.data || [];
-      const expenses = results[1]?.data || [];
-      const accounts = results[2]?.data || [];
-      const payReqs = results[3]?.data || [];
-      const topups = results[4]?.data || [];
 
-      const totalIncome = income.reduce((s, r) => s + Number(r.amount || 0), 0);
-      const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount || 0), 0);
-      const totalBalance = accounts.reduce((s, r) => s + Number(r.balance || 0), 0);
-      const pendingPayments = payReqs.filter(r => r.status === 'pending').length;
-      const pendingTopups = topups.filter(r => r.status === 'pending_finance').length;
-      sendJson(res, 200, { ok: true, stats: { totalIncome, totalExpenses, totalBalance, pendingPayments, pendingTopups, netProfit: totalIncome - totalExpenses } });
-      return true;
-    }
 
     // ═══════ ACCOUNTS ═══════
     if (req.method === 'GET' && url.pathname === '/finance/accounts') {
@@ -615,9 +594,9 @@ export async function handleFinance(req, res, url) {
         ...(incomeRes.data || []).map(i => ({
           ...i,
           __type: i.entry_type === 'receivable' ? 'receivable'
-               : i.entry_type === 'payable' ? 'payable'
-               : i.entry_type === 'expense' ? 'expense'
-               : 'income',
+            : i.entry_type === 'payable' ? 'payable'
+              : i.entry_type === 'expense' ? 'expense'
+                : 'income',
           date: i.entry_date
         })),
         ...(expenseRes.data || []).map(e => ({ ...e, __type: 'expense', date: e.expense_date }))

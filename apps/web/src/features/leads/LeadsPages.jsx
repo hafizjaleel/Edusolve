@@ -258,14 +258,17 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
     return map;
   }, [counselors]);
 
-  // Tab-based filtering: "new" = no counselor_id OR counselor_id not in counselor list
+  // Tab-based filtering
   const tabbedItems = useMemo(() => {
-    if (leadTab === 'new') return items.filter(i => !i.counselor_id || !counselorMap[i.counselor_id]);
+    if (leadTab === 'unassigned') return items.filter(i => !i.counselor_id || !counselorMap[i.counselor_id]);
     if (leadTab === 'assigned') return items.filter(i => i.counselor_id && counselorMap[i.counselor_id]);
-    return items;
+    // 'all': unassigned first, then assigned
+    const unassigned = items.filter(i => !i.counselor_id || !counselorMap[i.counselor_id]);
+    const assigned = items.filter(i => i.counselor_id && counselorMap[i.counselor_id]);
+    return [...unassigned, ...assigned];
   }, [items, leadTab, counselorMap]);
 
-  const newCount = useMemo(() => items.filter(i => !i.counselor_id || !counselorMap[i.counselor_id]).length, [items, counselorMap]);
+  const unassignedCount = useMemo(() => items.filter(i => !i.counselor_id || !counselorMap[i.counselor_id]).length, [items, counselorMap]);
   const assignedCount = useMemo(() => items.filter(i => i.counselor_id && counselorMap[i.counselor_id]).length, [items, counselorMap]);
 
   // Client-side filtering
@@ -323,19 +326,28 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
 
   return (
     <section className="panel">
-      {/* New / Assigned / All Tabs */}
+      {/* All / Unassigned / Assigned Tabs — visible to counselor_head and above */}
       {user?.role !== 'counselor' ? (
-        <div className="tabs" style={{ marginBottom: '16px' }}>
+        <div className="tabs-row" style={{ marginBottom: 16 }}>
           {[
-            { id: 'new', label: 'New', count: newCount },
-            { id: 'assigned', label: 'Assigned', count: assignedCount }
+            { id: 'all', label: 'All', count: items.length },
+            { id: 'unassigned', label: 'Unassigned', count: unassignedCount },
+            { id: 'assigned', label: 'Assigned', count: assignedCount },
           ].map(tab => (
             <button
               key={tab.id}
               className={`tab-btn ${leadTab === tab.id ? 'active' : ''}`}
               onClick={() => { setLeadTab(tab.id); setSelectedIds([]); }}
             >
-              {tab.label} ({tab.count})
+              {tab.label}
+              <span style={{
+                marginLeft: 6, fontSize: 11, fontWeight: 700,
+                background: leadTab === tab.id ? 'rgba(255,255,255,0.25)' : (tab.id === 'unassigned' && unassignedCount > 0 ? '#fee2e2' : 'var(--surface-soft)'),
+                color: leadTab === tab.id ? '#fff' : (tab.id === 'unassigned' && unassignedCount > 0 ? 'var(--danger)' : 'var(--muted)'),
+                borderRadius: 99, padding: '1px 7px'
+              }}>
+                {tab.count}
+              </span>
             </button>
           ))}
         </div>
@@ -392,7 +404,10 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
             </thead>
             <tbody>
               {filteredItems.map((lead) => (
-                <tr key={lead.id} className={selectedIds.includes(lead.id) ? 'selected-row' : ''}>
+                <tr key={lead.id}
+                  className={selectedIds.includes(lead.id) ? 'selected-row' : ''}
+                  style={leadTab === 'all' && (!lead.counselor_id || !counselorMap[lead.counselor_id]) ? { background: '#fffbeb' } : undefined}
+                >
                   <td>
                     <input
                       type="checkbox"
@@ -1853,29 +1868,55 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
 export function ConvertedLeadsPage() {
   const [leads, setLeads] = useState([]);
   const [acs, setAcs] = useState([]);
+  const [counselors, setCounselors] = useState([]);
+  const [leadTypes, setLeadTypes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [assigningId, setAssigningId] = useState(null);
   const [selectedAc, setSelectedAc] = useState({});
   const [assignedMap, setAssignedMap] = useState({});
   const [search, setSearch] = useState('');
+
+  // Pagination & Filters
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const limit = 20;
+  const [counselorFilter, setCounselorFilter] = useState('all');
+  const [leadTypeFilter, setLeadTypeFilter] = useState('all');
+
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAcId, setBulkAcId] = useState('');
   const [bulkAssigning, setBulkAssigning] = useState(false);
   const [tab, setTab] = useState('unassigned'); // 'unassigned' | 'all'
 
+  // Load initial dropdowns
+  useEffect(() => {
+    Promise.all([
+      apiFetch('/leads/academic-coordinators'),
+      apiFetch('/leads/counselors'),
+      apiFetch('/leads/types')
+    ]).then(([acsRes, counsRes, typeRes]) => {
+      setAcs(acsRes.items || []);
+      setCounselors(counsRes.items || []);
+      setLeadTypes(typeRes.types || []);
+    }).catch(console.error);
+  }, []);
+
+  // Load leads based on page and filters
   useEffect(() => {
     async function load() {
       setLoading(true);
       try {
-        const [leadsRes, acsRes] = await Promise.all([
-          apiFetch('/leads?scope=joined'),
-          apiFetch('/leads/academic-coordinators')
-        ]);
+        const query = new URLSearchParams({ scope: 'joined', page, limit });
+        if (counselorFilter !== 'all') query.set('counselor_id', counselorFilter);
+        if (leadTypeFilter !== 'all') query.set('lead_type', leadTypeFilter);
+
+        const leadsRes = await apiFetch(`/leads?${query.toString()}`);
         const fetchedLeads = leadsRes.items || [];
+
         setLeads(fetchedLeads);
-        setAcs(acsRes.items || []);
+        setTotal(leadsRes.total || 0);
 
         // Prepopulate assigned map from backend `students` relation
         const initialAssignedMap = {};
@@ -1893,7 +1934,7 @@ export function ConvertedLeadsPage() {
       }
     }
     load();
-  }, []);
+  }, [page, counselorFilter, leadTypeFilter]);
 
   async function handleAssign(leadId) {
     const acId = selectedAc[leadId];
@@ -1966,8 +2007,8 @@ export function ConvertedLeadsPage() {
 
   return (
     <section className="panel">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-        <div style={{ display: 'flex', gap: '8px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'nowrap', gap: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
+        <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
           <button
             className={tab === 'unassigned' ? 'primary' : 'secondary'}
             style={{ fontSize: '13px' }}
@@ -1980,16 +2021,34 @@ export function ConvertedLeadsPage() {
             style={{ fontSize: '13px' }}
             onClick={() => setTab('all')}
           >
-            All ({leads.length})
+            All
           </button>
         </div>
-        <input
-          type="text"
-          placeholder="Search by name or phone…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          style={{ width: '220px', padding: '8px 12px' }}
-        />
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'nowrap', flexShrink: 0 }}>
+          <select
+            value={counselorFilter}
+            onChange={e => { setCounselorFilter(e.target.value); setPage(1); }}
+            style={{ padding: '8px 12px', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+          >
+            <option value="all">All Counselors</option>
+            {counselors.map(c => <option key={c.id} value={c.id}>{c.full_name}</option>)}
+          </select>
+          <select
+            value={leadTypeFilter}
+            onChange={e => { setLeadTypeFilter(e.target.value); setPage(1); }}
+            style={{ padding: '8px 12px', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+          >
+            <option value="all">All Lead Types</option>
+            {leadTypes.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input
+            type="text"
+            placeholder="Search by name or phone…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ width: '220px', padding: '8px 12px' }}
+          />
+        </div>
       </div>
 
       {loading ? <p>Loading joined leads…</p> : null}
@@ -2064,6 +2123,15 @@ export function ConvertedLeadsPage() {
         </div>
       )}
 
+      {/* Pagination component */}
+      {!loading && total > limit && (
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px', alignItems: 'center', justifyContent: 'center' }}>
+          <button className="secondary small" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button>
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--muted)' }}>Page {page} of {Math.ceil(total / limit)}</span>
+          <button className="secondary small" disabled={page * limit >= total} onClick={() => setPage(page + 1)}>Next</button>
+        </div>
+      )}
+
       {/* Floating Bulk Assign Bar */}
       {selectedIds.length > 0 ? (
         <div style={{
@@ -2098,7 +2166,8 @@ export function ConvertedLeadsPage() {
 }
 
 export function DemoManagementPage({ leadId, onOpenDetails }) {
-  const { items, loading, error, refresh } = useLeads('mine');
+  const [activeTab, setActiveTab] = useState('demo_scheduled');
+  const { items, total, page, setPage, limit, loading, error, refresh } = useLeads(`mine&status=${activeTab}`);
   const [teachers, setTeachers] = useState([]);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [selectedLeadId, setSelectedLeadId] = useState('');
@@ -2106,18 +2175,13 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
   const [scheduledAt, setScheduledAt] = useState('');
   const [msg, setMsg] = useState('');
   const [err, setErr] = useState('');
-  const [activeTab, setActiveTab] = useState('demo_done');
 
   useEffect(() => {
     apiFetch('/teachers/pool').then(d => setTeachers(d.items || [])).catch(() => { });
   }, []);
 
-  const demoLeads = useMemo(() => {
-    return items.filter(i => ['demo_scheduled', 'demo_done'].includes(i.status));
-  }, [items]);
-
-  const scheduledCount = items.filter(i => i.status === 'demo_scheduled').length;
-  const doneCount = items.filter(i => i.status === 'demo_done').length;
+  const demoLeads = items; // Already filtered by backend
+  // We don't know total counts for both tabs from one query, so we'll just show the total for the current tab.
 
   async function handleScheduleDemo(e) {
     e.preventDefault();
@@ -2175,13 +2239,21 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
 
   return (
     <section className="panel">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '20px' }}>Demo Management</h2>
-          <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>
-            {scheduledCount} upcoming · {doneCount} demos taken
-          </p>
-        </div>
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '20px', overflowX: 'auto' }}>
+        {[
+          { id: 'demo_scheduled', label: '⏳ Upcoming Demos' },
+          { id: 'demo_done', label: '✅ History' }
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => { setActiveTab(t.id); setPage(1); }}
+            className={activeTab === t.id ? 'primary' : 'secondary'}
+            style={{ fontSize: '13px', whiteSpace: 'nowrap' }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
 
@@ -2189,13 +2261,6 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
       {loading ? <p>Loading demos...</p> : null}
       {error ? <p className="error">{error}</p> : null}
       {msg ? <p style={{ color: '#10b981', marginBottom: '12px' }}>{msg}</p> : null}
-
-      {!loading && demoLeads.length === 0 ? (
-        <div className="card" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>
-          <p style={{ fontSize: '28px', margin: '0 0 8px' }}>📅</p>
-          <p style={{ fontWeight: 500 }}>No demos in this category.</p>
-        </div>
-      ) : null}
 
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap mobile-friendly-table">
@@ -2257,10 +2322,27 @@ export function DemoManagementPage({ leadId, onOpenDetails }) {
                   </tr>
                 );
               })}
+              {!loading && demoLeads.length === 0 && (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>
+                    <p style={{ fontSize: '28px', margin: '0 0 8px' }}>📅</p>
+                    <p style={{ fontWeight: 500, margin: 0 }}>No demos in this category.</p>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Pagination component */}
+      {!loading && total > limit && (
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px', alignItems: 'center', justifyContent: 'center' }}>
+          <button className="secondary small" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</button>
+          <span style={{ fontSize: '13px', fontWeight: 500, color: 'var(--muted)' }}>Page {page} of {Math.ceil(total / limit)}</span>
+          <button className="secondary small" disabled={page * limit >= total} onClick={() => setPage(page + 1)}>Next</button>
+        </div>
+      )}
 
       {/* Schedule Demo Modal */}
       {
@@ -2792,14 +2874,11 @@ export function OverdueLeadsPage() {
   return (
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: '20px' }}>Overdue Leads</h2>
-          <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>
-            Leads assigned for more than 13 days without reaching Joined or Dropped status
-          </p>
-        </div>
+        <p style={{ margin: 0, fontSize: 13, color: 'var(--muted)' }}>
+          Leads assigned 13+ days without Joined or Dropped status
+        </p>
         <div style={{
-          padding: '8px 16px', borderRadius: '8px', fontSize: '14px', fontWeight: 700,
+          padding: '6px 14px', borderRadius: '8px', fontSize: '13px', fontWeight: 700,
           background: leads.length > 0 ? '#fee2e2' : '#dcfce7',
           color: leads.length > 0 ? '#dc2626' : '#15803d'
         }}>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { apiFetch } from '../../lib/api.js';
+import { getSession } from '../../lib/auth.js';
 import DateTimePicker from '../../components/DateTimePicker.jsx';
 
 /* ─── Inline SVG Icons ─── */
@@ -2102,17 +2103,41 @@ export function TCAllLeadsPage({ onNavigate }) {
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
     const [dateFilter, setDateFilter] = useState('all');
-
     const [showViewModal, setShowViewModal] = useState(null);
 
+    // Admin-only state
+    const userRole = getSession()?.user?.role || '';
+    const isAdmin = userRole === 'super_admin';
+    const [allTcs, setAllTcs] = useState([]);
+    const [reassigning, setReassigning] = useState(null); // { leadId, currentTcId }
+    const [newTcId, setNewTcId] = useState('');
+
     useEffect(() => {
-        apiFetch('/teacher-leads').then(res => {
-            setLeads(res.items || []);
+        (async () => {
+            try {
+                const res = await apiFetch('/teacher-leads');
+                let items = res.items || [];
+                if (isAdmin) {
+                    // Fetch all users to build coordinator name map + TC dropdown
+                    const usersRes = await apiFetch('/admin/users');
+                    const allUsers = usersRes.items || [];
+                    const nameMap = {};
+                    const tcList = [];
+                    allUsers.forEach(u => {
+                        nameMap[u.id] = u.name || u.email;
+                        if (u.role === 'teacher_coordinator') {
+                            tcList.push({ id: u.id, full_name: u.name || u.email, email: u.email });
+                        }
+                    });
+                    setAllTcs(tcList);
+                    items = items.map(l => ({ ...l, coordinatorName: nameMap[l.coordinator_id] || null }));
+                }
+                setLeads(items);
+            } catch (err) {
+                console.error(err);
+            }
             setLoading(false);
-        }).catch(err => {
-            console.error(err);
-            setLoading(false);
-        });
+        })();
     }, []);
 
     const filteredLeads = useMemo(() => {
@@ -2216,6 +2241,7 @@ export function TCAllLeadsPage({ onNavigate }) {
                                 <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151', minWidth: '120px' }}>Contact</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Experience</th>
                                 <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>Status</th>
+                                {isAdmin && <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151' }}>TC / Coordinator</th>}
                                 <th style={{ padding: '12px 16px', fontWeight: 600, color: '#374151', textAlign: 'right' }}>Actions</th>
                             </tr>
                         </thead>
@@ -2251,6 +2277,50 @@ export function TCAllLeadsPage({ onNavigate }) {
                                             {STATUS_LABELS[lead.status] || lead.status}
                                         </span>
                                     </td>
+                                    {/* TC column - admin only */}
+                                    {isAdmin && (
+                                        <td style={{ padding: '12px 16px', color: '#4b5563', minWidth: '160px' }}>
+
+                                            {reassigning?.leadId === lead.id ? (
+                                                <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                                                    <select
+                                                        value={newTcId}
+                                                        onChange={e => setNewTcId(e.target.value)}
+                                                        style={{ padding: '4px 8px', borderRadius: '4px', border: '1px solid #d1d5db', fontSize: '12px', flex: 1 }}
+                                                    >
+                                                        <option value="">— None —</option>
+                                                        {allTcs.map(tc => <option key={tc.id} value={tc.id}>{tc.full_name}</option>)}
+                                                    </select>
+                                                    <button
+                                                        style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '4px', background: '#2563eb', color: '#fff', border: 'none', cursor: 'pointer' }}
+                                                        onClick={async () => {
+                                                            await apiFetch(`/teacher-leads/${lead.id}`, {
+                                                                method: 'PATCH',
+                                                                body: JSON.stringify({ coordinator_id: newTcId || null })
+                                                            });
+                                                            setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, coordinator_id: newTcId || null, coordinatorName: allTcs.find(t => t.id === newTcId)?.full_name || null } : l));
+                                                            setReassigning(null);
+                                                        }}
+                                                    >✓</button>
+                                                    <button
+                                                        style={{ padding: '4px 8px', fontSize: '11px', borderRadius: '4px', background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', cursor: 'pointer' }}
+                                                        onClick={() => setReassigning(null)}
+                                                    >✕</button>
+                                                </div>
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                                    <span style={{ fontSize: '13px' }}>
+                                                        {lead.coordinatorName || <span style={{ color: '#9ca3af' }}>Unassigned</span>}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => { setReassigning({ leadId: lead.id }); setNewTcId(lead.coordinator_id || ''); }}
+                                                        style={{ fontSize: '11px', padding: '2px 6px', borderRadius: '4px', border: '1px solid #d1d5db', background: '#f9fafb', cursor: 'pointer', color: '#4b5563', whiteSpace: 'nowrap' }}
+                                                    >Reassign</button>
+                                                </div>
+                                            )}
+                                        </td>
+                                    )}
+
                                     <td style={{ padding: '12px 16px', textAlign: 'right' }}>
                                         <button
                                             className="small secondary"

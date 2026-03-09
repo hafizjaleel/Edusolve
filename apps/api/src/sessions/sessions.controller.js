@@ -105,14 +105,17 @@ export async function handleSessions(req, res, url) {
       const { data, error } = await adminClient
         .from('academic_sessions')
         .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(status,reason,verified_at)')
+        .eq('status', 'completed')
         .order('session_date', { ascending: false })
         .limit(160);
       if (error) throw new Error(error.message);
 
-      const items = (data || []).map((item) => ({
+      let items = (data || []).map((item) => ({
         ...item,
         verification_status: verificationStatusOf(item)
       }));
+
+      items = items.filter(i => i.verification_status === 'approved');
       sendJson(res, 200, { ok: true, items });
       return true;
     }

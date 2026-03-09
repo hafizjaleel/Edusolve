@@ -2,9 +2,9 @@ import { ROLES } from './roles.js';
 
 export const APP_PAGES = [
   /* ── Dashboards ── */
-  { path: '/dashboard/tc', title: 'TC Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/dashboard/super-admin', title: 'Super Admin Dashboard', group: 'Dashboards', roles: [ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/dashboard/counselor', title: 'Counselor Dashboard', group: 'Dashboards', roles: [ROLES.COUNSELOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/dashboard/tc', title: 'TC Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/dashboard/counselor', title: 'Counselor Dashboard', group: 'Dashboards', roles: [ROLES.COUNSELOR], showInNav: true },
   { path: '/dashboard/counselor-head', title: 'Counselor Head Dashboard', group: 'Dashboards', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/dashboard/academic-coordinator', title: 'AC Dashboard', group: 'Dashboards', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
@@ -35,7 +35,7 @@ export const APP_PAGES = [
   { path: '/teachers/all', title: 'Teacher Directory', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN, ROLES.TEACHER_COORDINATOR], showInNav: true },
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/topups/manage', title: 'Top-Ups', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/automation/hub', title: 'Automation', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/automation/hub', title: 'Automation', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR], showInNav: true },
   { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/tc/performance', title: 'Teacher Performance', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 

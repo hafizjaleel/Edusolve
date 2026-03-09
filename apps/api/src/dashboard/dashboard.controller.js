@@ -15,50 +15,60 @@ export async function handleDashboard(req, res) {
       }
 
       try {
-        // 1. Leads Stats
-        const { count: totalLeads } = await adminClient.from('leads').select('*', { count: 'exact', head: true });
-        const { count: newLeads } = await adminClient.from('leads').select('*', { count: 'exact', head: true }).eq('status', 'new');
+        const [
+          { count: totalLeads },
+          { count: newLeads },
+          { count: totalStudents },
+          { count: totalTeachers },
+          { data: incomeData },
+          { data: expenseData },
+          { data: teacherPayableEntries },
+          { data: teacherExpenseEntries },
+          { data: studentLedgerData },
+        ] = await Promise.all([
+          adminClient.from('leads').select('*', { count: 'exact', head: true }),
+          adminClient.from('leads').select('*', { count: 'exact', head: true }).eq('status', 'new'),
+          adminClient.from('students').select('*', { count: 'exact', head: true }).eq('status', 'active'),
+          adminClient.from('teacher_profiles').select('*', { count: 'exact', head: true }).eq('is_in_pool', true),
+          // Real income table: ledger_entries with entry_type = 'income'
+          adminClient.from('ledger_entries').select('amount').eq('entry_type', 'income'),
+          // Real expenses table
+          adminClient.from('expenses').select('amount'),
+          // Teacher payable: net ledger balance (payable - already paid via expenses)
+          adminClient.from('ledger_entries').select('teacher_id, amount').eq('entry_type', 'payable').not('teacher_id', 'is', null),
+          adminClient.from('expenses').select('teacher_id, amount').not('teacher_id', 'is', null),
+          // Pending Incoming: per-student outstanding (same logic as Finance Ledger page)
+          adminClient.from('ledger_entries').select('student_id, amount, entry_type').in('entry_type', ['receivable', 'income']).not('student_id', 'is', null),
+        ]);
 
-        // 2. Students Stats
-        const { count: totalStudents } = await adminClient.from('students').select('*', { count: 'exact', head: true }).eq('status', 'active');
-
-        // 3. Teachers Stats
-        const { count: totalTeachers } = await adminClient.from('teachers').select('*', { count: 'exact', head: true }).eq('status', 'active');
-
-        // 4. Finance Stats (This month)
-        // Note: For MVP we might just grab totals or use a simplified query if finance_transactions table exists
-        // Checking if finance_transactions exists from previous context or just using aggregation
-        // Assuming we need to calculate from 'finance_income' and 'finance_expenses' tables
-
-        const { data: incomeData } = await adminClient.from('finance_income').select('amount');
-        const totalIncome = (incomeData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-        const { data: expenseData } = await adminClient.from('finance_expenses').select('amount');
-        const totalExpenses = (expenseData || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
-
-        const netProfit = totalIncome - totalExpenses;
-
-        // 5. Teacher Payables (Approved but not Paid)
-        // We need to join with payroll_monthly_cycles to check status='approved'
-        // For MVP, let's fetch approved cycles first, then sum their items
-        const { data: approvedCycles } = await adminClient.from('payroll_monthly_cycles').select('id').eq('status', 'approved');
-        const approvedCycleIds = (approvedCycles || []).map(c => c.id);
-
-        let teacherPayable = 0;
-        if (approvedCycleIds.length > 0) {
-          const { data: payrollItems } = await adminClient.from('payroll_items').select('amount').in('cycle_id', approvedCycleIds);
-          teacherPayable = (payrollItems || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        const totalIncome = (incomeData || []).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const totalExpenses = (expenseData || []).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        // Teacher payable = total payable entries - total expenses paid to teachers (net balance we still owe)
+        const totalTeacherPayable = (teacherPayableEntries || []).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const totalTeacherPaid = (teacherExpenseEntries || []).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+        const teacherPayable = totalTeacherPayable - totalTeacherPaid;
+        // Group ledger entries by student, compute receivable - income per student, sum only +ve (student still owes)
+        const studentLedger = {};
+        for (const row of (studentLedgerData || [])) {
+          if (!row.student_id) continue;
+          if (!studentLedger[row.student_id]) studentLedger[row.student_id] = { receivable: 0, income: 0 };
+          if (row.entry_type === 'receivable') studentLedger[row.student_id].receivable += Number(row.amount || 0);
+          else studentLedger[row.student_id].income += Number(row.amount || 0);
         }
-
-        // 6. Pending Incoming (Pending Payment Requests)
-        const { data: pendingRequests } = await adminClient.from('payment_requests').select('amount').eq('status', 'pending');
-        const pendingIncoming = (pendingRequests || []).reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        const pendingIncoming = Object.values(studentLedger)
+          .reduce((sum, s) => sum + (s.receivable - s.income), 0);
 
         const stats = {
           leads: { total: totalLeads || 0, new: newLeads || 0 },
           students: { total: totalStudents || 0 },
           teachers: { total: totalTeachers || 0 },
-          finance: { income: totalIncome, expenses: totalExpenses, net: netProfit, teacherPayable, pendingIncoming }
+          finance: {
+            income: totalIncome,
+            expenses: totalExpenses,
+            net: totalIncome - totalExpenses,
+            teacherPayable,
+            pendingIncoming
+          }
         };
 
         sendJson(res, 200, { ok: true, stats });

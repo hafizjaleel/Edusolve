@@ -44,19 +44,64 @@ export async function handleStudents(req, res, url) {
         return true;
       }
 
+      const acIdFilter = url.searchParams.get('ac_id') || '';
+
       let query = adminClient
         .from('students')
-        .select('*, student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
+        .select('*, ac_user:academic_coordinator_id(id, full_name), student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       if (isAC(actor)) {
         query = query.eq('academic_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && acIdFilter) {
+        query = query.eq('academic_coordinator_id', acIdFilter);
       }
 
       const { data, error } = await query;
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+
+      const students = data || [];
+
+      // Determine outstanding balance per student (total_amount > amount = outstanding)
+      if (students.length > 0) {
+        const studentIds = students.map(s => s.id);
+        const leadIds = students.map(s => s.lead_id).filter(Boolean);
+
+        const [topupRes, prRes] = await Promise.all([
+          adminClient
+            .from('student_topups')
+            .select('student_id, total_amount, amount')
+            .in('student_id', studentIds)
+            .neq('status', 'rejected'),
+          leadIds.length > 0
+            ? adminClient
+              .from('payment_requests')
+              .select('lead_id, total_amount, amount')
+              .in('lead_id', leadIds)
+              .neq('status', 'rejected')
+            : Promise.resolve({ data: [] })
+        ]);
+
+        const topupOutstandingMap = {};
+        for (const t of (topupRes.data || [])) {
+          const out = Number(t.total_amount || 0) - Number(t.amount || 0);
+          if (out > 0) topupOutstandingMap[t.student_id] = (topupOutstandingMap[t.student_id] || 0) + out;
+        }
+        const prOutstandingMap = {};
+        for (const p of (prRes.data || [])) {
+          const out = Number(p.total_amount || 0) - Number(p.amount || 0);
+          if (out > 0) prOutstandingMap[p.lead_id] = (prOutstandingMap[p.lead_id] || 0) + out;
+        }
+
+        for (const s of students) {
+          const hasTopupOut = (topupOutstandingMap[s.id] || 0) > 0;
+          const hasInitialOut = s.lead_id && (prOutstandingMap[s.lead_id] || 0) > 0;
+          s.pending_payment = hasTopupOut ? 'topup' : hasInitialOut ? 'initial' : null;
+        }
+      }
+
+      sendJson(res, 200, { ok: true, items: students });
       return true;
     }
 
@@ -132,6 +177,22 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── GET /students/coordinators ──────────────────────────────────────────
+    if (req.method === 'GET' && url.pathname === '/students/coordinators') {
+      if (!['super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'only super admin can list coordinators' });
+        return true;
+      }
+      const { data, error } = await adminClient
+        .from('users')
+        .select('id, full_name, email')
+        .eq('role', 'academic_coordinator')
+        .order('full_name', { ascending: true });
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
     // ─── GET /students/teacher-availability ─────────────────
     if (req.method === 'GET' && url.pathname === '/students/teacher-availability') {
       if (!['academic_coordinator', 'teacher_coordinator', 'super_admin'].includes(actor.role)) {
@@ -190,6 +251,7 @@ export async function handleStudents(req, res, url) {
         .select('*, users!academic_sessions_teacher_id_fkey(id,full_name)')
         .eq('student_id', studentId)
         .eq('status', 'completed')
+        .eq('verification_status', 'approved')
         .order('session_date', { ascending: false })
         .order('started_at', { ascending: false });
 
@@ -242,6 +304,15 @@ export async function handleStudents(req, res, url) {
 
       let demoSessions = [];
       let paymentRequests = [];
+      let topupRequests = [];
+
+      // Always fetch topups by student id
+      const { data: topups } = await adminClient
+        .from('student_topups')
+        .select('*')
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false });
+      if (topups) topupRequests = topups;
 
       if (data.lead_id) {
         // Fetch demo sessions
@@ -268,8 +339,165 @@ export async function handleStudents(req, res, url) {
         sessions: sessions || [],
         messages: messages || [],
         demoSessions,
-        paymentRequests
+        paymentRequests,
+        topupRequests
       });
+      return true;
+    }
+
+    // ─── POST /students/:id/messages/send-reminder ──────────
+    const srMatch = url.pathname.match(/^\/students\/([^\/]+)\/messages\/send-reminder$/);
+    if (req.method === 'POST' && srMatch) {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only ac and admin can send reminders' });
+        return true;
+      }
+      const studentId = srMatch[1];
+      const { data: st } = await adminClient.from('students').select('student_name, contact_number, alternative_number, parent_phone').eq('id', studentId).maybeSingle();
+      if (!st) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+
+      const phoneRaw = st.contact_number || st.alternative_number || st.parent_phone;
+      if (!phoneRaw) {
+        sendJson(res, 400, { ok: false, error: 'student has no phone number on record' });
+        return true;
+      }
+      const phone = phoneRaw.replace(/[^0-9]/g, '');
+
+      const body = await readJson(req).catch(() => ({}));
+      const text = body.text || `Hello ${st.student_name}, this is a gentle reminder regarding your upcoming classes.`;
+
+      const { data: sessRow } = await adminClient.from('whatsapp_sessions').select('session_name, api_key').eq('status', 'WORKING').order('updated_at', { ascending: false }).limit(1).maybeSingle();
+      if (!sessRow) {
+        sendJson(res, 500, { ok: false, error: 'No active WhatsApp session found' });
+        return true;
+      }
+
+      const waappaUrl = process.env.WAAPPA_BASE_URL || 'http://localhost:3001';
+      const sendRes = await fetch(`${waappaUrl}/api/sendText`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': sessRow.api_key, 'Accept': 'application/json' },
+        body: JSON.stringify({ session: sessRow.session_name, chatId: `${phone}@c.us`, text })
+      });
+      if (!sendRes.ok) {
+        const errText = await sendRes.text();
+        sendJson(res, 500, { ok: false, error: `Waappa send failed: ${errText}` });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true, message: 'Reminder sent via WhatsApp' });
+      return true;
+    }
+
+    // ─── POST /students/:id/whatsapp-group ──────────────────
+    const waGroupMatch = url.pathname.match(/^\/students\/([^\/]+)\/whatsapp-group$/);
+    if (req.method === 'POST' && waGroupMatch) {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only ac and admin can create groups' });
+        return true;
+      }
+      const studentId = waGroupMatch[1];
+
+      const { data: st, error: stErr } = await adminClient
+        .from('students')
+        .select('student_name, contact_number, alternative_number, parent_phone, group_jid')
+        .eq('id', studentId)
+        .maybeSingle();
+
+      if (stErr || !st) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+      if (st.group_jid) {
+        sendJson(res, 400, { ok: false, error: 'group already exists' });
+        return true;
+      }
+
+      const { data: sessRow } = await adminClient
+        .from('whatsapp_sessions')
+        .select('session_name, api_key, connected_phone')
+        .eq('status', 'WORKING')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (!sessRow || !sessRow.api_key) {
+        sendJson(res, 500, { ok: false, error: 'No active WhatsApp session found' });
+        return true;
+      }
+
+      const session = sessRow.session_name;
+      const apiKey = sessRow.api_key;
+
+      const phones = [st.contact_number, st.alternative_number, st.parent_phone]
+        .filter(Boolean)
+        .map(p => {
+          let num = p.replace(/[^0-9]/g, '');
+          // If starting with 0, remove it
+          if (num.startsWith('0') && num.length === 11) num = num.substring(1);
+          // If 10 digits, assume India (+91)
+          if (num.length === 10) num = `91${num}`;
+          return num;
+        })
+        .filter(p => p.length >= 12);
+
+      const uniquePhones = [...new Set(phones)].map(p => ({ id: `${p}@c.us` }));
+      if (uniquePhones.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'No valid phone numbers to add' });
+        return true;
+      }
+
+      const body = await readJson(req).catch(() => ({}));
+      const groupName = body.name || (st.student_name ? `Edusolve - ${st.student_name}` : 'Edusolve Group');
+
+      const waappaUrl = process.env.WAAPPA_BASE_URL || 'http://localhost:3001';
+
+      const payload = {
+        name: groupName,
+        participants: uniquePhones
+      };
+
+      const response = await fetch(`${waappaUrl}/api/${session}/groups`, {
+        method: 'POST',
+        headers: {
+          'Authorization': apiKey,
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        sendJson(res, 500, { ok: false, error: `Waappa error: ${response.status} ${errText}` });
+        return true;
+      }
+
+      const groupInfo = await response.json();
+
+      let jid = groupInfo.JID || groupInfo.id || groupInfo.group_id;
+      if (!jid && Array.isArray(groupInfo) && groupInfo.length > 0) {
+        jid = groupInfo[0].JID || groupInfo[0].id;
+      }
+
+      if (!jid) {
+        sendJson(res, 500, { ok: false, error: 'Waappa returned missing JID' });
+        return true;
+      }
+
+      const { error: updateErr } = await adminClient
+        .from('students')
+        .update({ group_jid: jid, group_name: groupName })
+        .eq('id', studentId);
+
+      if (updateErr) {
+        sendJson(res, 500, { ok: false, error: updateErr.message });
+        return true;
+      }
+
+      sendJson(res, 200, { ok: true, group_jid: jid, group_name: groupName });
       return true;
     }
 

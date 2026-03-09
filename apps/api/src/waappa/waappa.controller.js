@@ -10,6 +10,10 @@ const supabase = createClient(env.supabaseUrl, env.supabaseServiceRoleKey);
 const waappaService = new WaappaService();
 const authService = new AuthService();
 
+// Simple in-memory LRU cache to reduce Supabase queries for webhook contacts
+const waContactCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes cache duration
+
 export class WaappaController {
 
     async handleRequest(req, res, url) {
@@ -26,10 +30,10 @@ export class WaappaController {
         }
 
         // Require Auth for all below
-        const token = getBearerToken(req);
-        if (!token) return sendJson(res, 401, { error: 'Unauthorized' });
-        const user = await authService.me(token);
-        if (!user.ok) return sendJson(res, 401, { error: 'Invalid token' });
+        const rawRole = req.headers['x-user-role'];
+        if (!rawRole) return sendJson(res, 401, { error: 'Unauthorized' });
+
+        const user = { ok: true, role: rawRole, id: req.headers['x-user-id'] };
 
         // Session Management Endpoints
         if (url.pathname === '/waappa/sessions' && req.method === 'GET') {
@@ -446,74 +450,45 @@ export class WaappaController {
                     });
                 }
 
-                // --- Skip Group Messages or null JID ---
-                // For outbound (fromMe=true): `to` is the contact, but Waappa often sets `to: null`
-                // In that case `from` is the chat JID (the contact), so fall back to that
-                const contactJidRaw = fromMe ? (to || from) : from;
+                let contactJidRaw = payload?._data?.Info?.Chat;
+                if (!contactJidRaw) {
+                    if (from && from.includes('@g.us')) contactJidRaw = from;
+                    else if (to && to.includes('@g.us')) contactJidRaw = to;
+                    else contactJidRaw = fromMe ? (to || from) : from;
+                }
+
                 if (!contactJidRaw) {
                     return sendJson(res, 200, { ok: true, skipped: 'no JID' });
                 }
-                if (contactJidRaw.includes('@g.us')) {
-                    return sendJson(res, 200, { ok: true, skipped: 'group message' });
-                }
 
                 // --- Handle LID & Phone Extractor ---
-                let finalPhone = null; // The exact @c.us or just digits
+                let finalPhone = null; // The exact @c.us or @g.us
                 let skipReason = null;
+                let isGroup = false;
 
-                if (contactJidRaw.includes('@lid')) {
+                if (contactJidRaw.includes('@g.us')) {
+                    // It's a group message
+                    finalPhone = contactJidRaw;
+                    isGroup = true;
+                } else if (contactJidRaw.includes('@lid')) {
                     // It's an @lid. 
-                    // Step 1: Check Database Cache
-                    const { data: cachedContact, error: cacheErr } = await supabase
-                        .from('whatsapp_contacts')
-                        .select('phone_number')
-                        .eq('lid', contactJidRaw)
-                        .maybeSingle();
-
-                    console.log(`[webhook] DB Cache lookup for ${contactJidRaw} -> Data:`, cachedContact, 'Err:', cacheErr);
-
+                    const { data: cachedContact } = await supabase.from('whatsapp_contacts').select('phone_number').eq('lid', contactJidRaw).maybeSingle();
                     if (cachedContact && cachedContact.phone_number) {
                         finalPhone = cachedContact.phone_number;
                     } else {
-                        // Step 2: Fetch from Waappa API
                         try {
                             const { data: sessRow } = await supabase.from('whatsapp_sessions').select('api_key').eq('session_name', session).maybeSingle();
-                            const resolved = sessRow?.api_key
-                                ? await waappaService.getPhoneNumberByLid(session, contactJidRaw, sessRow.api_key)
-                                : null;
-
-                            console.log(`[webhook] Waappa API LID check: LID=${contactJidRaw}, Response=${JSON.stringify(resolved)}`);
-
+                            const resolved = sessRow?.api_key ? await waappaService.getPhoneNumberByLid(session, contactJidRaw, sessRow.api_key) : null;
                             if (resolved && resolved.pn) {
-                                finalPhone = resolved.pn; // This will be like 919876543210@c.us
-                                // Save mapping to Database
-                                try {
-                                    await supabase.from('whatsapp_contacts').upsert({
-                                        lid: contactJidRaw,
-                                        phone_number: finalPhone
-                                    });
-                                } catch (e) {
-                                    console.error('[webhook] failed to cache LID:', e.message);
-                                }
+                                finalPhone = resolved.pn;
+                                try { await supabase.from('whatsapp_contacts').upsert({ lid: contactJidRaw, phone_number: finalPhone }); } catch (e) { }
                             } else {
                                 skipReason = `Waappa could not resolve LID ${contactJidRaw}`;
                             }
-                        } catch (lidErr) {
-                            skipReason = `LID resolve API error: ${lidErr.message}`;
-                        }
+                        } catch (lidErr) { skipReason = `LID API error: ${lidErr.message}`; }
                     }
                 } else if (contactJidRaw.includes('@c.us') || /^\d+$/.test(contactJidRaw.split('@')[0])) {
-                    // It's a normal phone number / @c.us
-                    finalPhone = contactJidRaw;
-
-                    // Optional: store this in whatsapp_contacts just to have a complete directory
-                    try {
-                        const pureNum = finalPhone.split('@')[0].replace(/[^0-9]/g, '');
-                        await supabase.from('whatsapp_contacts').upsert({
-                            lid: finalPhone, // using the JID itself as key since we don't have an @lid
-                            phone_number: finalPhone
-                        });
-                    } catch (e) { }
+                    finalPhone = contactJidRaw.includes('@c.us') ? contactJidRaw : `${contactJidRaw}@c.us`;
                 } else {
                     skipReason = "Unknown contact JID format";
                 }
@@ -523,67 +498,72 @@ export class WaappaController {
                     return sendJson(res, 200, { ok: true, skipped: skipReason });
                 }
 
-                // --- Extraction ---
-                // Strip @c.us or other suffixes, remove non-digits, take last 10
-                const cleanDigits = finalPhone.split('@')[0].replace(/[^0-9]/g, '');
-                const last10 = cleanDigits.slice(-10);
-
-                if (!last10 || last10.length < 10) {
-                    console.log(`[webhook msg] JID: ${contactJidRaw} → finalPhone: ${finalPhone} → Invalid digits: ${cleanDigits}`);
-                    return sendJson(res, 200, { ok: true, skipped: 'invalid phone length' });
-                }
-
-                console.log(`[webhook msg] JID: ${contactJidRaw} → finalPhone: ${finalPhone} → last10: ${last10}`);
-
-                // --- Only store messages from known students or teachers ---
                 let contactType = null;
+                let contactPhoneToStore = null;
 
-                // Check students (match any of their 3 possible phone fields, last-10 normalized)
-                // Check students based on their specific messaging_number preference
-                // supabase has no dynamic "OR on value of a column", so we fetch matches and filter manually
-                const { data: stData } = await supabase
-                    .from('students')
-                    .select('id, messaging_number, contact_number, alternative_number, parent_phone')
-                    .or([
-                        `contact_number.ilike.%${last10}`,
-                        `alternative_number.ilike.%${last10}`,
-                        `parent_phone.ilike.%${last10}`
-                    ].join(','));
+                // Cache check
+                const cacheKey = `wa_contact_${finalPhone}`;
+                const cachedContact = waContactCache.get(cacheKey);
 
-                let matchedStudent = null;
-                if (stData && stData.length > 0) {
-                    // Filter to strictly the one whose *active messaging number* matches last10
-                    matchedStudent = stData.find(s => {
-                        const colToUse = s.messaging_number || 'contact_number';
-                        const num = (s[colToUse] || '').replace(/[^0-9]/g, '');
-                        return num.endsWith(last10);
-                    });
-                }
-
-                if (matchedStudent) {
-                    contactType = 'student';
+                if (cachedContact && (Date.now() - cachedContact.timestamp) < CACHE_TTL) {
+                    contactType = cachedContact.contactType;
+                    contactPhoneToStore = cachedContact.contactPhoneToStore;
                 } else {
-                    const { data: teacherData } = await supabase
-                        .from('teacher_profiles')
-                        .select('id')
-                        .ilike('phone', `%${last10}`)
-                        .maybeSingle();
-                    if (teacherData) contactType = 'teacher';
+                    if (isGroup) {
+                        // Check if it's a student group
+                        const { data: stData } = await supabase
+                            .from('students')
+                            .select('id, group_jid')
+                            .eq('group_jid', finalPhone)
+                            .maybeSingle();
+
+                        if (stData) {
+                            contactType = 'student';
+                            contactPhoneToStore = finalPhone; // Store the @g.us as the contact phone
+                        }
+                    } else {
+                        // Check if it's a teacher personal number
+                        const cleanDigits = finalPhone.split('@')[0].replace(/[^0-9]/g, '');
+                        const last10 = cleanDigits.slice(-10);
+                        if (last10 && last10.length >= 10) {
+                            const { data: teacherData } = await supabase
+                                .from('teacher_profiles')
+                                .select('id')
+                                .ilike('phone', `%${last10}%`)
+                                .limit(1);
+
+                            if (teacherData && teacherData.length > 0) {
+                                contactType = 'teacher';
+                                contactPhoneToStore = last10;
+                            }
+                        }
+                    }
+
+                    // Save to cache if found
+                    if (contactType) {
+                        waContactCache.set(cacheKey, { contactType, contactPhoneToStore, timestamp: Date.now() });
+
+                        // Prevent Map from growing indefinitely (basic garbage collection of oldest keys)
+                        if (waContactCache.size > 1000) {
+                            const firstKey = waContactCache.keys().next().value;
+                            if (firstKey) waContactCache.delete(firstKey);
+                        }
+                    }
                 }
 
-                // Skip unknown contacts entirely
+                // Strictly skip if it's neither a known student group nor a known teacher
                 if (!contactType) {
-                    console.log(`[webhook msg] SKIPPED - unknown contact: ${last10}`);
-                    return sendJson(res, 200, { ok: true, skipped: 'unknown contact' });
+                    console.log(`[webhook msg] SKIPPED - Contact is neither a known student group nor a teacher: ${finalPhone}`);
+                    return sendJson(res, 200, { ok: true, skipped: 'unauthorized contact type' });
                 }
-                console.log(`[webhook msg] STORING message from ${last10} (${contactType})`);
+
+                console.log(`[webhook msg] STORING message from/to ${contactPhoneToStore} (${contactType})`);
 
                 // Upsert Message
                 const { error: upsertErr } = await supabase.from('whatsapp_messages').upsert({
                     id,
                     session_name: session,
                     timestamp,
-                    // Fallback to connected session JID or empty string if null to satisfy DB constraints
                     from_jid: from || '',
                     to_jid: to || '',
                     from_me: fromMe,
@@ -594,7 +574,7 @@ export class WaappaController {
                     ack: ack,
                     ack_name: ackName || null,
                     source: source,
-                    contact_phone: last10,   // store normalized last-10 for consistent lookups
+                    contact_phone: contactPhoneToStore,
                     contact_type: contactType
                 });
 

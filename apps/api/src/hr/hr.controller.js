@@ -37,32 +37,67 @@ export async function handleHR(req, res, url) {
   try {
     // ═══════ DASHBOARD STATS ═══════
     if (req.method === 'GET' && url.pathname === '/hr/stats') {
-      const [{ data: employees }, { data: attendance }] = await Promise.all([
-        adminClient.from('employees').select('id, is_active').eq('is_active', true),
-        adminClient.from('attendance_records').select('status').eq('attendance_date', new Date().toISOString().slice(0, 10))
+      const today = new Date().toISOString().slice(0, 10);
+
+      // Date helpers
+      const todayDate = new Date();
+      // Week: Monday–Sunday
+      const dayOfWeek = todayDate.getDay(); // 0=Sun
+      const diffToMon = (dayOfWeek + 6) % 7;
+      const weekStart = new Date(todayDate); weekStart.setDate(todayDate.getDate() - diffToMon);
+      const weekStartStr = weekStart.toISOString().slice(0, 10);
+      // This month
+      const monthStart = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const monthEnd = today;
+      // Last month
+      const lastMonthDate = new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 1);
+      const lastMonthStart = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}-01`;
+      const lastMonthEnd = new Date(todayDate.getFullYear(), todayDate.getMonth(), 0).toISOString().slice(0, 10);
+
+      // Fetch all active staff employees
+      const { data: allEmployees } = await adminClient.from('employees').select('id, is_active, employee_type').eq('is_active', true);
+      const staffIds = (allEmployees || []).filter(e => e.employee_type === 'staff').map(e => e.id);
+      const totalEmployees = (allEmployees || []).length;
+      const totalStaff = staffIds.length;
+
+      // Fetch attendance for all needed ranges at once — staff only
+      const [todayRec, weekRec, monthRec, lastMonthRec] = await Promise.all([
+        adminClient.from('attendance_records').select('employee_id, status').eq('attendance_date', today).in('employee_id', staffIds.length ? staffIds : ['no-match']),
+        adminClient.from('attendance_records').select('employee_id, status').gte('attendance_date', weekStartStr).lte('attendance_date', today).in('employee_id', staffIds.length ? staffIds : ['no-match']),
+        adminClient.from('attendance_records').select('employee_id, status').gte('attendance_date', monthStart).lte('attendance_date', monthEnd).in('employee_id', staffIds.length ? staffIds : ['no-match']),
+        adminClient.from('attendance_records').select('employee_id, status').gte('attendance_date', lastMonthStart).lte('attendance_date', lastMonthEnd).in('employee_id', staffIds.length ? staffIds : ['no-match'])
       ]);
 
-      const totalEmployees = (employees || []).length;
-      const todayPresent = (attendance || []).filter(a => a.status === 'present').length;
-      const todayAbsent = (attendance || []).filter(a => a.status === 'absent').length;
-      const todayHalfDay = (attendance || []).filter(a => a.status === 'half_day').length;
-      const todayLeave = (attendance || []).filter(a => a.status === 'leave').length;
-      const todayMarked = (attendance || []).length;
+      function summarise(records) {
+        const r = records?.data || [];
+        return {
+          present: r.filter(a => a.status === 'present').length,
+          absent: r.filter(a => a.status === 'absent').length,
+          half_day: r.filter(a => a.status === 'half_day').length,
+        };
+      }
 
-      const { data: pendingCycles } = await adminClient.from('hr_payroll_cycles').select('id').eq('status', 'draft');
+      const todaySummary = summarise(todayRec);
+
       const { data: pendingRequests } = await adminClient.from('hr_payment_requests').select('id').eq('status', 'pending');
 
       sendJson(res, 200, {
         ok: true,
         stats: {
           totalEmployees,
-          todayPresent,
-          todayAbsent,
-          todayHalfDay,
-          todayLeave,
-          todayMarked,
-          pendingPayrollCycles: (pendingCycles || []).length,
-          pendingPaymentRequests: (pendingRequests || []).length
+          totalStaff,
+          todayPresent: todaySummary.present,
+          todayAbsent: todaySummary.absent,
+          todayHalfDay: todaySummary.half_day,
+          todayLeave: (todayRec?.data || []).filter(a => a.status === 'leave').length,
+          todayMarked: (todayRec?.data || []).length,
+          pendingPaymentRequests: (pendingRequests || []).length,
+          periods: {
+            today: { ...todaySummary, total_staff: totalStaff, label: 'Today' },
+            week: { ...summarise(weekRec), total_staff: totalStaff, label: 'This Week' },
+            month: { ...summarise(monthRec), total_staff: totalStaff, label: 'This Month' },
+            last_month: { ...summarise(lastMonthRec), total_staff: totalStaff, label: 'Last Month' },
+          }
         }
       });
       return true;
@@ -215,7 +250,7 @@ export async function handleHR(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/hr/attendance/report') {
       const year = parseInt(url.searchParams.get('year') || new Date().getFullYear(), 10);
       const month = parseInt(url.searchParams.get('month') || (new Date().getMonth() + 1), 10);
-      
+
       const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
       const endDate = new Date(year, month, 0).toISOString().slice(0, 10);
 
@@ -240,7 +275,7 @@ export async function handleHR(req, res, url) {
           attendanceMap[a.employee_id] = { present: 0, absent: 0, half_day: 0 };
         }
         if (a.status !== 'leave') {
-           attendanceMap[a.employee_id][a.status]++;
+          attendanceMap[a.employee_id][a.status]++;
         }
       });
 
@@ -415,7 +450,7 @@ export async function handleHR(req, res, url) {
         sendJson(res, 400, { ok: false, error: 'items array is required' });
         return true;
       }
-      
+
       // We will clear existing and insert new to easily handle replacements
       const { error: delErr } = await adminClient.from('salary_rate_config').delete().neq('id', '00000000-0000-0000-0000-000000000000');
       if (delErr) throw new Error(delErr.message);
@@ -446,13 +481,13 @@ export async function handleHR(req, res, url) {
         sendJson(res, 400, { ok: false, error: 'teacherUserId, year, and month required' });
         return true;
       }
-      
+
       const { calculateAllTeacherSalaries } = await import('./salary.service.js');
       const report = await calculateAllTeacherSalaries(payload.month, payload.year);
       const teacherData = report.find(t => t.user_id === payload.teacherUserId || t.id === payload.teacherUserId);
-      if (!teacherData) { 
-        sendJson(res, 404, { ok: false, error: 'Teacher data not found or no sessions.' }); 
-        return true; 
+      if (!teacherData) {
+        sendJson(res, 404, { ok: false, error: 'Teacher data not found or no sessions.' });
+        return true;
       }
 
       // Check if already submitted
@@ -464,9 +499,9 @@ export async function handleHR(req, res, url) {
         .eq('month', payload.month)
         .maybeSingle();
 
-      if (existing) { 
-        sendJson(res, 400, { ok: false, error: 'Payment request already exists for this month.' }); 
-        return true; 
+      if (existing) {
+        sendJson(res, 400, { ok: false, error: 'Payment request already exists for this month.' });
+        return true;
       }
 
       const totalAmount = teacherData.total_salary;
@@ -483,18 +518,18 @@ export async function handleHR(req, res, url) {
         teacher_id: teacherData.id,
         target_type: 'teacher',
         total_amount: finalAmount,
-        year: payload.year,        
-        month: payload.month,        
+        year: payload.year,
+        month: payload.month,
         status: 'pending',
         requested_by: resolvedUserId2,
         hr_note: payload.hr_note || null,
         breakdown: {
           base_calculated: totalAmount,
           adjustment,
-          details: { 
-            total_hours: teacherData.total_hours, 
-            breakdown_by_subject: teacherData.breakdown_by_subject, 
-            breakdown_by_level: teacherData.breakdown_by_level 
+          details: {
+            total_hours: teacherData.total_hours,
+            breakdown_by_subject: teacherData.breakdown_by_subject,
+            breakdown_by_level: teacherData.breakdown_by_level
           }
         }
       }).select('*').single();
@@ -503,12 +538,12 @@ export async function handleHR(req, res, url) {
 
       if (finalAmount > 0) {
         await adminClient.from('ledger_entries').insert([{
-            entry_date: new Date().toISOString().slice(0, 10),
-            entry_type: 'payable',
-            amount: finalAmount,
-            description: `Salary Payable (Teacher) — ${payload.year}/${String(payload.month).padStart(2, '0')}`,
-            teacher_id: teacherData.id,
-            posted_by: resolvedUserId2
+          entry_date: new Date().toISOString().slice(0, 10),
+          entry_type: 'payable',
+          amount: finalAmount,
+          description: `Salary Payable (Teacher) — ${payload.year}/${String(payload.month).padStart(2, '0')}`,
+          teacher_id: teacherData.id,
+          posted_by: resolvedUserId2
         }]);
       }
       sendJson(res, 201, { ok: true, request: data });
@@ -531,9 +566,9 @@ export async function handleHR(req, res, url) {
         .eq('month', payload.month)
         .maybeSingle();
 
-      if (existing) { 
-        sendJson(res, 400, { ok: false, error: 'Payment request already exists for this month.' }); 
-        return true; 
+      if (existing) {
+        sendJson(res, 400, { ok: false, error: 'Payment request already exists for this month.' });
+        return true;
       }
 
       const startDate = `${payload.year}-${String(payload.month).padStart(2, '0')}-01`;
@@ -542,7 +577,7 @@ export async function handleHR(req, res, url) {
       const [salRes, attRes] = await Promise.all([
         adminClient.from('salary_structures').select('*').eq('employee_id', payload.employeeId).maybeSingle(),
         adminClient.from('attendance_records').select('status').eq('employee_id', payload.employeeId).gte('attendance_date', startDate).lte('attendance_date', endDate)
-      ]);      
+      ]);
 
       const sal = salRes.data;
       const attList = attRes.data || [];
@@ -570,14 +605,14 @@ export async function handleHR(req, res, url) {
       const effectiveDays = present + (half_day * 0.5);
       let proRatedGross = 0;
       let calcNet = 0;
-      
+
       if (effectiveDays === 0) {
         calcNet = Math.round(grossSalary - totalDeductions);
       } else {
         proRatedGross = workingDays > 0 ? (grossSalary * effectiveDays / workingDays) : 0;
         calcNet = Math.round(proRatedGross - totalDeductions);
       }
-      
+
       const adjustment = Number(payload.adjustment) || 0;
       const finalAmount = Math.max(0, calcNet + adjustment);
 
@@ -599,13 +634,13 @@ export async function handleHR(req, res, url) {
         breakdown: {
           base_calculated: calcNet,
           adjustment,
-          details: { 
-            working_days: workingDays, 
-            present_days: present, 
-            half_days: half_day, 
-            base_salary: baseSalary, 
-            total_allowances: totalAllowances, 
-            total_deductions: totalDeductions 
+          details: {
+            working_days: workingDays,
+            present_days: present,
+            half_days: half_day,
+            base_salary: baseSalary,
+            total_allowances: totalAllowances,
+            total_deductions: totalDeductions
           }
         }
       }).select('*').single();
@@ -614,12 +649,12 @@ export async function handleHR(req, res, url) {
 
       if (finalAmount > 0) {
         await adminClient.from('ledger_entries').insert([{
-            entry_date: new Date().toISOString().slice(0, 10),
-            entry_type: 'payable',
-            amount: finalAmount,
-            description: `Salary Payable (Employee) — ${payload.year}/${String(payload.month).padStart(2, '0')}`,
-            employee_id: payload.employeeId,
-            posted_by: resolvedUserId2
+          entry_date: new Date().toISOString().slice(0, 10),
+          entry_type: 'payable',
+          amount: finalAmount,
+          description: `Salary Payable (Employee) — ${payload.year}/${String(payload.month).padStart(2, '0')}`,
+          employee_id: payload.employeeId,
+          posted_by: resolvedUserId2
         }]);
       }
       sendJson(res, 201, { ok: true, request: data });
@@ -639,7 +674,15 @@ export async function handleHR(req, res, url) {
         .order('created_at', { ascending: false });
 
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+
+      let items = data || [];
+      items.sort((a, b) => {
+        if (a.status === 'pending' && b.status !== 'pending') return -1;
+        if (b.status === 'pending' && a.status !== 'pending') return 1;
+        return 0;
+      });
+
+      sendJson(res, 200, { ok: true, items });
       return true;
     }
 
@@ -648,7 +691,7 @@ export async function handleHR(req, res, url) {
     if (req.method === 'PATCH' && prUpdateMatch) {
       const prId = prUpdateMatch[1];
       const payload = await readJson(req);
-      
+
       const updates = { updated_at: nowIso() };
       if (payload.status) updates.status = payload.status;
       if (payload.status === 'approved') updates.approved_at = nowIso();
@@ -660,23 +703,23 @@ export async function handleHR(req, res, url) {
         .eq('id', prId)
         .select('*')
         .single();
-        
+
       if (error) throw new Error(error.message);
 
       // If cancelled/rejected, we should delete the payable ledger entry too
       if (payload.status === 'rejected' || payload.status === 'cancelled') {
-         // Optionally delete ledger entries if needed to keep financial records clean
-         if (data.employee_id) {
-            await adminClient.from('ledger_entries').delete()
-              .eq('employee_id', data.employee_id)
-              .eq('entry_type', 'payable')
-              .like('description', `%${data.year}/${String(data.month).padStart(2, '0')}%`);
-         } else if (data.teacher_id) {
-            await adminClient.from('ledger_entries').delete()
-              .eq('teacher_id', data.teacher_id)
-              .eq('entry_type', 'payable')
-              .like('description', `%${data.year}/${String(data.month).padStart(2, '0')}%`);
-         }
+        // Optionally delete ledger entries if needed to keep financial records clean
+        if (data.employee_id) {
+          await adminClient.from('ledger_entries').delete()
+            .eq('employee_id', data.employee_id)
+            .eq('entry_type', 'payable')
+            .like('description', `%${data.year}/${String(data.month).padStart(2, '0')}%`);
+        } else if (data.teacher_id) {
+          await adminClient.from('ledger_entries').delete()
+            .eq('teacher_id', data.teacher_id)
+            .eq('entry_type', 'payable')
+            .like('description', `%${data.year}/${String(data.month).padStart(2, '0')}%`);
+        }
       }
 
       sendJson(res, 200, { ok: true, request: data });
