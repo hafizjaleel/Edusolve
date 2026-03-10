@@ -23,6 +23,21 @@ async function resolveRoleFromDb(userId) {
   return ALL_ROLES.includes(roleCode) ? roleCode : null;
 }
 
+async function resolveNameFromDb(userId) {
+  const adminClient = getSupabaseAdminClient();
+  if (!adminClient || !userId) return null;
+
+  const { data, error } = await adminClient
+    .from('users')
+    .select('full_name')
+    .eq('id', userId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return data.full_name;
+}
+
 export class AuthService {
   async login(payload) {
     const { email, password, role } = payload;
@@ -45,6 +60,8 @@ export class AuthService {
         return { ok: false, error: 'user role is missing or invalid' };
       }
 
+      const dbName = await resolveNameFromDb(data.user.id);
+
       return {
         ok: true,
         token: data.session?.access_token,
@@ -53,7 +70,7 @@ export class AuthService {
           id: data.user.id,
           email: data.user.email,
           role: resolvedRole,
-          name: data.user.user_metadata?.name || data.user.email.split('@')[0]
+          name: dbName || data.user.user_metadata?.name || null
         }
       };
     }
@@ -87,13 +104,15 @@ export class AuthService {
         return { ok: false, error: 'user role is missing or invalid' };
       }
 
+      const dbName = await resolveNameFromDb(data.user.id);
+
       return {
         ok: true,
         user: {
           id: data.user.id,
           email: data.user.email,
           role: resolvedRole,
-          name: data.user.user_metadata?.name || data.user.email.split('@')[0]
+          name: dbName || data.user.user_metadata?.name || null
         }
       };
     }
@@ -120,6 +139,8 @@ export class AuthService {
       const resolvedRole = roleFromUser(data.user) || (await resolveRoleFromDb(data.user?.id));
       if (!resolvedRole) return { ok: false, error: 'user role is missing or invalid' };
 
+      const dbName = await resolveNameFromDb(data.user.id);
+
       return {
         ok: true,
         token: data.session?.access_token,
@@ -128,7 +149,7 @@ export class AuthService {
           id: data.user.id,
           email: data.user.email,
           role: resolvedRole,
-          name: data.user.user_metadata?.name || data.user.email.split('@')[0]
+          name: dbName || data.user.user_metadata?.name || null
         }
       };
     }
