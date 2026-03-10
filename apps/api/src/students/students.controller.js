@@ -97,7 +97,7 @@ export async function handleStudents(req, res, url) {
         for (const s of students) {
           const topupOut = topupOutstandingMap[s.id] || 0;
           const initialOut = s.lead_id ? (prOutstandingMap[s.lead_id] || 0) : 0;
-          
+
           if (topupOut > 0) {
             s.pending_payment = 'topup';
             s.pending_amount = topupOut;
@@ -121,11 +121,21 @@ export async function handleStudents(req, res, url) {
         sendJson(res, 403, { ok: false, error: 'session access is not allowed for this role' });
         return true;
       }
-      const today = new Date().toISOString().slice(0, 10);
+      const offsetParam = url.searchParams.get('offset') || '0';
+      const offset = parseInt(offsetParam, 10);
+
+      const nowRaw = new Date();
+      const istStr = nowRaw.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+      const now = new Date(istStr);
+      now.setDate(now.getDate() + offset);
+
+      const pad = n => String(n).padStart(2, '0');
+      const targetDate = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+
       let query = adminClient
         .from('academic_sessions')
         .select('*, students!inner(student_code,student_name,academic_coordinator_id), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(id,type,status)')
-        .eq('session_date', today)
+        .eq('session_date', targetDate)
         .order('started_at', { ascending: true });
 
       const requestedUserId = url.searchParams.get('user_id');
@@ -170,17 +180,24 @@ export async function handleStudents(req, res, url) {
       const offsetParam = url.searchParams.get('offset') || '0';
       const offset = parseInt(offsetParam, 10);
 
-      const now = new Date();
-      const dayOfWeek = now.getDay();
+      // 1. Get current time in correct locale timezone (Asia/Kolkata)
+      const nowRaw = new Date();
+      const istStr = nowRaw.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+      const now = new Date(istStr);
+
+      const dayOfWeek = now.getDay() || 7; // Convert 0 (Sunday) to 7
+      const mondayOffset = dayOfWeek - 1; // Days to subtract to reach Monday
+
       const monday = new Date(now);
-      monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7) + offset * 7);
-      monday.setHours(0, 0, 0, 0);
+      monday.setDate(now.getDate() - mondayOffset + offset * 7);
+
       const sunday = new Date(monday);
       sunday.setDate(monday.getDate() + 6);
-      sunday.setHours(23, 59, 59, 999);
 
-      const startDate = monday.toISOString().slice(0, 10);
-      const endDate = sunday.toISOString().slice(0, 10);
+      // Convert specifically referencing local year/month/date manually to avoid standard ISO conversion shifting back to UTC
+      const pad = n => String(n).padStart(2, '0');
+      const startDate = `${monday.getFullYear()}-${pad(monday.getMonth() + 1)}-${pad(monday.getDate())}`;
+      const endDate = `${sunday.getFullYear()}-${pad(sunday.getMonth() + 1)}-${pad(sunday.getDate())}`;
 
       let query = adminClient
         .from('academic_sessions')

@@ -81,6 +81,7 @@ export function TicketDashboardPage({ role, userId, onNavigateToDetail }) {
     const [priorityFilter, setPriorityFilter] = useState('all');
     const [categoryFilter, setCategoryFilter] = useState('all');
     const [search, setSearch] = useState('');
+    const [showFilters, setShowFilters] = useState(false);
 
     // Modals
     const [showCreate, setShowCreate] = useState(false);
@@ -125,7 +126,7 @@ export function TicketDashboardPage({ role, userId, onNavigateToDetail }) {
     return (
         <section className="panel">
             {/* Stats Cards */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+            <div className="ticket-stats-grid">
                 {[
                     { label: 'Open', value: stats.open || 0, color: '#3b82f6' },
                     { label: 'In Progress', value: stats.in_progress || 0, color: '#f59e0b' },
@@ -134,49 +135,60 @@ export function TicketDashboardPage({ role, userId, onNavigateToDetail }) {
                     { label: 'Closed', value: stats.closed || 0, color: '#64748b' },
                     { label: 'Total', value: stats.total || 0, color: '#818cf8' }
                 ].map(s => (
-                    <div key={s.label} className="card stat-card" style={{
-                        padding: '16px', textAlign: 'center',
-                        borderTop: `3px solid ${s.color}`
-                    }}>
-                        <div style={{ fontSize: 28, fontWeight: 700, color: s.color }}>{s.value}</div>
-                        <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{s.label}</div>
+                    <div key={s.label} className="card stat-card ticket-stat-card" style={{ '--stat-color': s.color }}>
+                        <div className="ticket-stat-val">{s.value}</div>
+                        <div className="ticket-stat-label">{s.label}</div>
                     </div>
                 ))}
             </div>
 
             {/* Filters Bar */}
-            <div className="card" style={{ display: 'flex', gap: 12, alignItems: 'center', padding: 12, flexWrap: 'wrap', marginBottom: 16 }}>
-                <form onSubmit={handleSearch} style={{ flex: 1, minWidth: 200, display: 'flex', gap: 8 }}>
-                    <input
-                        type="text" placeholder="Search tickets..."
-                        value={search} onChange={e => setSearch(e.target.value)}
-                        style={{ flex: 1 }}
-                    />
-                    <button type="submit" className="primary" style={{ whiteSpace: 'nowrap' }}>Search</button>
-                </form>
+            <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 12, marginBottom: 16 }}>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+                    <form onSubmit={handleSearch} style={{ flex: '1 1 200px', display: 'flex', gap: 8 }}>
+                        <input
+                            type="text" placeholder="Search tickets..."
+                            value={search} onChange={e => setSearch(e.target.value)}
+                            style={{ flex: 1, padding: '8px 12px', borderRadius: '8px', border: '1px solid #d1d5db', minWidth: 0 }}
+                        />
+                        <button type="submit" className="primary" style={{ whiteSpace: 'nowrap', padding: '8px 16px', borderRadius: '8px' }}>Search</button>
+                    </form>
+                    <button
+                        type="button"
+                        onClick={() => setShowFilters(!showFilters)}
+                        className="mobile-only-flex secondary"
+                        style={{ padding: '8px 12px', borderRadius: '8px', alignItems: 'center', gap: 6 }}
+                    >
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+                        </svg>
+                        Filters
+                    </button>
+                    <button onClick={() => setShowCreate(true)} className="primary" style={{ whiteSpace: 'nowrap', padding: '8px 16px', borderRadius: '8px', flex: '1 1 auto' }}>+ New Ticket</button>
+                </div>
 
-                <select value={scope} onChange={e => setScope(e.target.value)} style={{ width: 150 }}>
-                    <option value="all">All Tickets</option>
-                    <option value="mine">My Tickets</option>
-                    <option value="assigned">Assigned to Me</option>
-                </select>
+                <div className={`ticket-filters-grid ${showFilters ? 'show' : ''}`}>
+                    <select value={scope} onChange={e => setScope(e.target.value)} style={{ padding: '8px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                        <option value="all">All Tickets</option>
+                        <option value="mine">My Tickets</option>
+                        <option value="assigned">Assigned to Me</option>
+                    </select>
 
-                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 150 }}>
-                    <option value="all">All Status</option>
-                    {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-                </select>
+                    <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '8px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                        <option value="all">All Status</option>
+                        {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+                    </select>
 
-                <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} style={{ width: 130 }}>
-                    <option value="all">All Priority</option>
-                    {PRIORITY_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                </select>
+                    <select value={priorityFilter} onChange={e => setPriorityFilter(e.target.value)} style={{ padding: '8px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                        <option value="all">All Priority</option>
+                        {PRIORITY_OPTIONS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
+                    </select>
 
-                <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ width: 150 }}>
-                    <option value="all">All Categories</option>
-                    {CATEGORY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-                </select>
-
-                <button onClick={() => setShowCreate(true)} className="primary" style={{ whiteSpace: 'nowrap' }}>+ New Ticket</button>
+                    <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ padding: '8px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                        <option value="all">All Categories</option>
+                        {CATEGORY_OPTIONS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                    </select>
+                </div>
             </div>
 
             {/* Error */}
@@ -184,7 +196,7 @@ export function TicketDashboardPage({ role, userId, onNavigateToDetail }) {
 
             {/* Tickets Table */}
             <div className="card">
-                <div className="table-wrap">
+                <div className="table-wrap mobile-friendly-table">
                     <table>
                         <thead>
                             <tr>
@@ -209,24 +221,24 @@ export function TicketDashboardPage({ role, userId, onNavigateToDetail }) {
                                     style={{ cursor: 'pointer' }}
                                     className="clickable-row"
                                 >
-                                    <td>
+                                    <td data-label="Ticket">
                                         <div style={{ fontWeight: 600 }}>{t.title}</div>
                                         <div style={{ fontSize: 12, color: '#888', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                             {t.description}
                                         </div>
                                     </td>
-                                    <td>{priorityBadge(t.priority)}</td>
-                                    <td style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{t.category?.replace(/_/g, ' ') || '—'}</td>
-                                    <td style={{ fontSize: 12 }}>{roleName(t.target_role)}</td>
-                                    <td style={{ fontSize: 12 }}>
+                                    <td data-label="Priority">{priorityBadge(t.priority)}</td>
+                                    <td data-label="Category" style={{ fontSize: 12, color: '#888', textTransform: 'capitalize' }}>{t.category?.replace(/_/g, ' ') || '—'}</td>
+                                    <td data-label="Target" style={{ fontSize: 12 }}>{roleName(t.target_role)}</td>
+                                    <td data-label="Created By" style={{ fontSize: 12 }}>
                                         <div>{t.creator?.full_name || 'Unknown'}</div>
                                         <div style={{ fontSize: 11, color: '#64748b', marginTop: 2, textTransform: 'capitalize' }}>
                                             {roleName(t.creator?.role || 'unknown')}
                                         </div>
                                     </td>
-                                    <td>{statusBadge(t.status)}</td>
-                                    <td style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>{timeAgo(t.created_at)}</td>
-                                    <td style={{ textAlign: 'center' }}>
+                                    <td data-label="Status">{statusBadge(t.status)}</td>
+                                    <td data-label="Date" style={{ fontSize: 12, color: '#888', whiteSpace: 'nowrap' }}>{timeAgo(t.created_at)}</td>
+                                    <td data-label="Msgs" style={{ textAlign: 'center' }}>
                                         {t.message_count > 0 && (
                                             <span style={{
                                                 background: '#e2e8f0', color: '#475569', padding: '2px 8px',
@@ -306,7 +318,7 @@ function CreateTicketModal({ role, onClose, onSuccess }) {
         if (isAC) {
             apiFetch('/teachers/pool')
                 .then(res => setTeachers(res.items || []))
-                .catch(() => {});
+                .catch(() => { });
         }
     }, [isAC]);
 
@@ -341,13 +353,13 @@ function CreateTicketModal({ role, onClose, onSuccess }) {
 
             await apiFetch('/tickets', {
                 method: 'POST',
-                body: JSON.stringify({ 
-                    title: finalTitle, 
-                    description: finalDescription, 
-                    target_role: targetRole, 
+                body: JSON.stringify({
+                    title: finalTitle,
+                    description: finalDescription,
+                    target_role: targetRole,
                     target_user_id: targetUserId || undefined,
-                    priority, 
-                    category: category || null 
+                    priority,
+                    category: category || null
                 })
             });
             onSuccess();

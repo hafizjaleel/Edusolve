@@ -90,6 +90,23 @@ export default function AppShell({ roleLabel, role, pages, activePath, onNavigat
   const [employeesByRole, setEmployeesByRole] = useState({});
 
   useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+      document.body.style.position = 'fixed'; // specifically prevents iOS Safari bounce scroll
+      document.body.style.width = '100%';
+    } else {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.body.style.position = '';
+      document.body.style.width = '';
+    };
+  }, [mobileMenuOpen]);
+
+  useEffect(() => {
     if (role === 'super_admin') {
       apiFetch('/admin/users/employees').then(res => {
         if (res.ok && res.items) {
