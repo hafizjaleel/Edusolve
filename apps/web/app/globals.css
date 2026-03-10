@@ -753,7 +753,32 @@ button.danger {
   gap: 12px;
 }
 
+/* hr layouts */
+.hr-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+
+.hr-donut-grid {
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 14px;
+}
+
+.attendance-quick-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  align-items: center;
+}
+
 @media (max-width: 960px) {
+  .attendance-quick-actions {
+    flex-wrap: wrap;
+    /* important for mobile */
+  }
+
   .mobile-only {
     display: block !important;
   }
@@ -772,6 +797,36 @@ button.danger {
 
   .ticket-filters-grid.show {
     display: grid;
+  }
+
+  .hr-stats-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .hr-stats-grid>.card {
+    padding: 12px 14px !important;
+  }
+
+  .hr-stats-grid>.card h3 {
+    font-size: 24px !important;
+  }
+
+  .hr-stats-grid>.card .eyebrow {
+    font-size: 11px !important;
+  }
+
+  .hr-stats-grid>.card>div {
+    margin-bottom: 2px !important;
+  }
+
+  .hr-stats-grid>.card p:last-of-type {
+    font-size: 11px !important;
+    margin-top: 2px !important;
+  }
+
+  .hr-donut-grid {
+    grid-template-columns: 1fr;
   }
 
   .ticket-stats-grid {
@@ -886,6 +941,11 @@ button.danger {
     padding-bottom: env(safe-area-inset-bottom, 8px);
     z-index: 40;
     box-shadow: 0 -4px 20px rgba(16, 35, 63, 0.05);
+  }
+
+  .dashboard-student-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .bottom-nav-item {
@@ -1031,6 +1091,26 @@ button.danger {
 
   .grid-four .stat-card .eyebrow {
     font-size: 10px;
+  }
+
+  /* Counselor Head mobile stats */
+  .counselor-head-stats-grid {
+    display: grid !important;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+  }
+
+  .counselor-head-stats-grid>.card {
+    padding: 12px 8px !important;
+    text-align: center !important;
+  }
+
+  .counselor-head-stats-grid>.card h3 {
+    font-size: 20px !important;
+  }
+
+  .counselor-head-stats-grid>.card .eyebrow {
+    font-size: 10px !important;
   }
 
   .page-content {

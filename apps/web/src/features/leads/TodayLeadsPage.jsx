@@ -27,7 +27,7 @@ function StatusBadge({ status }) {
     );
 }
 
-function ExpandableMobileCard({ title, subtitle, topRight, mainStats, expandedContent, actions, borderColor }) {
+function ExpandableMobileCard({ title, subtitle, topRight, topRightBottom, mainStats, expandedContent, actions, borderColor }) {
     const [expanded, setExpanded] = useState(false);
     return (
         <div className="card today-lead-card" style={{ padding: '16px', position: 'relative', borderLeft: borderColor ? `4px solid ${borderColor}` : undefined }}>
@@ -42,16 +42,23 @@ function ExpandableMobileCard({ title, subtitle, topRight, mainStats, expandedCo
                     </p>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px' }}>
-                    {topRight}
-                    <span style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        width: '24px', height: '24px', borderRadius: '50%', background: '#f3f4f6', color: '#6b7280',
-                        transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s'
-                    }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="6 9 12 15 18 9"></polyline>
-                        </svg>
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {topRight}
+                        <span style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: '24px', height: '24px', borderRadius: '50%', background: '#f3f4f6', color: '#6b7280',
+                            transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s'
+                        }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </span>
+                    </div>
+                    {topRightBottom && (
+                        <div style={{ paddingRight: '32px' }}>
+                            {topRightBottom}
+                        </div>
+                    )}
                 </div>
             </div>
 
@@ -210,6 +217,13 @@ export function TodayLeadsPage({ onOpenDetails, onViewInPipeline, role }) {
                                 </>
                             }
                             topRight={<StatusBadge status={lead.status} />}
+                            topRightBottom={
+                                isHead ? (
+                                    <span style={{ fontSize: '12px', color: '#4f46e5', fontWeight: 600 }}>
+                                        {counselorMap[lead.counselor_id] || 'Unassigned'}
+                                    </span>
+                                ) : null
+                            }
                             mainStats={
                                 <>
                                     <div><span className="text-muted" style={{ fontSize: '11px', display: 'block' }}>Class</span><strong style={{ fontSize: '13px' }}>{lead.class_level || '—'}</strong></div>

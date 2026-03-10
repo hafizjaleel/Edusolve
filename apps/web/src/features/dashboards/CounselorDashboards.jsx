@@ -291,16 +291,29 @@ function SimpleBarChart({ data, xKey, yKeys, colors }) {
 export function CounselorHeadDashboardPage({ targetUserId }) {
   const [stats, setStats] = useState(null);
   const [counselors, setCounselors] = useState([]);
+  const [cLevels, setCLevels] = useState([]);
+  const [allCProfiles, setAllCProfiles] = useState([]);
+  const [salesMap, setSalesMap] = useState({});
 
   useEffect(() => {
     // Parallel fetch
     const statsUrl = targetUserId ? `/counselors/stats?user_id=${targetUserId}` : '/counselors/stats';
+    const d = new Date();
+    const month = d.getMonth() + 1;
+    const year = d.getFullYear();
+
     Promise.all([
       apiFetch(statsUrl),
-      apiFetch('/counselors')
-    ]).then(([statsData, counselorsData]) => {
+      apiFetch('/counselors'),
+      apiFetch('/hr/councilor-profiles'),
+      apiFetch('/hr/councilor-levels'),
+      apiFetch(`/hr/councilors/sales-report?month=${month}&year=${year}`)
+    ]).then(([statsData, counselorsData, cpRes, clRes, srRes]) => {
       setStats(statsData.stats);
       setCounselors(counselorsData.items || []);
+      setCLevels(clRes.items || []);
+      setAllCProfiles(cpRes.items || []);
+      setSalesMap(srRes.report || {});
     }).catch(err => console.error(err));
   }, [targetUserId]);
 
@@ -326,11 +339,39 @@ export function CounselorHeadDashboardPage({ targetUserId }) {
     }), { total: 0, joined: 0, dropped: 0 });
   }, [stats]);
 
+  const leaderboard = useMemo(() => {
+    if (!counselors.length || !cLevels.length) return [];
+    const defaultLvl = [...cLevels].sort((a, b) => a.level_name.localeCompare(b.level_name))[0];
+
+    const mapped = counselors.map(c => {
+      const profile = allCProfiles.find(p => p.user_id === c.id);
+      const lvl = profile?.councilor_levels || defaultLvl;
+      const targetAmt = lvl ? Number(lvl.target_amount) : 0;
+      const achieved = salesMap[c.id] || 0;
+      const progress = targetAmt > 0 ? Math.min(100, Math.round((achieved / targetAmt) * 100)) : 0;
+
+      return {
+        id: c.id,
+        name: c.full_name?.split(' ')[0] || c.email?.split('@')[0] || 'Unknown',
+        achieved,
+        targetAmt,
+        progress,
+        levelName: lvl?.level_name || 'N/A'
+      };
+    });
+
+    // Sort by descending progress %, then by absolute achieved amount
+    return mapped.sort((a, b) => {
+      if (b.progress !== a.progress) return b.progress - a.progress;
+      return b.achieved - a.achieved;
+    });
+  }, [counselors, allCProfiles, cLevels, salesMap]);
+
   return (
     <section className="panel">
 
 
-      <div className="grid-three">
+      <div className="grid-three counselor-head-stats-grid">
         <StatCard label="Total Leads" value={totals.total} />
         <StatCard label="Converted" value={totals.joined} tone="success" />
         <StatCard label="Dropped" value={totals.dropped} tone="danger" />
@@ -365,6 +406,39 @@ export function CounselorHeadDashboardPage({ targetUserId }) {
               </tbody>
             </table>
           </div>
+        </article>
+      </div>
+
+      <div className="grid-one" style={{ marginTop: '16px' }}>
+        <article className="card" style={{ padding: '20px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '15px' }}>Target Leaderboard</h3>
+          {leaderboard.length ? leaderboard.map((l, index) => (
+            <div key={l.id} style={{ padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '20px',
+                    height: '20px',
+                    borderRadius: '50%',
+                    background: index === 0 ? '#fef08a' : index === 1 ? '#e2e8f0' : index === 2 ? '#fed7aa' : '#f3f4f6',
+                    color: index === 0 ? '#ca8a04' : index === 1 ? '#64748b' : index === 2 ? '#c2410c' : '#9ca3af',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
+                  }}>{index + 1}</span>
+                  <span style={{ fontSize: '14px', fontWeight: l.id === targetUserId ? '600' : '500', color: l.id === targetUserId ? '#4f46e5' : 'inherit' }}>
+                    {l.name} {l.id === targetUserId && '(You)'}
+                  </span>
+                </div>
+                <span style={{ fontSize: '13px', fontWeight: 'bold' }}>{l.progress}%</span>
+              </div>
+              <div style={{ background: '#f3f4f6', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
+                <div style={{ height: '100%', width: `${l.progress}%`, background: l.progress >= 100 ? '#10b981' : '#6366f1' }}></div>
+              </div>
+            </div>
+          )) : <p className="text-muted" style={{ fontSize: '13px' }}>Loading board...</p>}
         </article>
       </div>
     </section>
