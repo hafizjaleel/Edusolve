@@ -683,7 +683,19 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
 
             <label style={{ gridColumn: '1 / -1' }}>Days of Week
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
-                {dayNames.map(d => (
+                {dayNames.filter(d => {
+                  if (!fStart || !fEnd || fStart > fEnd) return true; // show all if invalid
+                  const startObj = new Date(fStart + 'T00:00:00Z');
+                  const endObj = new Date(fEnd + 'T00:00:00Z');
+                  const daysDiff = Math.floor((endObj - startObj) / (1000 * 60 * 60 * 24));
+                  if (daysDiff >= 6) return true; // all days exist in a >= 7 day span
+                  
+                  // Check if this day of week falls between start Date and end Date
+                  for (let tempD = new Date(startObj); tempD <= endObj; tempD.setDate(tempD.getDate() + 1)) {
+                    if (DAY_MAP[tempD.getUTCDay()] === d) return true;
+                  }
+                  return false;
+                }).map(d => (
                   <button key={d} type="button"
                     className={`secondary small ${fDays.includes(d) ? 'primary' : ''}`}
                     style={fDays.includes(d) ? { background: '#2563eb', color: '#fff', borderColor: '#2563eb' } : {}}
