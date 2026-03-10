@@ -103,12 +103,9 @@ export function TeacherDashboardPage() {
 
     return (
         <section className="panel">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '6px' }}>
+            <div className="dash-stats-grid">
                 <DashCard label="Hours" value={`${metrics.monthlyHours}h`} tone="info" />
                 <DashCard label="Sessions" value={metrics.monthlyCompleted} tone="success" />
-                <DashCard label="Receivables" value={`₹${metrics.monthlyReceivables.toLocaleString('en-IN')}`} tone="success" />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '6px' }}>
                 <DashCard label="Today" value={todaySessions.length} />
                 <DashCard label="My Students" value={metrics.uniqueStudents} />
             </div>
@@ -123,7 +120,7 @@ export function TeacherDashboardPage() {
                         </span>
                     ) : null}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
                     <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', borderRadius: '12px' }}>
                         <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#1d4ed8' }}>₹{salary.total_earned.toLocaleString('en-IN')}</p>
                         <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#3b82f6', fontWeight: 600 }}>Total Earned</p>
@@ -193,7 +190,6 @@ export function TeacherDashboardPage() {
                             <p style={{ fontSize: '13px' }}><strong>Code:</strong> {profile.teacher_code || '—'}</p>
                             <p style={{ fontSize: '13px' }}><strong>Name:</strong> {profile.users?.full_name || '—'}</p>
                             <p style={{ fontSize: '13px' }}><strong>Experience:</strong> {profile.experience_level || '—'}</p>
-                            <p style={{ fontSize: '13px' }}><strong>Rate:</strong> {profile.per_hour_rate ? `₹${profile.per_hour_rate}/hr` : '—'}</p>
                             <p style={{ fontSize: '13px' }}><strong>Availability Slots:</strong> {(profile.teacher_availability || []).length}</p>
                         </>
                     ) : <p className="text-muted" style={{ fontSize: '13px' }}>Profile not found</p>}
@@ -224,16 +220,18 @@ export function TeacherTodaySessionsPage() {
     const [confirmSession, setConfirmSession] = useState(null); // custom confirm modal
     const [approvalReason, setApprovalReason] = useState(''); // Teacher note for approval
     const [approving, setApproving] = useState(false);
+    const [dayOffset, setDayOffset] = useState(0);
 
-    async function loadSessions() {
+    const loadSessions = async (offset) => {
+        setLoading(true);
         try {
-            const d = await apiFetch('/students/sessions/today');
+            const d = await apiFetch(`/students/sessions/today?offset=${offset}`);
             setSessions(d.items || []);
         } catch (e) { setError(e.message); }
         setLoading(false);
-    }
+    };
 
-    useEffect(() => { loadSessions(); }, []);
+    useEffect(() => { loadSessions(dayOffset); }, [dayOffset]);
 
     async function handleConfirmApproval() {
         if (!confirmSession) return;
@@ -245,7 +243,7 @@ export function TeacherTodaySessionsPage() {
             });
             setConfirmSession(null);
             setApprovalReason('');
-            await loadSessions();
+            await loadSessions(dayOffset);
         } catch (e) {
             console.error('Approval error:', e);
             setError(e.message);
@@ -269,15 +267,38 @@ export function TeacherTodaySessionsPage() {
         cancelled: '#6b7280'
     };
 
+    const getDayLabel = () => {
+        if (dayOffset === 0) return 'Today';
+        if (dayOffset === -1) return 'Yesterday';
+        if (dayOffset === 1) return 'Tomorrow';
+
+        const d = new Date();
+        const istStr = d.toLocaleString('en-US', { timeZone: 'Asia/Kolkata' });
+        const localD = new Date(istStr);
+        localD.setDate(localD.getDate() + dayOffset);
+        return localD.toLocaleDateString('en-IN', { weekday: 'short', month: 'short', day: 'numeric' });
+    };
+
     return (
         <section className="panel">
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '10px', marginBottom: '10px', flexWrap: 'wrap' }}>
+                <button className="small secondary" onClick={() => setDayOffset(d => d - 1)} style={{ padding: '5px 10px' }}>◀ Prev</button>
+                <span style={{ fontSize: '14px', fontWeight: 600, color: '#374151', minWidth: '120px', textAlign: 'center' }}>
+                    {getDayLabel()}
+                </span>
+                <button className="small secondary" onClick={() => setDayOffset(d => d + 1)} style={{ padding: '5px 10px' }}>Next ▶</button>
+                {dayOffset !== 0 && (
+                    <button className="small primary" onClick={() => setDayOffset(0)} style={{ padding: '5px 10px', fontSize: '11px' }}>Today</button>
+                )}
+            </div>
+
             {loading ? <p>Loading sessions...</p> : null}
             {error ? <p className="error">{error}</p> : null}
 
             {!loading && !sessions.length ? (
                 <div className="card" style={{ padding: '40px', textAlign: 'center', color: '#9ca3af' }}>
                     <p style={{ fontSize: '28px', margin: '0 0 8px' }}>📚</p>
-                    <p style={{ fontWeight: 500 }}>No sessions scheduled for today.</p>
+                    <p style={{ fontWeight: 500 }}>No sessions scheduled for {getDayLabel().toLowerCase()}.</p>
                 </div>
             ) : null}
 
@@ -580,7 +601,7 @@ function RescheduleModal({ session, onClose, onDone }) {
                     <label>Duration (Hours)
                         <select value={newDuration} onChange={e => setNewDuration(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px' }}>
                             <option value="">Select hours</option>
-                            {[0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4].map(h => (
+                            {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3, 3.25, 3.5, 3.75, 4].map(h => (
                                 <option key={h} value={h}>{h}h</option>
                             ))}
                         </select>
@@ -635,6 +656,12 @@ export function TeacherTimetablePage() {
         return Array.from(subs).sort();
     }, [sessions]);
 
+    // Helper to create a local Date exactly at midnight from YYYY-MM-DD
+    const parseLocalDate = (dateStr) => {
+        const [y, m, d] = dateStr.split('-').map(Number);
+        return new Date(y, m - 1, d);
+    };
+
     const timetable = useMemo(() => {
         const map = {};
         DAYS.forEach(d => { map[d] = []; });
@@ -643,7 +670,7 @@ export function TeacherTimetablePage() {
             .filter(s => !subjectFilter || s.subject === subjectFilter)
             .forEach(s => {
                 if (s.session_date) {
-                    const day = new Date(s.session_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+                    const day = parseLocalDate(s.session_date).toLocaleDateString('en-US', { weekday: 'long' });
                     if (map[day]) map[day].push(s);
                 }
             });
@@ -654,7 +681,7 @@ export function TeacherTimetablePage() {
     const dayDates = useMemo(() => {
         if (!weekStart) return {};
         const result = {};
-        const start = new Date(weekStart + 'T00:00:00');
+        const start = parseLocalDate(weekStart);
         DAYS.forEach((day, i) => {
             const d = new Date(start);
             d.setDate(start.getDate() + i);
@@ -665,8 +692,8 @@ export function TeacherTimetablePage() {
 
     function formatWeekLabel() {
         if (!weekStart || !weekEnd) return '';
-        const s = new Date(weekStart + 'T00:00:00');
-        const e = new Date(weekEnd + 'T00:00:00');
+        const s = parseLocalDate(weekStart);
+        const e = parseLocalDate(weekEnd);
         return `${s.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })} – ${e.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`;
     }
 
@@ -687,20 +714,20 @@ export function TeacherTimetablePage() {
             </div>
 
             {/* Filters row */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1 }}>
-                    <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', flex: 1, minWidth: '0' }}>
-                        <option value=''>All Students</option>
-                        {allStudentNames.map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
-                    <select value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)} style={{ padding: '5px 8px', fontSize: '12px', flex: 1, minWidth: '0' }}>
-                        <option value=''>All Subjects</option>
-                        {allSubjects.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                    {(studentFilter || subjectFilter) && (
-                        <button className='small secondary' onClick={() => { setStudentFilter(''); setSubjectFilter(''); }} style={{ padding: '5px 10px', fontSize: '11px' }}>✕ Clear</button>
-                    )}
-                </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+                <select value={studentFilter} onChange={e => setStudentFilter(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                    <option value=''>All Students</option>
+                    {allStudentNames.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                <select value={subjectFilter} onChange={e => setSubjectFilter(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                    <option value=''>All Subjects</option>
+                    {allSubjects.map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+                {(studentFilter || subjectFilter) && (
+                    <button type="button" onClick={() => { setStudentFilter(''); setSubjectFilter(''); }} style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563', cursor: 'pointer' }}>
+                        ✕ Clear Filters
+                    </button>
+                )}
             </div>
 
             {/* Legend row */}
@@ -1511,6 +1538,16 @@ export function TeacherStudentsPage() {
     const [loading, setLoading] = useState(true);
     const [savingId, setSavingId] = useState(null);
     const [msg, setMsg] = useState('');
+    const [editingIds, setEditingIds] = useState(new Set());
+
+    const toggleEdit = (id) => {
+        setEditingIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
 
     useEffect(() => {
         apiFetch('/teachers/my-students').then(res => {
@@ -1537,6 +1574,11 @@ export function TeacherStudentsPage() {
             });
             if (!res.ok) throw new Error(res.error || 'Failed to update link');
             setMsg('Link saved successfully.');
+            setEditingIds(prev => {
+                const next = new Set(prev);
+                next.delete(id);
+                return next;
+            });
             setTimeout(() => setMsg(''), 3000);
         } catch (e) {
             setMsg(`Error: ${e.message}`);
@@ -1548,7 +1590,6 @@ export function TeacherStudentsPage() {
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Students</h2>
             {msg && (
                 <div style={{
                     padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', fontWeight: 500,
@@ -1558,7 +1599,7 @@ export function TeacherStudentsPage() {
                     {msg}
                 </div>
             )}
-            
+
             <article className="card" style={{ padding: '20px' }}>
                 <div className="table-wrap mobile-friendly-table">
                     <table>
@@ -1576,26 +1617,43 @@ export function TeacherStudentsPage() {
                                     <td data-label="Student Name">{a.student_name || 'Unknown'}</td>
                                     <td data-label="Subjects">{(a.subjects || []).join(', ') || '—'}</td>
                                     <td data-label="Meeting Link">
-                                        <input 
-                                            type="url" 
-                                            value={a.meeting_link || ''}
-                                            onChange={e => handleLinkChange(a.student_id, e.target.value)}
-                                            placeholder="https://meet.google.com/..."
-                                            style={{
-                                                width: '100%', padding: '6px 10px', border: '1px solid #d1d5db',
-                                                borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
-                                            }}
-                                        />
+                                        {a.meeting_link && !editingIds.has(a.student_id) ? (
+                                            <a href={a.meeting_link} target="_blank" rel="noopener noreferrer" style={{ color: '#1d4ed8', textDecoration: 'underline', fontSize: '13px', wordBreak: 'break-all' }}>
+                                                {a.meeting_link}
+                                            </a>
+                                        ) : (
+                                            <input
+                                                type="url"
+                                                value={a.meeting_link || ''}
+                                                onChange={e => handleLinkChange(a.student_id, e.target.value)}
+                                                placeholder="https://meet.google.com/..."
+                                                style={{
+                                                    width: '100%', padding: '6px 10px', border: '1px solid #d1d5db',
+                                                    borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                                                }}
+                                            />
+                                        )}
                                     </td>
                                     <td data-label="Action">
-                                        <button 
-                                            className="small primary" 
-                                            onClick={() => saveMeetingLink(a.student_id, a.meeting_link)}
-                                            disabled={savingId === a.student_id}
-                                            style={{ padding: '6px 12px', fontSize: '13px' }}
-                                        >
-                                            {savingId === a.student_id ? 'Saving...' : 'Save Link'}
-                                        </button>
+                                        {a.meeting_link && !editingIds.has(a.student_id) ? (
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleEdit(a.student_id)}
+                                                style={{ padding: '6px 12px', fontSize: '13px', background: '#f3f4f6', border: '1px solid #d1d5db', borderRadius: '6px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', color: '#374151', fontWeight: 500 }}
+                                            >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                                                Edit
+                                            </button>
+                                        ) : (
+                                            <button
+                                                className="small primary"
+                                                onClick={() => saveMeetingLink(a.student_id, a.meeting_link)}
+                                                disabled={savingId === a.student_id}
+                                                style={{ padding: '6px 12px', fontSize: '13px' }}
+                                            >
+                                                {savingId === a.student_id ? 'Saving...' : 'Save Link'}
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                             ))}
@@ -1820,6 +1878,10 @@ export function TeacherInvoicesPage() {
     const [profile, setProfile] = useState(null);
     const [loading, setLoading] = useState(true);
 
+    const [monthFilter, setMonthFilter] = useState('');
+    const [startDate, setStartDate] = useState('');
+    const [endDate, setEndDate] = useState('');
+
     const MONTHS = {
         1: 'January', 2: 'February', 3: 'March', 4: 'April', 5: 'May', 6: 'June',
         7: 'July', 8: 'August', 9: 'September', 10: 'October', 11: 'November', 12: 'December'
@@ -1839,23 +1901,66 @@ export function TeacherInvoicesPage() {
         })();
     }, []);
 
-    const totalEarnings = invoices.reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
-    const totalHours = invoices.reduce((sum, inv) => sum + (Number(inv.breakdown?.hours_calculated) || 0), 0);
+    const filteredInvoices = invoices.filter(inv => {
+        if (monthFilter && inv.month !== parseInt(monthFilter)) return false;
+
+        const invDate = new Date(inv.updated_at || inv.created_at);
+        if (startDate) {
+            const [y, m] = startDate.split('-');
+            const start = new Date(Number(y), Number(m) - 1, 1);
+            if (invDate < start) return false;
+        }
+        if (endDate) {
+            const [y, m] = endDate.split('-');
+            const end = new Date(Number(y), Number(m), 0, 23, 59, 59, 999);
+            if (invDate > end) return false;
+        }
+
+        return true;
+    });
+
+    const totalEarnings = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.total_amount) || 0), 0);
+    const totalHours = filteredInvoices.reduce((sum, inv) => sum + (Number(inv.breakdown?.hours_calculated) || 0), 0);
 
     if (loading) return <section className="panel"><p>Loading invoices...</p></section>;
 
     return (
         <section className="panel">
-            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Earnings & Invoices</h2>
+            {/* Filters Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '16px' }}>
+                <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}>
+                    <option value="">All Months</option>
+                    {Object.entries(MONTHS).map(([num, name]) => (
+                        <option key={num} value={num}>{name}</option>
+                    ))}
+                </select>
 
-            <div className="grid-three" style={{ marginBottom: '16px' }}>
+                <input
+                    type="month"
+                    value={startDate}
+                    onChange={e => setStartDate(e.target.value)}
+                    style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}
+                    title="From Month"
+                />
+
+                <input
+                    type="month"
+                    value={endDate}
+                    onChange={e => setEndDate(e.target.value)}
+                    style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', border: '1px solid #d1d5db', background: '#fff' }}
+                    title="To Month"
+                />
+
+                {(monthFilter || startDate || endDate) && (
+                    <button type="button" onClick={() => { setMonthFilter(''); setStartDate(''); setEndDate(''); }} style={{ padding: '8px 10px', fontSize: '13px', borderRadius: '8px', background: '#f3f4f6', border: '1px solid #d1d5db', color: '#4b5563', cursor: 'pointer' }}>
+                        ✕ Clear Filters
+                    </button>
+                )}
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginBottom: '16px' }}>
                 <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
                     <p style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1d4ed8' }}>{totalHours}h</p>
                     <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>Total Hours Paid</p>
-                </div>
-                <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
-                    <p style={{ margin: 0, fontSize: '28px', fontWeight: 700 }}>₹{profile?.per_hour_rate || 0}/hr</p>
-                    <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>Current Rate</p>
                 </div>
                 <div className="card" style={{ padding: '20px', textAlign: 'center' }}>
                     <p style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#15803d' }}>₹{totalEarnings.toLocaleString()}</p>
@@ -1872,7 +1977,6 @@ export function TeacherInvoicesPage() {
                                 <th>Period</th>
                                 <th>Generated Date</th>
                                 <th>Hours Paid</th>
-                                <th>Rate Kept</th>
                                 <th>Amount Paid</th>
                                 <th>Status</th>
                             </tr>
@@ -1883,7 +1987,6 @@ export function TeacherInvoicesPage() {
                                     <td data-label="Period">{MONTHS[inv.month]} {inv.year}</td>
                                     <td data-label="Generated Date">{new Date(inv.updated_at || inv.created_at).toLocaleDateString()}</td>
                                     <td data-label="Hours Paid">{inv.breakdown?.hours_calculated || 0}h</td>
-                                    <td data-label="Rate Kept">₹{inv.breakdown?.hourly_rate || 0}/hr</td>
                                     <td data-label="Amount Paid" style={{ fontWeight: 600, color: '#15803d' }}>₹{(Number(inv.total_amount) || 0).toLocaleString()}</td>
                                     <td data-label="Status">
                                         <span style={{ background: '#dcfce7', color: '#15803d', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, textTransform: 'uppercase' }}>
@@ -1892,7 +1995,7 @@ export function TeacherInvoicesPage() {
                                     </td>
                                 </tr>
                             ))}
-                            {!invoices.length ? <tr><td colSpan="6" style={{ textAlign: 'center', padding: '30px', color: '#6b7280' }}>No invoice payments generated yet.</td></tr> : null}
+                            {!invoices.length ? <tr><td colSpan="5" style={{ textAlign: 'center', padding: '30px', color: '#6b7280' }}>No invoice payments generated yet.</td></tr> : null}
                         </tbody>
                     </table>
                 </div>

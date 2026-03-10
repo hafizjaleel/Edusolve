@@ -19,7 +19,7 @@ export const APP_PAGES = [
   { path: '/leads/payment-requests', title: 'Payment Requests', group: 'Student Sales', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/counselors/reports', title: 'Sales Reports', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/team/counselors', title: 'Counselors (Team)', group: 'Student Sales', roles: [ROLES.COUNSELOR_HEAD], showInNav: true },
- 
+
   /* ── Teacher Sales ── */
   { path: '/tc/leads', title: 'All Leads', group: 'Teacher Sales', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/tc/teacher-leads', title: 'Leads Pipeline', group: 'Teacher Sales', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
@@ -42,10 +42,10 @@ export const APP_PAGES = [
   { path: '/dashboard/teacher', title: 'Dashboard', group: 'Dashboards', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/today-sessions', title: 'Today Sessions', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/timetable', title: 'My Timetable', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
-  { path: '/teacher/profile', title: 'My Profile', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/students', title: 'My Students', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/reports', title: 'Reports', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/invoices', title: 'Invoices', group: 'Finance', roles: [ROLES.TEACHER], showInNav: true },
+  { path: '/teacher/profile', title: 'My Profile', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teachers/profile', title: 'Teacher Profile', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.ACADEMIC_COORDINATOR, ROLES.FINANCE, ROLES.TEACHER, ROLES.SUPER_ADMIN], showInNav: false },
 
   /* ── Finance ── */

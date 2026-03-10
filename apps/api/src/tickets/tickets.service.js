@@ -101,19 +101,29 @@ export class TicketsService {
             }
         }
 
-        // Fallback: look up any missing users from auth.users
+        // Fallback: look up any missing users or users without a DB role from auth.users
         const foundIds = new Set(allUsers.map(u => u.id));
         const missingIds = creatorIds.filter(id => !foundIds.has(id));
-        for (const id of missingIds) {
+        const usersNeedingRole = allUsers.filter(u => !roleMap[u.id]).map(u => u.id);
+        const idsToFetchFromAuth = [...new Set([...missingIds, ...usersNeedingRole])];
+
+        for (const id of idsToFetchFromAuth) {
             try {
                 const { data } = await this.admin.auth.admin.getUserById(id);
                 if (data?.user) {
-                    allUsers.push({
-                        id: data.user.id,
-                        full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
-                        email: data.user.email || '',
-                        role: data.user.app_metadata?.role || data.user.user_metadata?.role
-                    });
+                    const fallbackRole = data.user.app_metadata?.role || data.user.user_metadata?.role;
+
+                    if (missingIds.includes(id)) {
+                        allUsers.push({
+                            id: data.user.id,
+                            full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
+                            email: data.user.email || '',
+                            role: fallbackRole
+                        });
+                    } else if (fallbackRole) {
+                        const existingUser = allUsers.find(u => u.id === id);
+                        if (existingUser) existingUser.role = fallbackRole;
+                    }
                 }
             } catch (e) { /* skip */ }
         }
@@ -176,16 +186,18 @@ export class TicketsService {
             creatorRole = Array.isArray(userRole.roles) ? userRole.roles[0]?.code : userRole.roles?.code;
         }
 
-        if (!creator) {
+        if (!creator || !creatorRole || creatorRole === 'unknown') {
             try {
                 const { data } = await this.admin.auth.admin.getUserById(ticket.created_by);
                 if (data?.user) {
-                    creator = {
-                        id: data.user.id,
-                        full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
-                        email: data.user.email || ''
-                    };
-                    if (creatorRole === 'unknown') {
+                    if (!creator) {
+                        creator = {
+                            id: data.user.id,
+                            full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
+                            email: data.user.email || ''
+                        };
+                    }
+                    if (!creatorRole || creatorRole === 'unknown') {
                         creatorRole = data.user.app_metadata?.role || data.user.user_metadata?.role || 'unknown';
                     }
                 }
@@ -222,17 +234,26 @@ export class TicketsService {
 
             const foundIds = new Set(allSenders.map(u => u.id));
             const missingIds = senderIds.filter(id => !foundIds.has(id));
+            const usersNeedingRole = allSenders.filter(u => !sRoleMap[u.id]).map(u => u.id);
+            const idsToFetchFromAuth = [...new Set([...missingIds, ...usersNeedingRole])];
 
-            for (const id of missingIds) {
+            for (const id of idsToFetchFromAuth) {
                 try {
                     const { data } = await this.admin.auth.admin.getUserById(id);
                     if (data?.user) {
-                        allSenders.push({
-                            id: data.user.id,
-                            full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
-                            email: data.user.email || '',
-                            role: data.user.app_metadata?.role || data.user.user_metadata?.role
-                        });
+                        const fallbackRole = data.user.app_metadata?.role || data.user.user_metadata?.role;
+
+                        if (missingIds.includes(id)) {
+                            allSenders.push({
+                                id: data.user.id,
+                                full_name: data.user.user_metadata?.full_name || data.user.email?.split('@')[0] || 'User',
+                                email: data.user.email || '',
+                                role: fallbackRole
+                            });
+                        } else if (fallbackRole) {
+                            const existingUser = allSenders.find(u => u.id === id);
+                            if (existingUser) existingUser.role = fallbackRole;
+                        }
                     }
                 } catch (e) { /* skip */ }
             }
