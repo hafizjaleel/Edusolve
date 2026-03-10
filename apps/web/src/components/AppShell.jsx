@@ -291,7 +291,8 @@ export default function AppShell({ roleLabel, role, user, pages, activePath, onN
           let displayTitle = page.title.replace(/^My\s/i, '');
           if (displayTitle === 'Today Sessions') displayTitle = 'Today';
           if (displayTitle === 'Send Materials') displayTitle = 'Send';
-          if (displayTitle === 'Counselor Dashboard') displayTitle = 'Dashboard';
+          if (displayTitle === 'Counselor Dashboard' || displayTitle === 'Counselor Head Dashboard') displayTitle = 'Dashboard';
+          if (displayTitle === 'Converted Leads') displayTitle = 'Converted';
           if (displayTitle === 'Payment Requests') displayTitle = 'Payments';
 
           return (

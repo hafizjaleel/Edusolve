@@ -37,7 +37,7 @@ export const APP_PAGES = [
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/topups/manage', title: 'Top-Ups', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/automation/hub', title: 'Automations', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+
   { path: '/tc/performance', title: 'Teacher Performance', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Teacher (Individual) ── */
@@ -72,6 +72,9 @@ export const APP_PAGES = [
   /* ── System ── */
   { path: '/admin/users', title: 'User Management', group: 'System', roles: [ROLES.SUPER_ADMIN, ROLES.HR], showInNav: true },
   { path: '/admin/settings', title: 'Settings', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },
+
+  /* ── Moved for HR Sidebar Order ── */
+  { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Support (always last in sidebar) ── */
   { path: '/tickets', title: 'Tickets', group: 'Support', roles: [ROLES.COUNSELOR, ROLES.COUNSELOR_HEAD, ROLES.TEACHER, ROLES.TEACHER_COORDINATOR, ROLES.ACADEMIC_COORDINATOR, ROLES.HR, ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true }

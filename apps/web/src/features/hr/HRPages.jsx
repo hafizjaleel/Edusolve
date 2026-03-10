@@ -108,7 +108,7 @@ export function HRDashboardPage() {
     return (
         <section className="panel">
             {/* Top stat cards — always today */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 14 }}>
+            <div className="hr-stats-grid">
 
                 {/* Total Employees */}
                 <article className="card" style={{ padding: '16px 18px' }}>
@@ -168,7 +168,7 @@ export function HRDashboardPage() {
             </div>
 
             {/* Bottom row: donut + staff attendance breakdown with period tabs */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 14 }}>
+            <div className="hr-donut-grid">
 
                 {/* Donut */}
                 <article className="card" style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
@@ -390,7 +390,7 @@ export function AttendancePage() {
             </div>
 
             {/* Quick Actions */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center' }}>
+            <div className="attendance-quick-actions">
                 <span style={{ fontSize: 13, color: '#64748b', marginRight: 4 }}>Quick:</span>
                 <button onClick={() => markAllAs('present')}
                     style={{ padding: '4px 12px', borderRadius: 6, background: '#dcfce7', color: '#166534', border: '1px solid #bbf7d0', cursor: 'pointer', fontSize: 12 }}>
@@ -665,18 +665,18 @@ export function EmployeesPage() {
                                             <td>{hasSalary ? `₹${Number(sal.base_salary).toLocaleString()}` : '—'}</td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: 6 }}>
-                                                     {emp.designation?.toLowerCase().includes('counselor') && (
-                                                         <button onClick={() => setAssignLevelEmp(emp)} className="secondary small" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
-                                                             Level
-                                                         </button>
-                                                     )}
-                                                     <button onClick={() => setEditEmp(emp)} className="secondary small">
-                                                         Edit
-                                                     </button>
-                                                     <button onClick={() => setSalaryEmp(emp)} className={hasSalary ? "secondary small" : "primary small"}>
-                                                         {hasSalary ? 'Edit Salary' : 'Set Salary'}
-                                                     </button>
-                                                 </div>
+                                                    {emp.designation?.toLowerCase().includes('counselor') && (
+                                                        <button onClick={() => setAssignLevelEmp(emp)} className="secondary small" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
+                                                            Level
+                                                        </button>
+                                                    )}
+                                                    <button onClick={() => setEditEmp(emp)} className="secondary small">
+                                                        Edit
+                                                    </button>
+                                                    <button onClick={() => setSalaryEmp(emp)} className={hasSalary ? "secondary small" : "primary small"}>
+                                                        {hasSalary ? 'Edit Salary' : 'Set Salary'}
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     );
@@ -769,10 +769,10 @@ export function CouncilorLevelsPage() {
             )}
 
             {(showAdd || editLevel) && (
-                <LevelModal 
-                    level={editLevel} 
-                    onClose={() => { setShowAdd(false); setEditLevel(null); }} 
-                    onDone={() => { setShowAdd(false); setEditLevel(null); load(); }} 
+                <LevelModal
+                    level={editLevel}
+                    onClose={() => { setShowAdd(false); setEditLevel(null); }}
+                    onDone={() => { setShowAdd(false); setEditLevel(null); load(); }}
                 />
             )}
         </section>
@@ -1309,12 +1309,12 @@ export function SalaryCalculatorPage() {
                                                 {isSubmitted ? (
                                                     <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
                                                 ) : (
-                                                     <div style={{ display: 'flex', gap: 6 }}>
-                                                         <button onClick={() => setEditEmp(emp)} className={gross > 0 ? "secondary small" : "primary small"}>
-                                                             {gross > 0 ? 'Edit Salary' : 'Set Salary'}
-                                                         </button>
-                                                         <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net, workingDays: wd } })} className="primary small">Submit</button>
-                                                     </div>
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        <button onClick={() => setEditEmp(emp)} className={gross > 0 ? "secondary small" : "primary small"}>
+                                                            {gross > 0 ? 'Edit Salary' : 'Set Salary'}
+                                                        </button>
+                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net, workingDays: wd } })} className="primary small">Submit</button>
+                                                    </div>
                                                 )}
                                             </td>
                                         </tr>
@@ -1373,7 +1373,7 @@ export function SalaryCalculatorPage() {
                                     // For unsubmitted ones, calculate expected values based on real-time sales
                                     let displayIncentive = 0;
                                     let displayAchieved = 0;
-                                    
+
                                     if (isSubmitted) {
                                         displayIncentive = pr.breakdown?.details?.incentive_amount || 0;
                                         displayAchieved = pr.breakdown?.details?.achieved_sales || 0;
@@ -1924,7 +1924,9 @@ function SalaryMasterRatesConfig() {
 
     useEffect(() => {
         apiFetch('/hr/salary-rate-config')
-            .then(res => setConfigs(res.items || []))
+            .then(res => {
+                setConfigs((res.items || []).map(i => ({ ...i, _isEditing: false })));
+            })
             .catch(() => { })
             .finally(() => setLoading(false));
     }, []);
@@ -1940,7 +1942,7 @@ function SalaryMasterRatesConfig() {
         try {
             await apiFetch('/hr/salary-rate-config', {
                 method: 'PUT',
-                body: JSON.stringify({ items: configs })
+                body: JSON.stringify({ items: configs.map(c => { const { _isEditing, ...rest } = c; return rest; }) })
             });
             alert('Master rates updated successfully! These will apply to all calculations dynamically.');
         } catch (err) {
@@ -1955,11 +1957,13 @@ function SalaryMasterRatesConfig() {
             experience_category: 'fresher',
             subject_key: '_default',
             level: 'lkg_7',
-            rate: ''
+            rate: '',
+            _isEditing: true
         }, ...configs]);
     }
 
     function deleteRow(idx) {
+        if (!confirm('Are you sure you want to delete this master rate?')) return;
         setConfigs(configs.filter((_, i) => i !== idx));
     }
 
@@ -1990,45 +1994,75 @@ function SalaryMasterRatesConfig() {
                             <th>Subject Key</th>
                             <th>Class Level</th>
                             <th>Rate (₹/hr)</th>
-                            <th style={{ width: 40 }}></th>
+                            <th style={{ width: 100 }}>Actions</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {configs.map((c, idx) => (
-                            <tr key={idx}>
-                                <td>
-                                    <select value={c.board} onChange={e => { const v = [...configs]; v[idx].board = e.target.value; setConfigs(v); }} style={selectStyle}>
-                                        <option value="state_cbse">State / CBSE</option>
-                                        <option value="icse_igcse">ICSE / IGCSE</option>
-                                        <option value="_any">Any Board</option>
-                                    </select>
-                                </td>
-                                <td>
-                                    <select value={c.experience_category} onChange={e => { const v = [...configs]; v[idx].experience_category = e.target.value; setConfigs(v); }} style={selectStyle}>
-                                        <option value="fresher">Fresher</option>
-                                        <option value="experienced">Experienced</option>
-                                        <option value="experienced_high">Experienced (High)</option>
-                                        <option value="_any">Any Experience</option>
-                                    </select>
-                                </td>
-                                <td>
-                                    <input value={c.subject_key} onChange={e => { const v = [...configs]; v[idx].subject_key = e.target.value; setConfigs(v); }} style={textStyle} placeholder="_default, french, etc." />
-                                </td>
-                                <td>
-                                    <select value={c.level} onChange={e => { const v = [...configs]; v[idx].level = e.target.value; setConfigs(v); }} style={selectStyle}>
-                                        <option value="lkg_7">LKG–7</option>
-                                        <option value="class_8_10">8–10</option>
-                                        <option value="plus_1_2">+1 & +2</option>
-                                    </select>
-                                </td>
-                                <td>
-                                    <input type="number" value={c.rate} onChange={e => handleRateChange(idx, e.target.value)} style={textStyle} placeholder="0" />
-                                </td>
-                                <td>
-                                    <button onClick={() => deleteRow(idx)} className="secondary small" style={{ color: '#ef4444', padding: '4px 8px' }}>✕</button>
-                                </td>
-                            </tr>
-                        ))}
+                        {configs.map((c, idx) => {
+                            const isEditing = c._isEditing;
+                            return (
+                                <tr key={idx}>
+                                    <td>
+                                        {isEditing ? (
+                                            <select value={c.board} onChange={e => { const v = [...configs]; v[idx].board = e.target.value; setConfigs(v); }} style={selectStyle}>
+                                                <option value="state_cbse">State / CBSE</option>
+                                                <option value="icse_igcse">ICSE / IGCSE</option>
+                                                <option value="_any">Any Board</option>
+                                            </select>
+                                        ) : (
+                                            <span style={{ textTransform: 'capitalize' }}>{c.board.replace(/_/g, ' ')}</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <select value={c.experience_category} onChange={e => { const v = [...configs]; v[idx].experience_category = e.target.value; setConfigs(v); }} style={selectStyle}>
+                                                <option value="fresher">Fresher</option>
+                                                <option value="experienced">Experienced</option>
+                                                <option value="experienced_high">Experienced (High)</option>
+                                                <option value="_any">Any Experience</option>
+                                            </select>
+                                        ) : (
+                                            <span style={{ textTransform: 'capitalize' }}>{c.experience_category.replace(/_/g, ' ')}</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input value={c.subject_key} onChange={e => { const v = [...configs]; v[idx].subject_key = e.target.value; setConfigs(v); }} style={textStyle} placeholder="_default, french, etc." />
+                                        ) : (
+                                            <span>{c.subject_key}</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <select value={c.level} onChange={e => { const v = [...configs]; v[idx].level = e.target.value; setConfigs(v); }} style={selectStyle}>
+                                                <option value="lkg_7">LKG–7</option>
+                                                <option value="class_8_10">8–10</option>
+                                                <option value="plus_1_2">+1 & +2</option>
+                                            </select>
+                                        ) : (
+                                            <span style={{ textTransform: 'capitalize' }}>{c.level.replace(/_/g, ' ')}</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        {isEditing ? (
+                                            <input type="number" value={c.rate} onChange={e => handleRateChange(idx, e.target.value)} style={textStyle} placeholder="0" />
+                                        ) : (
+                                            <span style={{ fontWeight: 600 }}>₹{c.rate || 0}</span>
+                                        )}
+                                    </td>
+                                    <td>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                            {isEditing ? (
+                                                <button onClick={() => { const v = [...configs]; v[idx]._isEditing = false; setConfigs(v); }} className="primary small" style={{ padding: '4px 12px' }}>Save</button>
+                                            ) : (
+                                                <button onClick={() => { const v = [...configs]; v[idx]._isEditing = true; setConfigs(v); }} className="secondary small" style={{ padding: '4px 12px' }}>Edit</button>
+                                            )}
+                                            <button onClick={() => deleteRow(idx)} className="secondary small" style={{ color: '#ef4444', padding: '4px 8px' }}>✕</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                         {configs.length === 0 && (
                             <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: 'var(--muted)' }}>No master rules configured.</td></tr>
                         )}

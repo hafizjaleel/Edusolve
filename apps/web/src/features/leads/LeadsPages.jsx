@@ -233,6 +233,17 @@ function StatusBadge({ status }) {
   return <span className={`status-badge ${colors[status] || 'neutral'}`}>{status?.replace('_', ' ') || 'unknown'}</span>;
 }
 
+function getRelativeTime(dateString) {
+  if (!dateString) return '';
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = Math.abs(now - date);
+  const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return '1 day ago';
+  return `${diffDays} days ago`;
+}
+
 function MobileLeadCard({ lead, counselorMap, onOpenDetails, onViewInPipeline, onDrop, isCounselor, isSelected, onToggleSelect }) {
   const [expanded, setExpanded] = useState(false);
   return (
@@ -257,7 +268,7 @@ function MobileLeadCard({ lead, counselorMap, onOpenDetails, onViewInPipeline, o
               {lead.student_name}
             </h4>
             <div style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
-              {lead.contact_number || '-'}
+              {lead.contact_number || '-'} • {getRelativeTime(lead.created_at)}
             </div>
           </div>
         </div>
@@ -277,7 +288,14 @@ function MobileLeadCard({ lead, counselorMap, onOpenDetails, onViewInPipeline, o
               </svg>
             </span>
           </div>
-          <span style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 500, paddingRight: '32px' }}>{lead.class_level || '-'}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+            <span style={{ fontSize: '11px', color: '#9ca3af', fontWeight: 500, paddingRight: '32px' }}>{lead.class_level || '-'}</span>
+            {!isCounselor && (
+              <span style={{ fontSize: '12px', color: '#4f46e5', fontWeight: 600, paddingRight: '32px' }}>
+                {counselorMap[lead.counselor_id] || 'Unassigned'}
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -478,6 +496,7 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
                 <th>Class</th>
                 <th>Type</th>
                 <th>Status</th>
+                <th>Created</th>
                 {user?.role !== 'counselor' ? (
                   <th>Assigned To</th>
                 ) : null}
@@ -514,6 +533,7 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
                   <td>{lead.class_level || '-'}</td>
                   <td>{lead.lead_type || '-'}</td>
                   <td><StatusBadge status={lead.status} /></td>
+                  <td style={{ whiteSpace: 'nowrap', color: '#6b7280', fontSize: '13px' }}>{getRelativeTime(lead.created_at)}</td>
                   {user?.role !== 'counselor' ? (
                     <td>{counselorMap[lead.counselor_id] || <span className="text-dim">Unassigned</span>}</td>
                   ) : null}
@@ -2034,6 +2054,65 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
 }
 
 /* ═══════ Converted Leads Page (Counselor Head Only) ═══════ */
+function MobileConvertedLeadCard({ lead, assignedMap, isSelected, onToggleSelect }) {
+  const [expanded, setExpanded] = useState(false);
+  const assignedStr = lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id];
+
+  return (
+    <div className="card list-mobile-card" style={{ padding: '16px', position: 'relative', marginBottom: '0', border: isSelected ? '2px solid #3b82f6' : '1px solid #e5e7eb', background: assignedStr ? '#fff' : '#fffbeb' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, paddingRight: 8, display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+          <div style={{ marginTop: '2px' }} onClick={e => e.stopPropagation()}>
+            <input
+              type="checkbox"
+              checked={isSelected}
+              disabled={!!assignedStr}
+              onChange={() => onToggleSelect(lead.id)}
+              style={{ width: '16px', height: '16px' }}
+            />
+          </div>
+          <div onClick={() => setExpanded(!expanded)} style={{ cursor: 'pointer', flex: 1 }}>
+            <h4 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: '#2563eb' }}>
+              {lead.student_name}
+            </h4>
+            <div style={{ margin: 0, fontSize: '12px', color: '#4338ca', fontWeight: 600 }}>
+              {lead.student_code || '—'}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {assignedStr ? (
+              <span style={{ padding: '4px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: '#dcfce7', color: '#15803d', whiteSpace: 'nowrap' }}>
+                ✅ {assignedStr}
+              </span>
+            ) : (
+              <span style={{ padding: '4px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: '#fef3c7', color: '#b45309', whiteSpace: 'nowrap' }}>
+                Unassigned
+              </span>
+            )}
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '50%', background: '#f3f4f6', color: '#6b7280', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: '12px', animation: 'fadeIn 0.2s ease-in' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px', borderTop: '1px solid #f1f5f9', paddingTop: '12px' }}>
+            <div><span style={{ color: '#888' }}>Contact:</span> <div style={{ fontWeight: 500 }}>{lead.contact_number || '-'}</div></div>
+            <div><span style={{ color: '#888' }}>Class:</span> <div style={{ fontWeight: 500 }}>{lead.class_level || '-'}</div></div>
+            <div><span style={{ color: '#888' }}>Closed By:</span> <div style={{ fontWeight: 500 }}>{lead.counselor?.full_name || lead.counselor?.email || '-'}</div></div>
+            <div><span style={{ color: '#888' }}>Joined Date:</span> <div style={{ fontWeight: 500 }}>{lead.updated_at ? new Date(lead.updated_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '-'}</div></div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ConvertedLeadsPage() {
   const [leads, setLeads] = useState([]);
   const [acs, setAcs] = useState([]);
@@ -2224,72 +2303,103 @@ export function ConvertedLeadsPage() {
       {error ? <p className="error">{error}</p> : null}
 
       {!loading && (
-        <div className="card">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: '40px' }}>
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-                  </th>
-                  <th>Student ID</th>
-                  <th>Name</th>
-                  <th>Contact</th>
-                  <th>Class</th>
-                  <th>Closed By</th>
-                  <th>Joined Date</th>
-                  <th>AC Coordinator</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(lead => {
-                  const alreadyAssigned = assignedMap[lead.id];
-                  return (
-                    <tr key={lead.id} className={selectedIds.includes(lead.id) ? 'selected-row' : ''}>
-                      <td>
-                        <input
-                          type="checkbox"
-                          checked={selectedIds.includes(lead.id)}
-                          disabled={!!(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id])}
-                          onChange={() => toggleOne(lead.id)}
-                        />
-                      </td>
-                      <td style={{ fontSize: '12px', color: '#4338ca', fontWeight: 600 }}>
-                        {lead.student_code || '—'}
-                      </td>
-                      <td style={{ fontWeight: 500 }}>{lead.student_name}</td>
-                      <td>{lead.contact_number || '—'}</td>
-                      <td>{lead.class_level || '—'}</td>
-                      <td style={{ fontSize: '12px' }}>{lead.counselor?.full_name || lead.counselor?.email || '—'}</td>
-                      <td>{lead.updated_at ? new Date(lead.updated_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
-                      <td>
-                        {(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]) ? (
-                          <span style={{
-                            display: 'inline-flex', alignItems: 'center', gap: '4px',
-                            padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
-                            fontWeight: 600, background: '#dcfce7', color: '#15803d'
-                          }}>
-                            ✅ {lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]}
-                          </span>
-                        ) : (
-                          <span style={{
-                            padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
-                            fontWeight: 600, background: '#f3f4f6', color: '#6b7280'
-                          }}>
-                            Unassigned
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-                {!filtered.length && (
-                  <tr><td colSpan={8} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>No leads found.</td></tr>
-                )}
-              </tbody>
-            </table>
+        <>
+          {/* Desktop Table */}
+          <div className="card desktop-only">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{ width: '40px' }}>
+                      <input type="checkbox" checked={allSelected} onChange={toggleAll} />
+                    </th>
+                    <th>Student ID</th>
+                    <th>Name</th>
+                    <th>Contact</th>
+                    <th>Class</th>
+                    <th>Closed By</th>
+                    <th>Joined Date</th>
+                    <th>AC Coordinator</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(lead => {
+                    const alreadyAssigned = assignedMap[lead.id];
+                    return (
+                      <tr key={lead.id} className={selectedIds.includes(lead.id) ? 'selected-row' : ''}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.includes(lead.id)}
+                            disabled={!!(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id])}
+                            onChange={() => toggleOne(lead.id)}
+                          />
+                        </td>
+                        <td style={{ fontSize: '12px', color: '#4338ca', fontWeight: 600 }}>
+                          {lead.student_code || '—'}
+                        </td>
+                        <td style={{ fontWeight: 500 }}>{lead.student_name}</td>
+                        <td>{lead.contact_number || '—'}</td>
+                        <td>{lead.class_level || '—'}</td>
+                        <td style={{ fontSize: '12px' }}>{lead.counselor?.full_name || lead.counselor?.email || '—'}</td>
+                        <td>{lead.updated_at ? new Date(lead.updated_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' }) : '—'}</td>
+                        <td>
+                          {(lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]) ? (
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: '4px',
+                              padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
+                              fontWeight: 600, background: '#dcfce7', color: '#15803d'
+                            }}>
+                              ✅ {lead.ac_user?.full_name || lead.ac_user?.email || assignedMap[lead.id]}
+                            </span>
+                          ) : (
+                            <span style={{
+                              padding: '4px 10px', borderRadius: '12px', fontSize: '12px',
+                              fontWeight: 600, background: '#f3f4f6', color: '#6b7280'
+                            }}>
+                              Unassigned
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {!filtered.length && (
+                    <tr><td colSpan={8} style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>No leads found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
+
+          {/* Mobile expandable cards */}
+          <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+            {filtered.length > 0 && selectableIds.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 4px', marginBottom: '4px' }}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={toggleAll}
+                  style={{ width: '16px', height: '16px' }}
+                  id="mobile-select-all-converted"
+                />
+                <label htmlFor="mobile-select-all-converted" style={{ fontSize: '13px', color: '#4b5563', fontWeight: 500 }}>Select All Unassigned</label>
+              </div>
+            )}
+            {filtered.map(lead => (
+              <MobileConvertedLeadCard
+                key={lead.id}
+                lead={lead}
+                assignedMap={assignedMap}
+                isSelected={selectedIds.includes(lead.id)}
+                onToggleSelect={toggleOne}
+              />
+            ))}
+            {!filtered.length && (
+              <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af' }}>No leads found.</div>
+            )}
+          </div>
+        </>
       )}
 
       {/* Pagination component */}
@@ -2873,7 +2983,7 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
           {loadingPending ? <p>Loading...</p> : (
             <>
               <div className="card desktop-only">
-                <div className="table-wrap">
+                <div className="table-wrap mobile-friendly-table">
                   <table className="data-table">
                     <thead><tr>
                       <th>Student</th>
@@ -3194,6 +3304,73 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
 
 
 /* ═══════ Overdue Leads Page (Counselor Head) ═══════ */
+function MobileOverdueLeadCard({ lead, counselors, days, selectedCounselor, onSelectCounselor, onReassign, reassigning }) {
+  const [expanded, setExpanded] = useState(false);
+  const isCritical = days >= 20;
+  const isWarning = days >= 13 && days < 20;
+  const daysColor = isCritical ? '#dc2626' : (isWarning ? '#ea580c' : '#6b7280');
+  const bg = isCritical ? '#fef2f2' : '#fff';
+
+  return (
+    <div className="card list-mobile-card" style={{ padding: '16px', position: 'relative', marginBottom: '0', border: isCritical ? '2px solid #fecaca' : '1px solid #e5e7eb', background: bg }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }} onClick={() => setExpanded(!expanded)}>
+        <div style={{ flex: 1, paddingRight: 8, display: 'flex', flexDirection: 'column', gap: '4px', cursor: 'pointer' }}>
+          <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: '#111827' }}>
+            {lead.student_name}
+          </h4>
+          <div style={{ fontSize: '12px', color: '#6b7280' }}>
+            {lead.subject || '-'}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', cursor: 'pointer' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontWeight: 700, fontSize: '14px', color: daysColor }}>
+              {days}d Overdue
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '24px', height: '24px', borderRadius: '50%', background: '#f3f4f6', color: '#6b7280', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </span>
+          </div>
+          <div style={{ fontSize: '12px', color: '#4f46e5', fontWeight: 600, paddingRight: '32px' }}>
+            {lead.users?.full_name || 'Unassigned'}
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ marginTop: '12px', animation: 'fadeIn 0.2s ease-in' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '13px', borderTop: '1px solid #e5e7eb', paddingTop: '12px', marginBottom: '12px' }}>
+            <div><span style={{ color: '#888' }}>Contact:</span> <div style={{ fontWeight: 500 }}>{lead.contact_number || '-'}</div></div>
+            <div><span style={{ color: '#888' }}>Status:</span> <div><span style={{ padding: '2px 6px', borderRadius: '6px', fontSize: '11px', fontWeight: 600, background: '#fef3c7', color: '#92400e' }}>{lead.status}</span></div></div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid #e5e7eb', paddingTop: '12px' }}>
+            <select
+              value={selectedCounselor}
+              onChange={e => onSelectCounselor(lead.id, e.target.value)}
+              style={{ flex: 1, padding: '8px', fontSize: '13px', border: '1px solid #d1d5db', borderRadius: '6px' }}
+            >
+              <option value="">Reassign to…</option>
+              {counselors.filter(c => c.id !== lead.counselor_id).map(c => (
+                <option key={c.id} value={c.id}>{c.full_name || c.email}</option>
+              ))}
+            </select>
+            <button
+              className="primary small"
+              onClick={() => onReassign(lead.id)}
+              disabled={reassigning}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {reassigning ? '…' : 'Reassign'}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function OverdueLeadsPage() {
   const [leads, setLeads] = useState([]);
   const [total, setTotal] = useState(0);
@@ -3284,77 +3461,96 @@ export function OverdueLeadsPage() {
       </div>
 
       {/* Table */}
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Phone</th>
-              <th>Subject</th>
-              <th>Status</th>
-              <th>Current Counselor</th>
-              <th>Days Overdue</th>
-              <th>Reassign To</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(l => {
-              const days = daysOverdue(l.assigned_at);
-              return (
-                <tr key={l.id} style={{ background: days >= 20 ? '#fef2f2' : 'transparent' }}>
-                  <td style={{ fontWeight: 500 }}>{l.student_name}</td>
-                  <td>{l.contact_number || '—'}</td>
-                  <td>{l.subject || '—'}</td>
-                  <td>
-                    <span style={{
-                      padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                      background: '#fef3c7', color: '#92400e'
-                    }}>{l.status}</span>
-                  </td>
-                  <td style={{ fontSize: '13px' }}>{l.users?.full_name || '—'}</td>
-                  <td>
-                    <span style={{
-                      fontWeight: 700, fontSize: '14px',
-                      color: days >= 20 ? '#dc2626' : days >= 13 ? '#ea580c' : '#6b7280'
-                    }}>
-                      {days}d
-                    </span>
-                  </td>
-                  <td>
-                    <select
-                      value={selectedCounselor[l.id] || ''}
-                      onChange={e => setSelectedCounselor(prev => ({ ...prev, [l.id]: e.target.value }))}
-                      style={{ fontSize: '12px', padding: '4px 8px', minWidth: '140px' }}
-                    >
-                      <option value="">Select…</option>
-                      {counselors
-                        .filter(c => c.id !== l.counselor_id)
-                        .map(c => (
-                          <option key={c.id} value={c.id}>{c.full_name}</option>
-                        ))}
-                    </select>
-                  </td>
-                  <td>
-                    <button
-                      className="small primary"
-                      disabled={!selectedCounselor[l.id] || reassigning[l.id]}
-                      onClick={() => handleReassign(l.id)}
-                      style={{ fontSize: '12px' }}
-                    >
-                      {reassigning[l.id] ? '…' : 'Reassign'}
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {!filtered.length && (
-              <tr><td colSpan={8} style={{ textAlign: 'center', color: '#15803d', padding: '40px', fontWeight: 500 }}>
-                ✅ No overdue leads — all assignments are within the 13-day window.
-              </td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="card desktop-only">
+        <div className="table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Phone</th>
+                <th>Subject</th>
+                <th>Status</th>
+                <th>Current Counselor</th>
+                <th>Days Overdue</th>
+                <th>Reassign To</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(l => {
+                const days = daysOverdue(l.assigned_at);
+                return (
+                  <tr key={l.id} style={{ background: days >= 20 ? '#fef2f2' : 'transparent' }}>
+                    <td style={{ fontWeight: 500 }}>{l.student_name}</td>
+                    <td>{l.contact_number || '—'}</td>
+                    <td>{l.subject || '—'}</td>
+                    <td>
+                      <span style={{
+                        padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
+                        background: '#fef3c7', color: '#92400e'
+                      }}>{l.status}</span>
+                    </td>
+                    <td style={{ fontSize: '13px' }}>{l.users?.full_name || '—'}</td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700, fontSize: '14px',
+                        color: days >= 20 ? '#dc2626' : days >= 13 ? '#ea580c' : '#6b7280'
+                      }}>
+                        {days}d
+                      </span>
+                    </td>
+                    <td>
+                      <select
+                        value={selectedCounselor[l.id] || ''}
+                        onChange={e => setSelectedCounselor(prev => ({ ...prev, [l.id]: e.target.value }))}
+                        style={{ fontSize: '12px', padding: '4px 8px', minWidth: '140px' }}
+                      >
+                        <option value="">Select…</option>
+                        {counselors
+                          .filter(c => c.id !== l.counselor_id)
+                          .map(c => (
+                            <option key={c.id} value={c.id}>{c.full_name || c.email}</option>
+                          ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button
+                        className="primary small"
+                        style={{ padding: '4px 10px', fontSize: '12px' }}
+                        disabled={reassigning[l.id]}
+                        onClick={() => handleReassign(l.id)}
+                      >
+                        {reassigning[l.id] ? 'Wait..' : 'Reassign'}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!filtered.length && (
+                <tr><td colSpan="8" style={{ textAlign: 'center', color: '#6b7280', padding: '32px' }}>No overdue leads found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Mobile expandable cards */}
+      <div className="mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px' }}>
+        {filtered.map(l => (
+          <MobileOverdueLeadCard
+            key={l.id}
+            lead={l}
+            days={daysOverdue(l.assigned_at)}
+            counselors={counselors}
+            selectedCounselor={selectedCounselor[l.id] || ''}
+            onSelectCounselor={(id, val) => setSelectedCounselor(prev => ({ ...prev, [id]: val }))}
+            onReassign={handleReassign}
+            reassigning={reassigning[l.id]}
+          />
+        ))}
+        {!filtered.length && (
+          <div style={{ textAlign: 'center', padding: '24px', color: '#9ca3af' }}>No overdue leads found.</div>
+        )}
       </div>
       {!loading && total > 0 && (
         <Pagination page={page} limit={limit} total={total} onPageChange={setPage} />
