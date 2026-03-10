@@ -64,8 +64,11 @@ export async function handleSessions(req, res, url) {
         return sv.status === 'pending' && sv.type === 'approval';
       });
       // Coordinator filtering: only show sessions for their assigned students
+      const requestedUserId = url.searchParams.get('user_id');
       if (isAC(actor)) {
         pending = pending.filter(s => s.students?.academic_coordinator_id === actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        pending = pending.filter(s => s.students?.academic_coordinator_id === requestedUserId);
       }
       sendJson(res, 200, { ok: true, items: pending });
       return true;
@@ -89,8 +92,11 @@ export async function handleSessions(req, res, url) {
       // Filter for reschedule type client-side (avoids schema cache issues with new column)
       let items = (data || []).filter(v => v.type === 'reschedule');
       // Coordinator filtering
+      const requestedUserId = url.searchParams.get('user_id');
       if (isAC(actor)) {
         items = items.filter(v => v.academic_sessions?.students?.academic_coordinator_id === actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        items = items.filter(v => v.academic_sessions?.students?.academic_coordinator_id === requestedUserId);
       }
       sendJson(res, 200, { ok: true, items });
       return true;
@@ -145,9 +151,19 @@ export async function handleSessions(req, res, url) {
         query = query.eq('status', statusStr);
       }
 
-      const { data, error } = await query
-        .order('session_date', { ascending: false })
-        .limit(500);
+      const { data, error } = await (async () => {
+        let q = query.order('session_date', { ascending: false }).limit(500);
+        const requestedUserId = url.searchParams.get('user_id');
+        if (actor.role === 'super_admin' && requestedUserId) {
+          // Join students to filter
+          // Wait, the select already has students. But we need to ensure it's an inner join if we want to filter efficiently?
+          // Actually, we can just use the dot notation if students is joined.
+          q = q.eq('students.academic_coordinator_id', requestedUserId);
+        } else if (isAC(actor)) {
+          q = q.eq('students.academic_coordinator_id', actor.userId);
+        }
+        return q;
+      })();
 
       if (error) throw new Error(error.message);
 
@@ -188,6 +204,8 @@ export async function handleSessions(req, res, url) {
           session_date,
           started_at: started_at.includes('T') ? started_at : `${session_date}T${started_at}:00+05:30`,
           duration_hours: Number(duration_hours),
+          ...(payload.subject !== undefined ? { subject: payload.subject } : {}),
+          ...(payload.teacher_id ? { teacher_id: payload.teacher_id } : {}),
           updated_at: nowIso()
         })
         .eq('id', sessionId)
@@ -268,7 +286,7 @@ export async function handleSessions(req, res, url) {
               .maybeSingle();
             if (studentError) throw new Error(studentError.message);
             if (student) {
-              const remaining = Math.max(0, Number(student.remaining_hours || 0) - duration);
+              const remaining = Number(student.remaining_hours || 0) - duration;
               const { error: studentUpdateError } = await adminClient
                 .from('students')
                 .update({ remaining_hours: remaining, updated_at: nowIso() })

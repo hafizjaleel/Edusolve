@@ -245,7 +245,7 @@ function ProgressTracker({ currentStatus }) {
 }
 
 /* ═══════ TC Dashboard ═══════ */
-export function TCDashboardPage() {
+export function TCDashboardPage({ targetUserId }) {
     const [stats, setStats] = useState({});
     const [pool, setPool] = useState([]);
     const [leads, setLeads] = useState([]);
@@ -254,10 +254,11 @@ export function TCDashboardPage() {
     useEffect(() => {
         (async () => {
             try {
+                const uQ = targetUserId ? `?user_id=${targetUserId}` : '';
                 const [s, p, l] = await Promise.all([
-                    apiFetch('/teacher-leads/stats'),
-                    apiFetch('/teachers/pool'),
-                    apiFetch('/teacher-leads')
+                    apiFetch(`/teacher-leads/stats${uQ}`),
+                    apiFetch(`/teachers/pool${uQ}`),
+                    apiFetch(`/teacher-leads${uQ}`)
                 ]);
                 setStats(s.stats || {});
                 setPool(p.items || []);
@@ -265,7 +266,7 @@ export function TCDashboardPage() {
             } catch (e) { }
             setLoading(false);
         })();
-    }, []);
+    }, [targetUserId]);
 
     const totalLeads = Object.values(stats).reduce((a, b) => a + b, 0);
     const pipelineActive = (stats.new || 0) + (stats.contacted || 0) + (stats.first_interview || 0) + (stats.first_interview_done || 0) + (stats.second_interview || 0) + (stats.second_interview_done || 0) + (stats.approved || 0);

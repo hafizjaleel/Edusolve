@@ -3,28 +3,53 @@ import { apiFetch } from '../../lib/api.js';
 import { SearchSelect } from '../../components/ui/SearchSelect.jsx';
 import { Pagination } from '../../components/ui/Pagination.jsx';
 
+/** Check if a scheduled session's class time has already passed */
+function isSessionOverdue(s) {
+  if (s.status !== 'scheduled') return false;
+  if (!s.session_date) return false;
+  try {
+    const dur = Number(s.duration_hours || 1);
+    let endMs;
+    if (s.started_at && s.started_at.includes('T')) {
+      endMs = new Date(s.started_at).getTime() + dur * 3600000;
+    } else if (s.started_at) {
+      endMs = new Date(`${s.session_date}T${s.started_at.slice(0,5)}:00+05:30`).getTime() + dur * 3600000;
+    } else {
+      // No time info, compare date only — overdue if date is in the past
+      endMs = new Date(s.session_date + 'T23:59:59+05:30').getTime();
+    }
+    return Date.now() > endMs;
+  } catch { return false; }
+}
+
 
 /* ═══════ AC Dashboard ═══════ */
-export function AcademicCoordinatorDashboardPage() {
+export function AcademicCoordinatorDashboardPage({ targetUserId }) {
   const [s, setS] = useState({ students: 0, today: 0, queue: 0, topups: 0 });
   const [weekSessions, setWeekSessions] = useState([]);
+  const [overdueCount, setOverdueCount] = useState(0);
   const [error, setError] = useState('');
 
   useEffect(() => {
     (async () => {
       try {
-        const [a, b, c, d, w] = await Promise.all([
-          apiFetch('/students'),
-          apiFetch('/students/sessions/today'),
-          apiFetch('/sessions/verification-queue'),
-          apiFetch('/students/topup-requests?status=pending_finance'),
-          apiFetch('/students/sessions/week?offset=0')
+        const uQ = targetUserId ? `?user_id=${targetUserId}` : '';
+        const uQAnd = targetUserId ? `&user_id=${targetUserId}` : '';
+        
+        const [a, b, c, d, w, allSched] = await Promise.all([
+          apiFetch(`/students${uQ}`),
+          apiFetch(`/students/sessions/today${uQ}`),
+          apiFetch(`/sessions/verification-queue${uQ}`),
+          apiFetch(`/students/topup-requests?status=pending_finance${uQAnd}`),
+          apiFetch(`/students/sessions/week?offset=0${uQAnd}`),
+          apiFetch(`/sessions/all?status=scheduled${uQAnd}`)
         ]);
         setS({ students: (a.items || []).length, today: (b.items || []).length, queue: (c.items || []).length, topups: (d.items || []).length });
         setWeekSessions(w.items || []);
+        setOverdueCount((allSched.items || []).filter(isSessionOverdue).length);
       } catch (e) { setError(e.message); }
     })();
-  }, []);
+  }, [targetUserId]);
 
   /* Prepare Chart Data */
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -72,6 +97,13 @@ export function AcademicCoordinatorDashboardPage() {
         <article className="card stat-card"><p className="eyebrow">Verification Queue</p><h3>{s.queue}</h3></article>
         <article className="card stat-card warning"><p className="eyebrow">Pending Top-Ups</p><h3>{s.topups}</h3></article>
       </div>
+      {overdueCount > 0 ? (
+        <div className="card stat-card" style={{ background: '#fef2f2', borderColor: '#fca5a5', marginTop: '8px', maxWidth: '280px' }}>
+          <p className="eyebrow" style={{ color: '#dc2626' }}>⚠ Overdue Sessions</p>
+          <h3 style={{ color: '#dc2626' }}>{overdueCount}</h3>
+          <p style={{ fontSize: '12px', color: '#9ca3af', margin: 0 }}>Classes not marked completed</p>
+        </div>
+      ) : null}
 
       <div className="grid-three">
         <article className="card">
@@ -517,7 +549,9 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
         body: JSON.stringify({
           session_date: rescheduleData.date,
           started_at: rescheduleData.time,
-          duration_hours: rescheduleData.duration
+          duration_hours: rescheduleData.duration,
+          subject: rescheduleData.subject || undefined,
+          teacher_id: rescheduleData.teacher_id || undefined
         })
       });
       setRescheduleData(null);
@@ -718,6 +752,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
                       <strong>{s.subject || 'Class'}</strong>
                       <span>{s.users?.full_name || 'Teacher'}</span>
                       <span className={`status-tag small ${s.status === 'scheduled' ? 'warning' : 'success'}`}>{s.status}</span>
+                      {isSessionOverdue(s) && <span className="status-tag small" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', marginLeft: 4 }}>Overdue</span>}
                     </div>
                   </div>
                 )) : <div className="calendar-empty">Free</div>}
@@ -742,6 +777,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
                   <span className={`status-tag small ${selectedSession.status === 'scheduled' ? 'warning' : 'success'}`}>
                     {selectedSession.status}
                   </span>
+                  {isSessionOverdue(selectedSession) && <span className="status-tag small" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', marginLeft: 4 }}>Overdue</span>}
                 </p>
               </div>
             </div>
@@ -751,6 +787,7 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
                   setRescheduleData({
                     id: selectedSession.id,
                     teacher_id: selectedSession.teacher_id,
+                    subject: selectedSession.subject || '',
                     date: selectedSession.session_date,
                     time: selectedSession.started_at ? selectedSession.started_at.slice(11, 16) : '',
                     duration: selectedSession.duration_hours
@@ -786,6 +823,18 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
             <h3>Reschedule Session</h3>
             <form onSubmit={handleRescheduleSave}>
               <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
+                <label>Teacher
+                  <select value={rescheduleData.teacher_id} onChange={e => setRescheduleData({ ...rescheduleData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                    <option value="">Select Teacher</option>
+                    {teachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.teacher_code}</option>)}
+                  </select>
+                </label>
+                <label>Subject
+                  <select value={rescheduleData.subject} onChange={e => setRescheduleData({ ...rescheduleData, subject: e.target.value })} required>
+                    <option value="">{rescheduleData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                    {(() => { const t = teachers.find(x => x.user_id === rescheduleData.teacher_id); const subs = t ? (Array.isArray(t.subjects_taught) ? t.subjects_taught : (typeof t.subjects_taught === 'string' ? JSON.parse(t.subjects_taught || '[]') : [])) : []; return subs.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>); })()}
+                  </select>
+                </label>
                 <label>Date
                   <input type="date" value={rescheduleData.date} min={today} onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
                 </label>
@@ -1718,7 +1767,7 @@ export function TodayClassesPage() {
     try {
       await apiFetch(`/sessions/${rescheduleData.id}/reschedule`, {
         method: 'PUT',
-        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration) })
+        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration), subject: rescheduleData.subject || undefined, teacher_id: rescheduleData.teacher_id || undefined })
       });
       setRescheduleData(null);
       await load();
@@ -1832,13 +1881,14 @@ export function TodayClassesPage() {
                     <td data-label="Hrs">{s.duration_hours}h</td>
                     <td data-label="Status">
                       <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
+                      {isSessionOverdue(s) && <span className="status-tag small" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', marginLeft: 4 }}>Overdue</span>}
                     </td>
                     <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
                       <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <div style={{ width: '85px' }}>
                           {isUpcoming && <button type="button" className="small secondary" style={{ width: '100%', padding: '4px 8px' }} onClick={() => setRescheduleData({
                             id: s.id, student_id: s.student_id || '', teacher_id: s.teacher_id || '',
-                            date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1
+                            subject: s.subject || '', date: s.session_date || '', time: s.started_at ? s.started_at.slice(11, 16) : '', duration: s.duration_hours || 1
                           })}>Reschedule</button>}
                         </div>
                         <div style={{ display: 'flex', gap: '4px', width: '64px' }}>
@@ -1872,6 +1922,20 @@ export function TodayClassesPage() {
             <h3>Reschedule Session</h3>
             <form onSubmit={submitReschedule}>
               <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                <label>Teacher
+                  <select value={rescheduleData.teacher_id} onChange={e => setRescheduleData({ ...rescheduleData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                    <option value="">Select teacher</option>
+                    {allTeachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.user_id}</option>)}
+                  </select>
+                </label>
+                {(() => { const rTeacher = allTeachers.find(t => t.user_id === rescheduleData.teacher_id); const rSubjects = rTeacher ? (Array.isArray(rTeacher.subjects_taught) ? rTeacher.subjects_taught : (typeof rTeacher.subjects_taught === 'string' ? JSON.parse(rTeacher.subjects_taught || '[]') : [])) : []; return (
+                <label>Subject
+                  <select value={rescheduleData.subject} onChange={e => setRescheduleData({ ...rescheduleData, subject: e.target.value })} required>
+                    <option value="">{rescheduleData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                    {rSubjects.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </label>
+                ); })()}
                 <label>Date
                   <input type="date" value={rescheduleData.date} min={todayStr}
                     onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
@@ -2150,7 +2214,7 @@ export function SessionsManagePage() {
     try {
       await apiFetch(`/sessions/${rescheduleData.id}/reschedule`, {
         method: 'PUT',
-        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration) })
+        body: JSON.stringify({ session_date: rescheduleData.date, started_at: rescheduleData.time, duration_hours: Number(rescheduleData.duration), subject: rescheduleData.subject || undefined, teacher_id: rescheduleData.teacher_id || undefined })
       });
       setRescheduleData(null);
       await loadAllSessions();
@@ -2343,6 +2407,7 @@ export function SessionsManagePage() {
                     <td data-label="Hrs">{s.duration_hours}h</td>
                     <td data-label="Status">
                       <span className={`status-tag ${s.status === 'completed' ? 'primary' : s.status === 'scheduled' ? 'warning' : ''}`}>{s.status}</span>
+                      {isSessionOverdue(s) && <span className="status-tag small" style={{ background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', marginLeft: 4 }}>Overdue</span>}
                       {s.status === 'completed' && <span className={`status-tag small ${s.verification_status === 'approved' ? 'success' : 'muted'}`} style={{ marginLeft: 4 }}>{s.verification_status}</span>}
                     </td>
                     <td className="actions" data-label="Actions" style={{ whiteSpace: 'nowrap' }}>
@@ -2352,6 +2417,7 @@ export function SessionsManagePage() {
                             id: s.id,
                             student_id: s.student_id || '',
                             teacher_id: s.teacher_id || '',
+                            subject: s.subject || '',
                             date: s.session_date || '',
                             time: s.started_at ? s.started_at.slice(11, 16) : '',
                             duration: s.duration_hours || 1
@@ -2403,6 +2469,20 @@ export function SessionsManagePage() {
               <h3>Reschedule Session</h3>
               <form onSubmit={submitReschedule}>
                 <div style={{ display: 'grid', gap: '12px', marginBottom: '18px' }}>
+                  <label>Teacher
+                    <select value={rescheduleData.teacher_id} onChange={e => setRescheduleData({ ...rescheduleData, teacher_id: e.target.value, subject: '', time: '' })} required>
+                      <option value="">Select teacher</option>
+                      {allTeachers.map(t => <option key={t.user_id} value={t.user_id}>{t.users?.full_name || t.user_id}</option>)}
+                    </select>
+                  </label>
+                  {(() => { const rTeacher = allTeachers.find(t => t.user_id === rescheduleData.teacher_id); const rSubjects = rTeacher ? (Array.isArray(rTeacher.subjects_taught) ? rTeacher.subjects_taught : (typeof rTeacher.subjects_taught === 'string' ? JSON.parse(rTeacher.subjects_taught || '[]') : [])) : []; return (
+                  <label>Subject
+                    <select value={rescheduleData.subject} onChange={e => setRescheduleData({ ...rescheduleData, subject: e.target.value })} required>
+                      <option value="">{rescheduleData.teacher_id ? 'Select subject' : 'Pick teacher first'}</option>
+                      {rSubjects.filter(Boolean).map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </label>
+                  ); })()}
                   <label>Date
                     <input type="date" value={rescheduleData.date} min={todayStr}
                       onChange={e => setRescheduleData({ ...rescheduleData, date: e.target.value, time: '' })} required />
@@ -2865,6 +2945,10 @@ export function TopUpsPage() {
   const [loadingPending, setLoadingPending] = useState(false);
   const [myInstallments, setMyInstallments] = useState([]);
   const [loadingMyInstallments, setLoadingMyInstallments] = useState(false);
+  
+  // Warning State
+  const [warningAck, setWarningAck] = useState(false);
+  const [pendingWarning, setPendingWarning] = useState(null); // { type: 'topup'|'initial', amount: 0 }
 
   const load = useCallback(async () => {
     try {
@@ -2893,8 +2977,26 @@ export function TopUpsPage() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => { if (activeTab === 'pending') { loadPending(); loadMyInstallments(); } }, [activeTab, loadPending, loadMyInstallments]);
 
+  // Reset warning if student changes
+  useEffect(() => {
+    setWarningAck(false);
+    setPendingWarning(null);
+  }, [sid, hrs, totalAmt, amt]);
+
   async function submit(e) {
-    e.preventDefault(); setError(''); setMsg('');
+    if (e) e.preventDefault(); 
+    setError(''); setMsg('');
+
+    // Warning Check
+    const student = students.find(s => String(s.id) === String(sid));
+    if (student && student.pending_payment && !warningAck) {
+      setPendingWarning({
+        type: student.pending_payment,
+        amount: student.pending_amount || 0
+      });
+      return; // Stop submission to show warning
+    }
+
     let scrUrl = null;
     if (scrFile) {
       try {
@@ -2916,7 +3018,29 @@ export function TopUpsPage() {
   return (
     <section className="panel">
       {error ? <p className="error">{error}</p> : null}
-      <article className="card"><h3>Create Top-Up</h3><form className="form-grid form-row" onSubmit={submit}><label>Student<select value={sid} onChange={e => setSid(e.target.value)} required><option value="">Select</option>{students.map(s => <option key={s.id} value={s.id}>{s.student_code || s.id} — {s.student_name} ({s.remaining_hours}h)</option>)}</select></label><label>Hours<input type="number" value={hrs} onChange={e => setHrs(e.target.value)} required /></label><label>Total Amount (₹)<input type="number" value={totalAmt} onChange={e => setTotalAmt(e.target.value)} required /></label><label>Paid Amount (₹)<input type="number" value={amt} onChange={e => setAmt(e.target.value)} required /></label><label>Finance Note<textarea value={fNote} onChange={e => setFNote(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></label><label>Screenshot (Upload)<input type="file" accept="image/*" onChange={e => setScrFile(e.target.files[0])} /></label><button type="submit" style={{ alignSelf: 'flex-end', marginTop: '16px' }}>Submit</button></form>{msg ? <p>{msg}</p> : null}</article>
+      <article className="card"><h3>Create Top-Up</h3>
+        {pendingWarning && !warningAck && (
+          <div style={{ padding: '12px 16px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px', marginBottom: '16px' }}>
+            <h4 style={{ margin: 0, color: '#d97706', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span>⚠️</span> WARNING: Pending Payment Detected
+            </h4>
+            <p style={{ fontSize: '14px', color: '#92400e', marginTop: '8px', marginBottom: '12px' }}>
+              This student currently has a pending <strong>{pendingWarning.type === 'topup' ? 'Top-up' : 'Initial'}</strong> payment of <strong style={{color:'#dc2626'}}>₹{Number(pendingWarning.amount).toLocaleString('en-IN')}</strong>. 
+              Are you sure you want to request another top-up before this is cleared?
+            </p>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="secondary small" onClick={() => setPendingWarning(null)}>Cancel</button>
+              <button type="button" className="primary small" style={{ background: '#d97706', borderColor: '#d97706' }} onClick={() => {
+                setWarningAck(true);
+                setPendingWarning(null);
+                // We use setTimeout to ensure state updates before submitting again
+                setTimeout(() => submit(), 0);
+              }}>Yes, Proceed Anyway</button>
+            </div>
+          </div>
+        )}
+        <form className="form-grid form-row" onSubmit={submit}><label>Student<select value={sid} onChange={e => setSid(e.target.value)} required><option value="">Select</option>{students.map(s => <option key={s.id} value={s.id}>{s.student_code || s.id} — {s.student_name} ({s.remaining_hours}h)</option>)}</select></label><label>Hours<input type="number" value={hrs} onChange={e => setHrs(e.target.value)} required /></label><label>Total Amount (₹)<input type="number" value={totalAmt} onChange={e => setTotalAmt(e.target.value)} required /></label><label>Paid Amount (₹)<input type="number" value={amt} onChange={e => setAmt(e.target.value)} required /></label><label>Finance Note<textarea value={fNote} onChange={e => setFNote(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></label><label>Screenshot (Upload)<input type="file" accept="image/*" onChange={e => setScrFile(e.target.files[0])} /></label><button type="submit" style={{ alignSelf: 'flex-end', marginTop: '16px' }}>Submit</button></form>{msg ? <p>{msg}</p> : null}
+      </article>
 
       <article className="card" style={{ marginTop: '24px' }}>
         <div style={{ display: 'flex', gap: '8px', borderBottom: '2px solid #e5e7eb', marginBottom: '16px' }}>
@@ -2930,7 +3054,7 @@ export function TopUpsPage() {
         </div>
 
         {activeTab === 'all' && (
-          <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Student</th><th>Hrs</th><th>Total ₹</th><th>Paid ₹</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Date</th></tr></thead><tbody>{requests.map(r => <tr key={r.id}><td data-label="Student">{r.students?.student_code || r.student_id}</td><td data-label="Hrs">{r.hours_added}</td><td data-label="Total ₹">₹{r.total_amount ? r.total_amount : '—'}</td><td data-label="Paid ₹">₹{r.amount}</td><td data-label="Note" style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.finance_note || '—'}</td><td data-label="Screenshot">{r.screenshot_url ? <a href={r.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>View</a> : '—'}</td><td data-label="Status"><span className={`status-tag ${r.status === 'approved' ? 'success' : ''}`}>{r.status}</span></td><td data-label="Date">{new Date(r.created_at).toLocaleDateString('en-IN')}</td></tr>)}{!requests.length ? <tr><td colSpan="8">No requests.</td></tr> : null}</tbody></table></div>
+          <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Student</th><th>Hrs</th><th>Total ₹</th><th>Paid ₹</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Date</th></tr></thead><tbody>{requests.map(r => <tr key={r.id}><td data-label="Student">{r.students?.student_name || '—'} <span className="text-muted" style={{fontSize:'11px'}}>({r.students?.student_code || r.student_id})</span></td><td data-label="Hrs">{r.hours_added}</td><td data-label="Total ₹">₹{r.total_amount ? r.total_amount : '—'}</td><td data-label="Paid ₹">₹{r.amount}</td><td data-label="Note" style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.finance_note || '—'}</td><td data-label="Screenshot">{r.screenshot_url ? <a href={r.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>View</a> : '—'}</td><td data-label="Status"><span className={`status-tag ${r.status === 'approved' ? 'success' : ''}`}>{r.status}</span></td><td data-label="Date">{new Date(r.created_at).toLocaleDateString('en-IN')}</td></tr>)}{!requests.length ? <tr><td colSpan="8">No requests.</td></tr> : null}</tbody></table></div>
         )}
 
         {activeTab === 'pending' && (

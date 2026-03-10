@@ -42,7 +42,7 @@ import { VerificationQueuePage, SessionLogsPage } from './features/sessions/Sess
 import { TeacherProfilePage } from './features/teachers/TeacherPages.jsx';
 import { TCDashboardPage, TeacherLeadsPage, TCAllLeadsPage, TCTeacherPoolPage, TeacherPerformancePage } from './features/teachers/TeacherCoordinatorPages.jsx';
 import { TeacherSalesReportsPage } from './features/teachers/TeacherSalesReportsPage.jsx';
-import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherReportsPage, TeacherInvoicesPage } from './features/teachers/TeacherDashboardPages.jsx';
+import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherStudentsPage, TeacherReportsPage, TeacherInvoicesPage } from './features/teachers/TeacherDashboardPages.jsx';
 import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPaymentRequestsPage } from './features/hr/HRPages.jsx';
 import { getSession, logout } from './lib/auth.js';
 import { defaultPageForRole, getPageByPath, pagesForRole } from './lib/routes.js';
@@ -87,7 +87,7 @@ export default function App() {
       if (!user?.role) return;
       const hashPath = currentPathFromHash();
       const page = getPageByPath(hashPath, user.role);
-      if (page) setActivePath(page.path);
+      if (page) setActivePath(hashPath);
     }
 
     window.addEventListener('hashchange', onHashChange);
@@ -145,10 +145,18 @@ export default function App() {
   function renderPage() {
     if (!page) return null;
 
+    // Handle dashboard target userId from activePath (e.g. /dashboard/tc?userId=xyz)
+    let dashboardUserId = null;
+    if (activePath.includes('?userId=')) {
+      const q = activePath.split('?userId=')[1];
+      if (q) dashboardUserId = q.split('&')[0];
+    }
+
     /* Dashboards */
-    if (page.path === '/dashboard/counselor') return <CounselorDashboardPage />;
-    if (page.path === '/dashboard/counselor-head') return <CounselorHeadDashboardPage />;
-    if (page.path === '/dashboard/academic-coordinator') return <AcademicCoordinatorDashboardPage />;
+    if (page.path === '/dashboard/counselor') return <CounselorDashboardPage targetUserId={dashboardUserId} />;
+    if (page.path === '/dashboard/counselor-head') return <CounselorHeadDashboardPage targetUserId={dashboardUserId} />;
+    if (page.path === '/dashboard/academic-coordinator') return <AcademicCoordinatorDashboardPage targetUserId={dashboardUserId} />;
+    if (page.path === '/dashboard/tc') return <TCDashboardPage targetUserId={dashboardUserId} />;
 
     /* Leads */
     if (page.path === '/leads/all') return <AllLeadsPage onOpenDetails={openLeadDetails} onViewInPipeline={navigateToPipeline} selectedLeadId={selectedLeadId} role={role} />;
@@ -196,6 +204,7 @@ export default function App() {
     if (page.path === '/teacher/today-sessions') return <TeacherTodaySessionsPage />;
     if (page.path === '/teacher/timetable') return <TeacherTimetablePage />;
     if (page.path === '/teacher/profile') return <TeacherMyProfilePage />;
+    if (page.path === '/teacher/students') return <TeacherStudentsPage />;
     if (page.path === '/teacher/reports') return <TeacherReportsPage />;
     if (page.path === '/teacher/invoices') return <TeacherInvoicesPage />;
 
@@ -255,7 +264,7 @@ export default function App() {
       role={role}
       roleLabel={roleLabel(role)}
       pages={pages}
-      activePath={page.path}
+      activePath={activePath.split('?')[0]}
       onNavigate={onNavigate}
       onLogout={onLogout}
       onNavigateToTicket={() => onNavigate('/tickets')}

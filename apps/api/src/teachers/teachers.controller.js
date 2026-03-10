@@ -54,7 +54,7 @@ export async function handleTeachers(req, res, url) {
   try {
     // ── GET /teachers/directory — fetch all teachers (AC/Admin) ──
     if (req.method === 'GET' && url.pathname === '/teachers/directory') {
-      if (!['academic_coordinator', 'super_admin', 'teacher_coordinator'].includes(actor.role)) {
+      if (!['super_admin', 'teacher_coordinator'].includes(actor.role)) {
         sendJson(res, 403, { ok: false, error: 'forbidden' });
         return true;
       }
@@ -127,11 +127,20 @@ export async function handleTeachers(req, res, url) {
       return true;
     }
     if (req.method === 'GET' && url.pathname === '/teachers/pool') {
-      const { data, error } = await adminClient
+      let query = adminClient
         .from('teacher_profiles')
         .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
         .eq('is_in_pool', true)
         .order('created_at', { ascending: false });
+
+      const requestedUserId = url.searchParams.get('user_id');
+      if (actor.role === 'teacher_coordinator') {
+        query = query.eq('teacher_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        query = query.eq('teacher_coordinator_id', requestedUserId);
+      }
+
+      const { data, error } = await query;
       if (error) throw new Error(error.message);
 
       const items = (data || []).map(p => {
@@ -250,21 +259,73 @@ export async function handleTeachers(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('student_teacher_assignments')
-        .select('student_id, students(student_name, student_code)')
+        .select('id, student_id, subject, meeting_link, students(student_name, student_code)')
         .eq('teacher_id', actor.userId);
 
       if (error) throw new Error(error.message);
 
-      // Deduplicate students
-      const map = new Map();
+      // Group by student
+      const studentMap = {};
       (data || []).forEach(row => {
-        if (row.students && row.students.student_name) {
-          map.set(row.student_id, { id: row.student_id, name: row.students.student_name });
+        if (!row.students || !row.students.student_name) return;
+        const sid = row.student_id;
+        if (!studentMap[sid]) {
+          studentMap[sid] = {
+            student_id: sid,
+            student_name: row.students.student_name,
+            student_code: row.students.student_code,
+            subjects: [],
+            meeting_link: row.meeting_link || ''
+          };
+        }
+        if (row.subject && !studentMap[sid].subjects.includes(row.subject)) {
+          studentMap[sid].subjects.push(row.subject);
+        }
+        // Take the first available meeting link if not set
+        if (!studentMap[sid].meeting_link && row.meeting_link) {
+            studentMap[sid].meeting_link = row.meeting_link;
         }
       });
 
-      const uniqueStudents = Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
-      sendJson(res, 200, { ok: true, items: uniqueStudents });
+      const groupedStudents = Object.values(studentMap).sort((a, b) => a.student_name.localeCompare(b.student_name));
+      sendJson(res, 200, { ok: true, items: groupedStudents });
+      return true;
+    }
+
+    // ── PATCH /teachers/my-students/:studentId/meeting-link — update specific meeting link ──
+    const studentMatch = url.pathname.match(/^\/teachers\/my-students\/([0-9a-fA-F-]+)\/meeting-link$/);
+    if (req.method === 'PATCH' && studentMatch) {
+      if (actor.role !== 'teacher') {
+        sendJson(res, 403, { ok: false, error: 'teacher role required' });
+        return true;
+      }
+      const studentId = studentMatch[1];
+      const payload = await readJson(req);
+
+      // Verify the student is assigned to this teacher
+      const { data: assignments, error: checkErr } = await adminClient
+        .from('student_teacher_assignments')
+        .select('id')
+        .eq('student_id', studentId)
+        .eq('teacher_id', actor.userId)
+        .limit(1);
+
+      if (checkErr) throw new Error(checkErr.message);
+      if (!assignments || assignments.length === 0) {
+        sendJson(res, 404, { ok: false, error: 'Student not found or unauthorized' });
+        return true;
+      }
+
+      // Update all assignments for this student-teacher pair
+      const { error: updateErr } = await adminClient
+        .from('student_teacher_assignments')
+        .update({ meeting_link: payload.meeting_link || null, updated_at: nowIso() })
+        .eq('student_id', studentId)
+        .eq('teacher_id', actor.userId);
+
+      if (updateErr) throw new Error(updateErr.message);
+
+      sendJson(res, 200, { ok: true, message: 'Meeting link updated successfully' });
       return true;
     }
 

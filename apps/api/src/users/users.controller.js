@@ -11,16 +11,35 @@ export async function handleUsers(req, res) {
         return true;
     }
 
-    // 1. Check permissions (Super Admin only)
+    // 1. Check permissions (Super Admin or HR)
     const role = req.headers['x-user-role'];
-    if (role !== ROLES.SUPER_ADMIN) {
-        sendJson(res, 403, { ok: false, error: 'Super Admin access required' });
+    if (role !== ROLES.SUPER_ADMIN && role !== ROLES.HR) {
+        sendJson(res, 403, { ok: false, error: 'Unauthorized access' });
         return true;
     }
 
     try {
+        // GET /admin/users/employees - Fast lookup for active sidebar dashboards
+        if (req.method === 'GET' && req.url === '/admin/users/employees') {
+            // Join users with user_roles to get name and role code
+            const { data, error } = await adminClient
+                .from('user_roles')
+                .select('user_id, roles(code), users(full_name)');
+                
+            if (error) throw error;
+            
+            const staff = (data || []).map(r => ({
+                id: r.user_id,
+                name: r.users?.full_name || 'Unknown',
+                role: Array.isArray(r.roles) ? r.roles[0]?.code : r.roles?.code
+            })).filter(u => u.role && u.role !== 'student' && u.role !== 'parent');
+            
+            sendJson(res, 200, { ok: true, items: staff });
+            return true;
+        }
+
         // GET /admin/users - List users
-        if (req.method === 'GET') {
+        if (req.method === 'GET' && req.url === '/admin/users') {
             const { data: { users }, error } = await adminClient.auth.admin.listUsers();
             if (error) throw error;
 

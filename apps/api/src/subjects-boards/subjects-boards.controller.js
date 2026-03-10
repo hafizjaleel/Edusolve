@@ -1,7 +1,7 @@
 import { getSupabaseAdminClient } from '../config/supabase.js';
 import { readJson, sendJson } from '../common/http.js';
 
-const ALLOWED_ROLES = ['academic_coordinator', 'teacher_coordinator', 'super_admin', 'hr', 'finance'];
+const ALLOWED_ROLES = ['teacher_coordinator', 'super_admin', 'hr', 'finance'];
 
 function actorFromHeaders(req) {
     const rawRole = req.headers['x-user-role'];

@@ -10,12 +10,13 @@ function StatCard({ label, value, tone = 'neutral' }) {
   );
 }
 
-export function CounselorDashboardPage() {
+export function CounselorDashboardPage({ targetUserId }) {
   const [items, setItems] = useState([]);
 
   useEffect(() => {
-    apiFetch('/leads?scope=mine').then((data) => setItems(data.items || [])).catch(() => setItems([]));
-  }, []);
+    const url = targetUserId ? `/leads?scope=mine&user_id=${targetUserId}` : '/leads?scope=mine';
+    apiFetch(url).then((data) => setItems(data.items || [])).catch(() => setItems([]));
+  }, [targetUserId]);
 
   const metrics = useMemo(() => {
     const total = items.length;
@@ -138,20 +139,21 @@ function SimpleBarChart({ data, xKey, yKeys, colors }) {
   );
 }
 
-export function CounselorHeadDashboardPage() {
+export function CounselorHeadDashboardPage({ targetUserId }) {
   const [stats, setStats] = useState(null);
   const [counselors, setCounselors] = useState([]);
 
   useEffect(() => {
     // Parallel fetch
+    const statsUrl = targetUserId ? `/counselors/stats?user_id=${targetUserId}` : '/counselors/stats';
     Promise.all([
-      apiFetch('/counselors/stats'),
+      apiFetch(statsUrl),
       apiFetch('/counselors')
     ]).then(([statsData, counselorsData]) => {
       setStats(statsData.stats);
       setCounselors(counselorsData.items || []);
     }).catch(err => console.error(err));
-  }, []);
+  }, [targetUserId]);
 
   const chartData = useMemo(() => {
     if (!stats || !counselors.length) return [];

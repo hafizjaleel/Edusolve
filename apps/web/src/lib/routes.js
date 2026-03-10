@@ -32,11 +32,10 @@ export const APP_PAGES = [
   { path: '/sessions/verifications', title: 'Verifications', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/sessions/verification-queue', title: 'Session Queue', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: false },
   { path: '/sessions/logs', title: 'Session Logs', group: 'Academics', roles: [ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/teachers/all', title: 'Teacher Directory', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN, ROLES.TEACHER_COORDINATOR], showInNav: true },
+  { path: '/teachers/all', title: 'Teacher Directory', group: 'Academics', roles: [ROLES.SUPER_ADMIN, ROLES.TEACHER_COORDINATOR], showInNav: true },
   { path: '/teachers/pool', title: 'Teacher Pool', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.COUNSELOR, ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/topups/manage', title: 'Top-Ups', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/automation/hub', title: 'Automation', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR], showInNav: true },
-  { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/manage/subjects', title: 'Subjects & Boards', group: 'Academics', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/tc/performance', title: 'Teacher Performance', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Teacher (Individual) ── */
@@ -44,6 +43,7 @@ export const APP_PAGES = [
   { path: '/teacher/today-sessions', title: 'Today Sessions', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/timetable', title: 'My Timetable', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/profile', title: 'My Profile', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
+  { path: '/teacher/students', title: 'My Students', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/reports', title: 'Reports', group: 'Operations', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teacher/invoices', title: 'Invoices', group: 'Finance', roles: [ROLES.TEACHER], showInNav: true },
   { path: '/teachers/profile', title: 'Teacher Profile', group: 'Academics', roles: [ROLES.TEACHER_COORDINATOR, ROLES.ACADEMIC_COORDINATOR, ROLES.FINANCE, ROLES.TEACHER, ROLES.SUPER_ADMIN], showInNav: false },
@@ -66,7 +66,7 @@ export const APP_PAGES = [
   { path: '/hr/payment-requests', title: 'Payment Requests', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── System ── */
-  { path: '/admin/users', title: 'User Management', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/admin/users', title: 'User Management', group: 'System', roles: [ROLES.SUPER_ADMIN, ROLES.HR], showInNav: true },
   { path: '/admin/settings', title: 'Settings', group: 'System', roles: [ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── Support (always last in sidebar) ── */
@@ -85,5 +85,6 @@ export function defaultPageForRole(role) {
 }
 
 export function getPageByPath(path, role) {
-  return pagesForRole(role).find((page) => page.path === path) || null;
+  const basePath = (path || '').split('?')[0];
+  return pagesForRole(role).find((page) => page.path === basePath) || null;
 }

@@ -1453,6 +1453,109 @@ function AddAvailabilityModal({ isOpen, onClose, onAdd }) {
     );
 }
 
+/* ═══════ Teacher Students ═══════ */
+export function TeacherStudentsPage() {
+    const [assignments, setAssignments] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [savingId, setSavingId] = useState(null);
+    const [msg, setMsg] = useState('');
+
+    useEffect(() => {
+        apiFetch('/teachers/my-students').then(res => {
+            setAssignments(res.items || []);
+            setLoading(false);
+        }).catch(e => {
+            console.error(e);
+            setMsg('Error loading students.');
+            setLoading(false);
+        });
+    }, []);
+
+    const handleLinkChange = (id, newLink) => {
+        setAssignments(prev => prev.map(a => a.student_id === id ? { ...a, meeting_link: newLink } : a));
+    };
+
+    const saveMeetingLink = async (id, meeting_link) => {
+        setSavingId(id);
+        setMsg('');
+        try {
+            const res = await apiFetch(`/teachers/my-students/${id}/meeting-link`, {
+                method: 'PATCH',
+                body: JSON.stringify({ meeting_link })
+            });
+            if (!res.ok) throw new Error(res.error || 'Failed to update link');
+            setMsg('Link saved successfully.');
+            setTimeout(() => setMsg(''), 3000);
+        } catch (e) {
+            setMsg(`Error: ${e.message}`);
+        }
+        setSavingId(null);
+    };
+
+    if (loading) return <section className="panel"><p>Loading students...</p></section>;
+
+    return (
+        <section className="panel">
+            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Students</h2>
+            {msg && (
+                <div style={{
+                    padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', fontWeight: 500,
+                    background: msg.startsWith('Error') ? '#fee2e2' : '#dcfce7',
+                    color: msg.startsWith('Error') ? '#dc2626' : '#15803d'
+                }}>
+                    {msg}
+                </div>
+            )}
+            
+            <article className="card" style={{ padding: '20px' }}>
+                <div className="table-wrap mobile-friendly-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Student Name</th>
+                                <th>Subject</th>
+                                <th>Meeting Link (Specific)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {assignments.map(a => (
+                                <tr key={a.student_id}>
+                                    <td data-label="Student Name">{a.student_name || 'Unknown'}</td>
+                                    <td data-label="Subjects">{(a.subjects || []).join(', ') || '—'}</td>
+                                    <td data-label="Meeting Link">
+                                        <input 
+                                            type="url" 
+                                            value={a.meeting_link || ''}
+                                            onChange={e => handleLinkChange(a.student_id, e.target.value)}
+                                            placeholder="https://meet.google.com/..."
+                                            style={{
+                                                width: '100%', padding: '6px 10px', border: '1px solid #d1d5db',
+                                                borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                                            }}
+                                        />
+                                    </td>
+                                    <td data-label="Action">
+                                        <button 
+                                            className="small primary" 
+                                            onClick={() => saveMeetingLink(a.student_id, a.meeting_link)}
+                                            disabled={savingId === a.student_id}
+                                            style={{ padding: '6px 12px', fontSize: '13px' }}
+                                        >
+                                            {savingId === a.student_id ? 'Saving...' : 'Save Link'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {!assignments.length ? <tr><td colSpan="4" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No students assigned yet.</td></tr> : null}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
+    );
+}
+
 /* ═══════ Teacher Reports ═══════ */
 export function TeacherReportsPage() {
     const [sessions, setSessions] = useState([]);

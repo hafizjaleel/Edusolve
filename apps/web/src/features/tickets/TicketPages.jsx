@@ -289,23 +289,66 @@ function CreateTicketModal({ role, onClose, onSuccess }) {
     const [targets, setTargets] = useState([]);
     const [loading, setLoading] = useState(false);
 
+    // AC -> TC specifics
+    const [teachers, setTeachers] = useState([]);
+    const [selectedTeacherId, setSelectedTeacherId] = useState('');
+    const [targetUserId, setTargetUserId] = useState('');
+    const isAC = role === 'academic_coordinator';
+
     useEffect(() => {
         apiFetch('/tickets/routing')
             .then(res => {
                 setTargets(res.targets || []);
-                if (res.targets?.length) setTargetRole(res.targets[0]);
+                if (res.targets?.length && !isAC) setTargetRole(res.targets[0]);
             })
             .catch(() => { });
-    }, []);
+
+        if (isAC) {
+            apiFetch('/teachers/pool')
+                .then(res => setTeachers(res.items || []))
+                .catch(() => {});
+        }
+    }, [isAC]);
+
+    function handleTeacherChange(e) {
+        const tId = e.target.value;
+        setSelectedTeacherId(tId);
+        if (tId) {
+            const selected = teachers.find(t => t.id === tId);
+            if (selected?.teacher_coordinator_id) {
+                setTargetUserId(selected.teacher_coordinator_id);
+                setTargetRole('teacher_coordinator');
+            } else {
+                setTargetUserId('');
+                // Optionally reset target role or leave as is
+            }
+        } else {
+            setTargetUserId('');
+        }
+    }
 
     async function handleSubmit(e) {
         e.preventDefault();
         if (!title || !description || !targetRole) return;
         setLoading(true);
         try {
+            let finalDescription = description;
+            let finalTitle = title;
+            if (selectedTeacherId) {
+                const tName = teachers.find(t => t.id === selectedTeacherId)?.users?.full_name || 'Teacher';
+                finalTitle = `[${tName}] ${title}`;
+            }
+
             await apiFetch('/tickets', {
                 method: 'POST',
-                body: JSON.stringify({ title, description, target_role: targetRole, priority, category: category || null })
+                body: JSON.stringify({ 
+                    title: finalTitle, 
+                    description: finalDescription, 
+                    target_role: targetRole, 
+                    target_user_id: targetUserId || undefined,
+                    priority, 
+                    category: category || null 
+                })
             });
             onSuccess();
         } catch (err) {
@@ -335,9 +378,26 @@ function CreateTicketModal({ role, onClose, onSuccess }) {
                         />
                     </div>
 
+                    {isAC && (
+                        <div className="form-field full-width">
+                            <label style={{ color: '#475569' }}>Related Teacher (Optional)</label>
+                            <select value={selectedTeacherId} onChange={handleTeacherChange}
+                                style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#1e293b' }}>
+                                <option value="">Select a teacher...</option>
+                                {teachers.map(t => (
+                                    <option key={t.id} value={t.id}>{t.users?.full_name || t.id}</option>
+                                ))}
+                            </select>
+                            <span style={{ fontSize: 11, color: '#64748b', display: 'block', marginTop: 4 }}>
+                                Selecting a teacher will automatically route the ticket to their assigned Teacher Coordinator.
+                            </span>
+                        </div>
+                    )}
+
                     <div className="form-field">
                         <label style={{ color: '#475569' }}>Send To (Target Role) *</label>
                         <select value={targetRole} onChange={e => setTargetRole(e.target.value)} required
+                            disabled={!!targetUserId}
                             style={{ background: '#f8fafc', border: '1px solid #cbd5e1', color: '#1e293b' }}>
                             <option value="">Select recipient...</option>
                             {targets.map(t => (

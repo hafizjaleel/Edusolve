@@ -1,6 +1,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
+import { getSession } from '../../lib/auth.js';
 import { AddCounselorModal } from './components/AddCounselorModal.jsx';
 
 export function CounselorTeamPage() {
@@ -8,6 +9,9 @@ export function CounselorTeamPage() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showAdd, setShowAdd] = useState(false);
+
+    const session = getSession();
+    const isHead = session?.user?.role === 'counselor_head';
 
     async function load() {
         setLoading(true);
@@ -39,11 +43,11 @@ export function CounselorTeamPage() {
 
     return (
         <section className="panel">
-
-
-            <div className="card filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', justifyContent: 'flex-end' }}>
-                <button onClick={() => setShowAdd(true)} className="primary" style={{ whiteSpace: 'nowrap' }}>+ Add Counselor</button>
-            </div>
+            {!isHead && (
+                <div className="card filters-bar" style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '12px', justifyContent: 'flex-end' }}>
+                    <button onClick={() => setShowAdd(true)} className="primary" style={{ whiteSpace: 'nowrap' }}>+ Add Counselor</button>
+                </div>
+            )}
 
             {loading ? <p>Loading team...</p> : null}
             {error ? <p className="error">{error}</p> : null}
