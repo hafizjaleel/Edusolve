@@ -598,6 +598,7 @@ export function EmployeesPage() {
     const [showAdd, setShowAdd] = useState(false);
     const [editEmp, setEditEmp] = useState(null);
     const [salaryEmp, setSalaryEmp] = useState(null);
+    const [assignLevelEmp, setAssignLevelEmp] = useState(null);
 
     function load() {
         setLoading(true);
@@ -664,13 +665,18 @@ export function EmployeesPage() {
                                             <td>{hasSalary ? `₹${Number(sal.base_salary).toLocaleString()}` : '—'}</td>
                                             <td>
                                                 <div style={{ display: 'flex', gap: 6 }}>
-                                                    <button onClick={() => setEditEmp(emp)} className="secondary small">
-                                                        Edit
-                                                    </button>
-                                                    <button onClick={() => setSalaryEmp(emp)} className={hasSalary ? "secondary small" : "primary small"}>
-                                                        {hasSalary ? 'Edit Salary' : 'Set Salary'}
-                                                    </button>
-                                                </div>
+                                                     {emp.designation?.toLowerCase().includes('counselor') && (
+                                                         <button onClick={() => setAssignLevelEmp(emp)} className="secondary small" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
+                                                             Level
+                                                         </button>
+                                                     )}
+                                                     <button onClick={() => setEditEmp(emp)} className="secondary small">
+                                                         Edit
+                                                     </button>
+                                                     <button onClick={() => setSalaryEmp(emp)} className={hasSalary ? "secondary small" : "primary small"}>
+                                                         {hasSalary ? 'Edit Salary' : 'Set Salary'}
+                                                     </button>
+                                                 </div>
                                             </td>
                                         </tr>
                                     );
@@ -687,7 +693,196 @@ export function EmployeesPage() {
             {showAdd && <AddEmployeeModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); load(); }} />}
             {editEmp && <EditEmployeeModal employee={editEmp} onClose={() => setEditEmp(null)} onDone={() => { setEditEmp(null); load(); }} />}
             {salaryEmp && <SalaryModal employee={salaryEmp} existing={(salaryEmp.salary_structures?.[0] || salaryEmp.salary_structures)} onClose={() => setSalaryEmp(null)} onDone={() => { setSalaryEmp(null); load(); }} />}
+            {assignLevelEmp && <AssignCounselorLevelModal employee={assignLevelEmp} onClose={() => setAssignLevelEmp(null)} onDone={() => { setAssignLevelEmp(null); load(); }} />}
         </section>
+    );
+}
+
+/* ═══════ COUNCILOR LEVELS PAGE ═══════ */
+export function CouncilorLevelsPage() {
+    const [levels, setLevels] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showAdd, setShowAdd] = useState(false);
+    const [editLevel, setEditLevel] = useState(null);
+
+    function load() {
+        setLoading(true);
+        apiFetch('/hr/councilor-levels').then(r => setLevels(r.items || [])).catch(() => { }).finally(() => setLoading(false));
+    }
+
+    useEffect(() => { load(); }, []);
+
+    async function deleteLevel(id) {
+        if (!confirm('Are you sure you want to delete this level?')) return;
+        try {
+            await apiFetch(`/hr/councilor-levels/${id}`, { method: 'DELETE' });
+            load();
+        } catch (err) { alert(err.message); }
+    }
+
+    return (
+        <section className="panel">
+            <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', color: '#10233f' }}>Counselor Levels Configuration</h2>
+                <div style={{ marginLeft: 'auto' }}>
+                    <button onClick={() => setShowAdd(true)} className="primary">
+                        + Add Level
+                    </button>
+                </div>
+            </div>
+
+            {loading ? <p>Loading levels...</p> : (
+                <div className="card">
+                    <div className="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Level Name</th>
+                                    <th>Basic Salary (₹)</th>
+                                    <th>Target Amount (₹)</th>
+                                    <th>Incentive (%)</th>
+                                    <th style={{ textAlign: 'right' }}>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {levels.map(lvl => (
+                                    <tr key={lvl.id}>
+                                        <td style={{ fontWeight: 600 }}>{lvl.level_name}</td>
+                                        <td>{Number(lvl.basic_salary).toLocaleString()}</td>
+                                        <td>{Number(lvl.target_amount).toLocaleString()}</td>
+                                        <td>{lvl.incentive_percentage}%</td>
+                                        <td style={{ textAlign: 'right' }}>
+                                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                                                <button onClick={() => setEditLevel(lvl)} className="secondary small">Edit</button>
+                                                <button onClick={() => deleteLevel(lvl.id)} className="secondary small" style={{ color: 'var(--danger)' }}>Delete</button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                                {levels.length === 0 && (
+                                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>No levels configured yet</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            {(showAdd || editLevel) && (
+                <LevelModal 
+                    level={editLevel} 
+                    onClose={() => { setShowAdd(false); setEditLevel(null); }} 
+                    onDone={() => { setShowAdd(false); setEditLevel(null); load(); }} 
+                />
+            )}
+        </section>
+    );
+}
+
+function LevelModal({ level, onClose, onDone }) {
+    const [form, setForm] = useState({
+        level_name: level?.level_name || '',
+        basic_salary: level?.basic_salary || '',
+        target_amount: level?.target_amount || '',
+        incentive_percentage: level?.incentive_percentage || ''
+    });
+    const [saving, setSaving] = useState(false);
+    const upd = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+    async function submit(e) {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            const method = level ? 'PATCH' : 'POST';
+            const url = level ? `/hr/councilor-levels/${level.id}` : '/hr/councilor-levels';
+            await apiFetch(url, { method, body: JSON.stringify(form) });
+            onDone();
+        } catch (err) { alert(err.message); }
+        finally { setSaving(false); }
+    }
+
+    return (
+        <div style={overlayStyle}>
+            <div style={modalStyle}>
+                <h3>{level ? 'Edit' : 'Add'} Counselor Level</h3>
+                <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                    <label style={labelStyle}>Level Name
+                        <input required value={form.level_name} onChange={e => upd('level_name', e.target.value)} style={inputStyle} placeholder="e.g. Level 1" />
+                    </label>
+                    <label style={labelStyle}>Basic Salary (₹)
+                        <input type="number" required value={form.basic_salary} onChange={e => upd('basic_salary', e.target.value)} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>Target Amount (₹)
+                        <input type="number" required value={form.target_amount} onChange={e => upd('target_amount', e.target.value)} style={inputStyle} />
+                    </label>
+                    <label style={labelStyle}>Incentive Percentage (%)
+                        <input type="number" step="0.1" required value={form.incentive_percentage} onChange={e => upd('incentive_percentage', e.target.value)} style={inputStyle} />
+                    </label>
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                        <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+                        <button type="submit" disabled={saving} style={btnPrimary}>{saving ? 'Saving...' : 'Save Level'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    );
+}
+
+function AssignCounselorLevelModal({ employee, onClose, onDone }) {
+    const [levels, setLevels] = useState([]);
+    const [selectedLevel, setSelectedLevel] = useState('');
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+
+    useEffect(() => {
+        Promise.all([
+            apiFetch('/hr/councilor-levels'),
+            apiFetch('/hr/councilor-profiles')
+        ]).then(([lvlRes, profRes]) => {
+            setLevels(lvlRes.items || []);
+            const current = profRes.items?.find(p => p.user_id === employee.user_id);
+            if (current) setSelectedLevel(current.level_id);
+        }).finally(() => setLoading(false));
+    }, []);
+
+    async function submit(e) {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            await apiFetch('/hr/councilor-profiles', {
+                method: 'POST',
+                body: JSON.stringify({ user_id: employee.user_id, level_id: selectedLevel })
+            });
+            onDone();
+        } catch (err) { alert(err.message); }
+        finally { setSaving(false); }
+    }
+
+    return (
+        <div style={overlayStyle}>
+            <div style={modalStyle}>
+                <h3>Assign Counselor Level</h3>
+                <p style={{ color: 'var(--muted)', fontSize: 13, marginBottom: 16 }}>{employee.full_name}</p>
+                {loading ? <p>Loading...</p> : (
+                    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                        <label style={labelStyle}>Select Level
+                            <select required value={selectedLevel} onChange={e => setSelectedLevel(e.target.value)} style={inputStyle}>
+                                <option value="">— Select Level —</option>
+                                {levels.map(lvl => (
+                                    <option key={lvl.id} value={lvl.id}>
+                                        {lvl.level_name} (₹{lvl.basic_salary} + {lvl.incentive_percentage}%)
+                                    </option>
+                                ))}
+                            </select>
+                        </label>
+                        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                            <button type="button" onClick={onClose} style={btnSecondary}>Cancel</button>
+                            <button type="submit" disabled={saving || !selectedLevel} style={btnPrimary}>{saving ? 'Saving...' : 'Assign Level'}</button>
+                        </div>
+                    </form>
+                )}
+            </div>
+        </div>
     );
 }
 
@@ -873,6 +1068,10 @@ export function SalaryCalculatorPage() {
     const [activeTab, setActiveTab] = useState('employees'); // 'employees' or 'teachers'
     const [teacherMonthOffset, setTeacherMonthOffset] = useState(0);
     const [selectedTeacher, setSelectedTeacher] = useState(null); // clicked teacher row
+    const [assignLevelEmp, setAssignLevelEmp] = useState(null);
+    const [counselorProfiles, setCounselorProfiles] = useState([]);
+    const [counselorLevels, setCounselorLevels] = useState([]);
+    const [counselorSalesMap, setCounselorSalesMap] = useState({});
 
     const getMonthYearString = (offset) => {
         const d = new Date();
@@ -900,8 +1099,11 @@ export function SalaryCalculatorPage() {
             apiFetch('/hr/salary-structures'),
             apiFetch(`/hr/teachers/salary-report?month=${currentMY.month}&year=${currentMY.year}`),
             apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`),
-            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`)
-        ]).then(([empRes, salRes, teachRes, prRes, attRes]) => {
+            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`),
+            apiFetch('/hr/councilor-profiles'),
+            apiFetch('/hr/councilor-levels'),
+            apiFetch(`/hr/councilors/sales-report?month=${currentMY.month}&year=${currentMY.year}`)
+        ]).then(([empRes, salRes, teachRes, prRes, attRes, cpRes, clRes, salesRes]) => {
             setEmployees(empRes.items || []);
             setSalaries(salRes.items || []);
             setTeacherReport(teachRes.items || []);
@@ -910,6 +1112,9 @@ export function SalaryCalculatorPage() {
             (attRes.items || []).forEach(i => { aMap[i.id] = i.report; });
             setAttendanceMap(aMap);
             setWorkingDaysOverride(null);
+            setCounselorProfiles(cpRes.items || []);
+            setCounselorLevels(clRes.items || []);
+            setCounselorSalesMap(salesRes.report || {});
         }).catch(() => { }).finally(() => setLoading(false));
     }, [currentMY.month, currentMY.year]);
 
@@ -919,8 +1124,11 @@ export function SalaryCalculatorPage() {
             apiFetch('/hr/salary-structures'),
             apiFetch(`/hr/teachers/salary-report?month=${currentMY.month}&year=${currentMY.year}`),
             apiFetch(`/hr/payment-requests?month=${currentMY.month}&year=${currentMY.year}`),
-            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`)
-        ]).then(([empRes, salRes, teachRes, prRes, attRes]) => {
+            apiFetch(`/hr/attendance/report?month=${currentMY.month}&year=${currentMY.year}`),
+            apiFetch('/hr/councilor-profiles'),
+            apiFetch('/hr/councilor-levels'),
+            apiFetch(`/hr/councilors/sales-report?month=${currentMY.month}&year=${currentMY.year}`)
+        ]).then(([empRes, salRes, teachRes, prRes, attRes, cpRes, clRes, salesRes]) => {
             setEmployees(empRes.items || []);
             setSalaries(salRes.items || []);
             setTeacherReport(teachRes.items || []);
@@ -928,6 +1136,9 @@ export function SalaryCalculatorPage() {
             const aMap = {};
             (attRes.items || []).forEach(i => { aMap[i.id] = i.report; });
             setAttendanceMap(aMap);
+            setCounselorProfiles(cpRes.items || []);
+            setCounselorLevels(clRes.items || []);
+            setCounselorSalesMap(salesRes.report || {});
         }).catch(() => { });
     }
 
@@ -945,6 +1156,12 @@ export function SalaryCalculatorPage() {
         });
         return map;
     }, [paymentRequests]);
+
+    const counselorProfileMap = useMemo(() => {
+        const map = {};
+        (counselorProfiles || []).forEach(cp => { map[cp.user_id] = cp; });
+        return map;
+    }, [counselorProfiles]);
 
     async function handleSubmitRequest(e) {
         e.preventDefault();
@@ -1018,7 +1235,7 @@ export function SalaryCalculatorPage() {
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <button onClick={() => setTeacherMonthOffset(prev => prev - 1)} className="secondary small">←</button>
                                 <span style={{ fontSize: 14, fontWeight: 500 }}>{currentMY.label}</span>
-                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small">→</button>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small" disabled={teacherMonthOffset >= 0}>→</button>
                                 {teacherMonthOffset !== 0 && (
                                     <button onClick={() => setTeacherMonthOffset(0)} className="secondary small" style={{ marginLeft: 4 }}>Current Month</button>
                                 )}
@@ -1035,6 +1252,9 @@ export function SalaryCalculatorPage() {
                             </div>
                         </div>
                     </div>
+
+                    {/* ─── Regular Employees Table ─── */}
+                    <h3 style={{ fontSize: 15, margin: '0 0 10px', color: '#10233f' }}>Staff Salaries</h3>
                     <div className="card" style={{ marginBottom: 24 }}>
                         <table>
                             <thead>
@@ -1049,7 +1269,7 @@ export function SalaryCalculatorPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {employees.filter(e => e.is_active).map((emp, idx) => {
+                                {employees.filter(e => e.is_active && (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head'))).map((emp, idx) => {
                                     const pr = prMap.employee[emp.id];
                                     const isSubmitted = !!pr;
 
@@ -1066,7 +1286,6 @@ export function SalaryCalculatorPage() {
 
                                     let calcNet = 0;
                                     if (presentDays === 0) {
-                                        // If no attendance marked, calculate full net (gross - deductions) by default for preview
                                         calcNet = Math.round(gross - deductions);
                                     } else {
                                         const proRatedGross = wd > 0 ? (gross * presentDays / wd) : 0;
@@ -1090,15 +1309,127 @@ export function SalaryCalculatorPage() {
                                                 {isSubmitted ? (
                                                     <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
                                                 ) : (
+                                                     <div style={{ display: 'flex', gap: 6 }}>
+                                                         <button onClick={() => setEditEmp(emp)} className={gross > 0 ? "secondary small" : "primary small"}>
+                                                             {gross > 0 ? 'Edit Salary' : 'Set Salary'}
+                                                         </button>
+                                                         <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net, workingDays: wd } })} className="primary small">Submit</button>
+                                                     </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {employees.filter(e => e.is_active && (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head'))).length === 0 && (
+                                    <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No staff employees</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* ─── Counselors Table ─── */}
+                    <h3 style={{ fontSize: 15, margin: '0 0 10px', color: '#10233f' }}>Counselor Salaries</h3>
+                    <div className="card" style={{ marginBottom: 24 }}>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Counselor</th>
+                                    <th>Level</th>
+                                    <th>Basic Salary</th>
+                                    <th>Target (₹)</th>
+                                    <th style={{ textAlign: 'center' }}>Present</th>
+                                    <th>Payable Basic</th>
+                                    <th>Incentive</th>
+                                    <th>Total Net</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {employees.filter(e => e.is_active && e.designation?.toLowerCase().includes('counselor') && !e.designation?.toLowerCase().includes('head')).map((emp, idx) => {
+                                    const pr = prMap.employee[emp.id];
+                                    const isSubmitted = !!pr;
+
+                                    // Find counselor profile/level — default to Level 1
+                                    const cProfile = counselorProfileMap[emp.user_id];
+                                    const defaultLevel = counselorLevels.length > 0 ? counselorLevels.sort((a, b) => a.level_name.localeCompare(b.level_name))[0] : null;
+                                    const cLevel = cProfile?.councilor_levels || defaultLevel;
+                                    const levelBasic = cLevel ? Number(cLevel.basic_salary) : 0;
+                                    const levelTarget = cLevel ? Number(cLevel.target_amount) : 0;
+                                    const levelIncentivePct = cLevel ? Number(cLevel.incentive_percentage) : 0;
+
+                                    const att = attendanceMap[emp.id] || { present: 0, half_day: 0 };
+                                    const presentDays = att.present + (att.half_day * 0.5);
+                                    const wd = workingDaysOverride !== null ? workingDaysOverride : autoWorkingDays;
+
+                                    let payableBasic = 0;
+                                    if (presentDays === 0) {
+                                        payableBasic = levelBasic; // Full if no attendance marked yet
+                                    } else {
+                                        payableBasic = wd > 0 ? Math.round(levelBasic * presentDays / wd) : 0;
+                                    }
+
+                                    // For submitted ones, show the submitted breakdown
+                                    // For unsubmitted ones, calculate expected values based on real-time sales
+                                    let displayIncentive = 0;
+                                    let displayAchieved = 0;
+                                    
+                                    if (isSubmitted) {
+                                        displayIncentive = pr.breakdown?.details?.incentive_amount || 0;
+                                        displayAchieved = pr.breakdown?.details?.achieved_sales || 0;
+                                    } else if (cLevel) {
+                                        displayAchieved = counselorSalesMap[emp.user_id] || 0;
+                                        const extraSales = Math.max(0, displayAchieved - levelTarget);
+                                        displayIncentive = Math.round(extraSales * levelIncentivePct / 100);
+                                    }
+
+                                    const displayNet = isSubmitted ? pr.total_amount : (payableBasic + displayIncentive);
+
+                                    return (
+                                        <tr key={emp.id}>
+                                            <td>{idx + 1}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 500 }}>{emp.full_name}</div>
+                                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{emp.designation || ''}</div>
+                                            </td>
+                                            <td>
+                                                <span style={{ padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: '#dbeafe', color: '#1d4ed8' }}>
+                                                    {cLevel ? cLevel.level_name : '—'}
+                                                </span>
+                                            </td>
+                                            <td>₹{levelBasic.toLocaleString()}</td>
+                                            <td>₹{levelTarget.toLocaleString()}</td>
+                                            <td style={{ textAlign: 'center', fontWeight: 500 }}>{presentDays}</td>
+                                            <td>₹{payableBasic.toLocaleString()}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 600, color: displayIncentive > 0 ? (isSubmitted ? 'var(--success)' : '#4f46e5') : 'var(--muted)' }}>
+                                                    ₹{displayIncentive.toLocaleString()}
+                                                </div>
+                                                <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                                                    Sales: ₹{displayAchieved.toLocaleString()}
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div style={{ fontWeight: 700, color: '#10233f', fontSize: 14 }}>₹{displayNet.toLocaleString()}</div>
+                                            </td>
+                                            <td>
+                                                {isSubmitted ? (
+                                                    <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
+                                                ) : (
                                                     <div style={{ display: 'flex', gap: 6 }}>
-                                                        <button onClick={() => setEditEmp(emp)} className="secondary small">{sal ? 'Edit' : 'Set'}</button>
-                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: net, workingDays: wd } })} className="primary small">Submit</button>
+                                                        <button onClick={() => setAssignLevelEmp(emp)} className="secondary small" style={{ borderColor: 'var(--primary)', color: 'var(--primary)' }}>
+                                                            Change Level
+                                                        </button>
+                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: payableBasic, workingDays: wd } })} className="primary small">Submit</button>
                                                     </div>
                                                 )}
                                             </td>
                                         </tr>
                                     );
                                 })}
+                                {employees.filter(e => e.is_active && e.designation?.toLowerCase().includes('counselor') && !e.designation?.toLowerCase().includes('head')).length === 0 && (
+                                    <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No counselors found</td></tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -1115,7 +1446,7 @@ export function SalaryCalculatorPage() {
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                                 <button onClick={() => setTeacherMonthOffset(prev => prev - 1)} className="secondary small">←</button>
                                 <span style={{ fontSize: 14, fontWeight: 500 }}>{currentMY.label}</span>
-                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small">→</button>
+                                <button onClick={() => setTeacherMonthOffset(prev => prev + 1)} className="secondary small" disabled={teacherMonthOffset >= 0}>→</button>
                                 {teacherMonthOffset !== 0 && (
                                     <button onClick={() => setTeacherMonthOffset(0)} className="secondary small" style={{ marginLeft: 8 }}>Current Month</button>
                                 )}
@@ -1259,6 +1590,14 @@ export function SalaryCalculatorPage() {
                     </div>
                 )
             }
+
+            {assignLevelEmp && (
+                <AssignCounselorLevelModal
+                    employee={assignLevelEmp}
+                    onClose={() => setAssignLevelEmp(null)}
+                    onDone={() => { setAssignLevelEmp(null); reload(); }}
+                />
+            )}
         </section >
     );
 }
@@ -1707,6 +2046,7 @@ export function HRPaymentRequestsPage() {
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [monthOffset, setMonthOffset] = useState(0);
+    const [selectedRequest, setSelectedRequest] = useState(null);
 
     const getMonthYearString = (offset) => {
         const d = new Date();
@@ -1756,6 +2096,7 @@ export function HRPaymentRequestsPage() {
                                     <th>Submitted At</th>
                                     <th>HR Note</th>
                                     <th>Finance Note</th>
+                                    <th></th> {/* For the Details button */}
                                 </tr>
                             </thead>
                             <tbody>
@@ -1793,18 +2134,87 @@ export function HRPaymentRequestsPage() {
                                             <td style={{ fontSize: 13, color: '#64748b' }}>{new Date(req.created_at).toLocaleDateString('en-IN')}</td>
                                             <td style={{ fontSize: 13, maxWidth: 150, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={req.hr_note}>{req.hr_note || '—'}</td>
                                             <td style={{ fontSize: 13, maxWidth: 150, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={req.finance_note}>{req.finance_note || '—'}</td>
+                                            <td>
+                                                <button onClick={() => setSelectedRequest(req)} className="secondary small">Details</button>
+                                            </td>
                                         </tr>
                                     );
                                 })}
                                 {requests.length === 0 && (
-                                    <tr><td colSpan={11} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>No individual payment requests yet. Submit from the Salary Calculator.</td></tr>
+                                    <tr><td colSpan={12} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>No individual payment requests yet. Submit from the Salary Calculator.</td></tr>
                                 )}
                             </tbody>
                         </table>
                     </div>
                 )}
             </div>
+            {selectedRequest && <RequestDetailsModal request={selectedRequest} onClose={() => setSelectedRequest(null)} />}
         </section>
+    );
+}
+
+function RequestDetailsModal({ request, onClose }) {
+    const details = request.breakdown?.details || {};
+    const isCounselor = request.target_type === 'employee' && request.employees?.designation?.toLowerCase().includes('counselor');
+
+    return (
+        <div style={overlayStyle}>
+            <div style={{ ...modalStyle, maxWidth: 500 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                    <h3 style={{ margin: 0 }}>Payment Details</h3>
+                    <button onClick={onClose} className="secondary small">✕</button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                        <div>
+                            <p style={labelStyle}>Staff Name</p>
+                            <p style={{ margin: 0, fontWeight: 600 }}>{request.employees?.full_name || request.teacher_profiles?.users?.full_name || '—'}</p>
+                        </div>
+                        <div>
+                            <p style={labelStyle}>Type / Period</p>
+                            <p style={{ margin: 0 }}>{request.target_type} · {request.month}/{request.year}</p>
+                        </div>
+                    </div>
+
+                    <div style={{ padding: 16, background: '#f8fafc', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <span style={{ fontSize: 14 }}>Base Salary {isCounselor ? `(${details.counselor_level})` : ''}</span>
+                            <span style={{ fontWeight: 600 }}>₹{Number(details.base_salary || 0).toLocaleString()}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: 13, marginBottom: 12 }}>
+                            <span>Attendance: {details.present_days}P + {details.half_days}H / {details.working_days} Days</span>
+                            <span>Pro-rated basic</span>
+                        </div>
+
+                        {isCounselor && (
+                            <div style={{ borderTop: '1px dotted #cbd5e1', paddingTop: 12, marginTop: 12 }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                                    <span style={{ fontSize: 14, fontWeight: 500 }}>Sales Incentive</span>
+                                    <span style={{ fontWeight: 600, color: 'var(--success)' }}>+₹{Number(details.incentive_amount || 0).toLocaleString()}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)', fontSize: 12 }}>
+                                    <span>Achieved: ₹{Number(details.achieved_sales || 0).toLocaleString()}</span>
+                                    <span>Based on Monthly Target</span>
+                                </div>
+                            </div>
+                        )}
+
+                        <div style={{ borderTop: '1px solid #cbd5e1', paddingTop: 12, marginTop: 12, display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ fontWeight: 700 }}>Total Calculated</span>
+                            <span style={{ fontWeight: 700 }}>₹{Number(request.breakdown?.base_calculated || 0).toLocaleString()}</span>
+                        </div>
+                    </div>
+
+                    {request.hr_note && (
+                        <div>
+                            <p style={labelStyle}>HR Note</p>
+                            <p style={{ margin: 0, fontSize: 13, color: '#475569' }}>{request.hr_note}</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
     );
 }
 

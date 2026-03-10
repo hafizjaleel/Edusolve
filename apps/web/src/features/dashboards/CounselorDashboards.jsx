@@ -12,11 +12,90 @@ function StatCard({ label, value, tone = 'neutral' }) {
 
 export function CounselorDashboardPage({ targetUserId }) {
   const [items, setItems] = useState([]);
+  const [cProfile, setCProfile] = useState(null);
+  const [allCProfiles, setAllCProfiles] = useState([]);
+  const [cLevels, setCLevels] = useState([]);
+  const [salesMap, setSalesMap] = useState({});
+  const [attendanceData, setAttendanceData] = useState(null);
+  const [workingDays, setWorkingDays] = useState(26);
+  const [counselorsList, setCounselorsList] = useState([]);
 
   useEffect(() => {
     const url = targetUserId ? `/leads?scope=mine&user_id=${targetUserId}` : '/leads?scope=mine';
     apiFetch(url).then((data) => setItems(data.items || [])).catch(() => setItems([]));
+
+    // Fetch hr context
+    const d = new Date();
+    const month = d.getMonth() + 1;
+    const year = d.getFullYear();
+
+    Promise.all([
+      apiFetch('/hr/councilor-profiles'),
+      apiFetch('/hr/councilor-levels'),
+      apiFetch(`/hr/councilors/sales-report?month=${month}&year=${year}`),
+      apiFetch(`/hr/attendance/report?month=${month}&year=${year}`),
+      apiFetch('/counselors')
+    ]).then(([cpRes, clRes, srRes, attRes, cRes]) => {
+      setCLevels(clRes.items || []);
+      const profiles = cpRes.items || [];
+      setAllCProfiles(profiles);
+      setCProfile(profiles.find(p => p.user_id === targetUserId) || null);
+      setSalesMap(srRes.report || {});
+      setWorkingDays(attRes.workingDays || 26);
+      setAttendanceData((attRes.items || []).find(a => a.user_id === targetUserId)?.report || null);
+      setCounselorsList(cRes.items || []);
+    }).catch(console.error);
   }, [targetUserId]);
+
+  const levelMetrics = useMemo(() => {
+    const defaultLvl = cLevels.length > 0 ? [...cLevels].sort((a,b)=>a.level_name.localeCompare(b.level_name))[0] : null;
+    const lvl = cProfile?.councilor_levels || defaultLvl;
+    
+    const targetAmt = lvl ? Number(lvl.target_amount) : 0;
+    const pct = lvl ? Number(lvl.incentive_percentage) : 0;
+    
+    const achieved = salesMap[targetUserId] || 0;
+    const extra = Math.max(0, achieved - targetAmt);
+    const expectedIncentive = Math.round(extra * pct / 100);
+    
+    const progress = targetAmt > 0 ? Math.min(100, Math.round((achieved / targetAmt) * 100)) : 0;
+    
+    let presentDays = 0;
+    if (attendanceData) {
+        presentDays = attendanceData.present + (attendanceData.half_day * 0.5);
+    }
+    const attendanceProgress = workingDays > 0 ? Math.min(100, Math.round((presentDays / workingDays) * 100)) : 0;
+    
+    return { lvl, expectedIncentive, achieved, targetAmt, progress, presentDays, attendanceProgress };
+  }, [cLevels, cProfile, salesMap, targetUserId, attendanceData, workingDays]);
+
+  const leaderboard = useMemo(() => {
+    if (!counselorsList.length || !cLevels.length) return [];
+    const defaultLvl = [...cLevels].sort((a,b)=>a.level_name.localeCompare(b.level_name))[0];
+    
+    const mapped = counselorsList.map(c => {
+       const profile = allCProfiles.find(p => p.user_id === c.id);
+       const lvl = profile?.councilor_levels || defaultLvl;
+       const targetAmt = lvl ? Number(lvl.target_amount) : 0;
+       const achieved = salesMap[c.id] || 0;
+       const progress = targetAmt > 0 ? Math.min(100, Math.round((achieved / targetAmt) * 100)) : 0;
+       
+       return {
+          id: c.id,
+          name: c.full_name?.split(' ')[0] || c.email?.split('@')[0] || 'Unknown',
+          achieved,
+          targetAmt,
+          progress,
+          levelName: lvl?.level_name || 'N/A'
+       };
+    });
+    
+    // Sort by descending progress %, then by absolute achieved amount
+    return mapped.sort((a,b) => {
+       if (b.progress !== a.progress) return b.progress - a.progress;
+       return b.achieved - a.achieved;
+    });
+  }, [counselorsList, allCProfiles, cLevels, salesMap]);
 
   const metrics = useMemo(() => {
     const total = items.length;
@@ -49,6 +128,43 @@ export function CounselorDashboardPage({ targetUserId }) {
 
   return (
     <section className="panel">
+      {/* Target & Performance Banner */}
+      <article className="card" style={{ padding: '24px', marginBottom: '24px', background: 'linear-gradient(to right, #4f46e5, #4338ca)', color: 'white', border: 'none' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
+          
+          <div style={{ flex: '1 1 300px' }}>
+            <h3 style={{ margin: '0 0 8px', fontSize: '18px', color: 'rgba(255,255,255,0.9)' }}>
+              Target & Performance - {new Date().toLocaleString('default', { month: 'long' })} {new Date().getFullYear()}
+              {levelMetrics.lvl && <span style={{ marginLeft: '12px', fontSize: '13px', background: 'rgba(255,255,255,0.2)', padding: '4px 10px', borderRadius: '12px' }}>{levelMetrics.lvl.level_name}</span>}
+            </h3>
+            
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '12px', marginTop: '16px' }}>
+               <h2 style={{ margin: 0, fontSize: '32px' }}>₹{levelMetrics.achieved.toLocaleString()}</h2>
+               <p style={{ margin: '0 0 6px 0', fontSize: '14px', color: 'rgba(255,255,255,0.7)' }}>/ ₹{levelMetrics.targetAmt.toLocaleString()} Target</p>
+            </div>
+            
+            <div style={{ marginTop: '16px', background: 'rgba(0,0,0,0.2)', height: '8px', borderRadius: '4px', overflow: 'hidden' }}>
+               <div style={{ height: '100%', width: `${levelMetrics.progress}%`, background: '#10b981', transition: 'width 0.5s ease-in-out' }}></div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+             <div style={{ background: 'rgba(255,255,255,0.1)', padding: '16px 24px', borderRadius: '12px', textAlign: 'center', minWidth: '150px' }}>
+                <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>Incentive Earned</p>
+                <p style={{ margin: 0, fontSize: '24px', fontWeight: 'bold', color: '#10b981' }}>+₹{levelMetrics.expectedIncentive.toLocaleString()}</p>
+             </div>
+             <div style={{ background: 'rgba(255,255,255,0.1)', padding: '16px 24px', borderRadius: '12px', textAlign: 'center', minWidth: '150px' }}>
+                <p style={{ margin: '0 0 4px', fontSize: '13px', color: 'rgba(255,255,255,0.8)' }}>Attendance Progress</p>
+                <p style={{ margin: '0 0 8px 0', fontSize: '20px', fontWeight: 'bold' }}>{levelMetrics.presentDays} / {workingDays} Days</p>
+                <div style={{ background: 'rgba(0,0,0,0.2)', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
+                   <div style={{ height: '100%', width: `${levelMetrics.attendanceProgress}%`, background: '#60a5fa', transition: 'width 0.5s ease-in-out' }}></div>
+                </div>
+             </div>
+          </div>
+          
+        </div>
+      </article>
+
       <div className="grid-four">
         <StatCard label="Lead Pipeline" value={metrics.total} />
         <StatCard label="Active Pipeline" value={metrics.active} />
@@ -110,6 +226,39 @@ export function CounselorDashboardPage({ targetUserId }) {
             </div>
           )) : <p className="text-muted" style={{ fontSize: '13px' }}>No leads yet</p>}
         </article>
+
+        {/* Target Leaderboard */}
+        <article className="card" style={{ padding: '20px' }}>
+          <h3 style={{ margin: '0 0 12px', fontSize: '15px' }}>Target Leaderboard</h3>
+          {leaderboard.length ? leaderboard.slice(0, 5).map((l, index) => (
+            <div key={l.id} style={{ padding: '8px 0', borderBottom: '1px solid #f3f4f6' }}>
+               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                     <span style={{ 
+                        display: 'flex', 
+                        alignItems: 'center', 
+                        justifyContent: 'center', 
+                        width: '20px', 
+                        height: '20px', 
+                        borderRadius: '50%', 
+                        background: index === 0 ? '#fef08a' : index === 1 ? '#e2e8f0' : index === 2 ? '#fed7aa' : '#f3f4f6', 
+                        color: index === 0 ? '#ca8a04' : index === 1 ? '#64748b' : index === 2 ? '#c2410c' : '#9ca3af',
+                        fontSize: '11px', 
+                        fontWeight: 'bold' 
+                     }}>{index + 1}</span>
+                     <span style={{ fontSize: '14px', fontWeight: l.id === targetUserId ? '600' : '500', color: l.id === targetUserId ? '#4f46e5' : 'inherit' }}>
+                        {l.name} {l.id === targetUserId && '(You)'}
+                     </span>
+                  </div>
+                  <span style={{ fontSize: '13px', fontWeight: 'bold' }}>{l.progress}%</span>
+               </div>
+               <div style={{ background: '#f3f4f6', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
+                  <div style={{ height: '100%', width: `${l.progress}%`, background: l.progress >= 100 ? '#10b981' : '#6366f1' }}></div>
+               </div>
+            </div>
+          )) : <p className="text-muted" style={{ fontSize: '13px' }}>Loading board...</p>}
+        </article>
+
       </div>
     </section>
   );

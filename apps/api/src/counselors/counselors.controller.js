@@ -11,8 +11,9 @@ export async function handleCounselors(req, res, url) {
     const role = req.headers['x-user-role'];
     const isRestrictedManager = role === 'super_admin' || role === 'hr';
     const isCounselorHead = role === 'counselor_head';
+    const isBasicCounselorGetArgs = role === 'counselor' && req.method === 'GET' && url.pathname === '/counselors';
 
-    if (!isRestrictedManager && !isCounselorHead) {
+    if (!isRestrictedManager && !isCounselorHead && !isBasicCounselorGetArgs) {
         sendJson(res, 403, { error: 'Unauthorized' });
         return true;
     }

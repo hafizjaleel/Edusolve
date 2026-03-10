@@ -43,7 +43,7 @@ import { TeacherProfilePage } from './features/teachers/TeacherPages.jsx';
 import { TCDashboardPage, TeacherLeadsPage, TCAllLeadsPage, TCTeacherPoolPage, TeacherPerformancePage } from './features/teachers/TeacherCoordinatorPages.jsx';
 import { TeacherSalesReportsPage } from './features/teachers/TeacherSalesReportsPage.jsx';
 import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherStudentsPage, TeacherReportsPage, TeacherInvoicesPage } from './features/teachers/TeacherDashboardPages.jsx';
-import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPaymentRequestsPage } from './features/hr/HRPages.jsx';
+import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPaymentRequestsPage, CouncilorLevelsPage } from './features/hr/HRPages.jsx';
 import { getSession, logout } from './lib/auth.js';
 import { defaultPageForRole, getPageByPath, pagesForRole } from './lib/routes.js';
 import { ROLE_OPTIONS } from './lib/roles.js';
@@ -153,8 +153,8 @@ export default function App() {
     }
 
     /* Dashboards */
-    if (page.path === '/dashboard/counselor') return <CounselorDashboardPage targetUserId={dashboardUserId} />;
-    if (page.path === '/dashboard/counselor-head') return <CounselorHeadDashboardPage targetUserId={dashboardUserId} />;
+    if (page.path === '/dashboard/counselor') return <CounselorDashboardPage targetUserId={dashboardUserId || user?.id} />;
+    if (page.path === '/dashboard/counselor-head') return <CounselorHeadDashboardPage targetUserId={dashboardUserId || user?.id} />;
     if (page.path === '/dashboard/academic-coordinator') return <AcademicCoordinatorDashboardPage targetUserId={dashboardUserId} />;
     if (page.path === '/dashboard/tc') return <TCDashboardPage targetUserId={dashboardUserId} />;
 
@@ -241,6 +241,7 @@ export default function App() {
     if (page.path === '/hr/attendance') return <AttendancePage />;
     if (page.path === '/hr/employees') return <EmployeesPage />;
     if (page.path === '/hr/salary') return <SalaryCalculatorPage />;
+    if (page.path === '/hr/councilor-levels') return <CouncilorLevelsPage />;
     if (page.path === '/hr/payment-requests') return <HRPaymentRequestsPage />;
 
     /* Super Admin & System */

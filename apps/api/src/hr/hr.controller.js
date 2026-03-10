@@ -27,7 +27,17 @@ export async function handleHR(req, res, url) {
   }
 
   const actor = actorFromHeaders(req);
-  if (!isHR(actor)) {
+
+  // Allow counselors to access specific endpoints for their dashboard
+  const isCounselorPath = [
+    '/hr/councilor-profiles',
+    '/hr/councilor-levels',
+    '/hr/councilors/sales-report',
+    '/hr/attendance/report'
+  ].some(p => url.pathname.startsWith(p));
+  const isCounselorRole = actor.role === 'counselor' || actor.role === 'counselor_head';
+
+  if (!isHR(actor) && !(isCounselorPath && isCounselorRole)) {
     sendJson(res, 403, { ok: false, error: 'HR role required' });
     return true;
   }
@@ -257,7 +267,7 @@ export async function handleHR(req, res, url) {
       // Get all active employees
       const { data: employees } = await adminClient
         .from('employees')
-        .select('id, full_name, designation, department, employee_type')
+        .select('id, user_id, full_name, designation, department, employee_type')
         .eq('is_active', true)
         .order('full_name');
 
@@ -279,13 +289,19 @@ export async function handleHR(req, res, url) {
         }
       });
 
+      // Calculate working days (excluding Sundays)
+      let workingDays = 0;
+      for (let d = new Date(startDate); d <= new Date(endDate); d.setDate(d.getDate() + 1)) {
+        if (d.getDay() !== 0) workingDays++;
+      }
+
       // Merge
       const report = (employees || []).map(emp => ({
         ...emp,
         report: attendanceMap[emp.id] || { present: 0, absent: 0, half_day: 0 }
       }));
 
-      sendJson(res, 200, { ok: true, year, month, items: report });
+      sendJson(res, 200, { ok: true, year, month, workingDays, items: report });
       return true;
     }
 
@@ -473,6 +489,70 @@ export async function handleHR(req, res, url) {
       return true;
     }
 
+    // ═══════ COUNCILOR LEVELS ═══════
+    if (req.method === 'GET' && url.pathname === '/hr/councilor-levels') {
+      const { data, error } = await adminClient.from('councilor_levels').select('*').order('level_name');
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/hr/councilor-levels') {
+      const payload = await readJson(req);
+      const { data, error } = await adminClient.from('councilor_levels').insert({
+        level_name: payload.level_name,
+        basic_salary: payload.basic_salary || 0,
+        target_amount: payload.target_amount || 0,
+        incentive_percentage: payload.incentive_percentage || 0
+      }).select('*').single();
+      if (error) throw new Error(error.message);
+      sendJson(res, 201, { ok: true, item: data });
+      return true;
+    }
+
+    if (req.method === 'PATCH' && parts.length === 3 && parts[1] === 'councilor-levels') {
+      const id = parts[2];
+      const payload = await readJson(req);
+      const { data, error } = await adminClient.from('councilor_levels').update({
+        level_name: payload.level_name,
+        basic_salary: payload.basic_salary,
+        target_amount: payload.target_amount,
+        incentive_percentage: payload.incentive_percentage,
+        updated_at: nowIso()
+      }).eq('id', id).select('*').single();
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
+
+    if (req.method === 'DELETE' && parts.length === 3 && parts[1] === 'councilor-levels') {
+      const id = parts[2];
+      const { error } = await adminClient.from('councilor_levels').delete().eq('id', id);
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true });
+      return true;
+    }
+
+    // ═══════ COUNCILOR PROFILES (link employee to level) ═══════
+    if (req.method === 'GET' && url.pathname === '/hr/councilor-profiles') {
+      const { data, error } = await adminClient.from('councilor_profiles').select('*, councilor_levels(*), users(full_name, email)');
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
+    if (req.method === 'POST' && url.pathname === '/hr/councilor-profiles') {
+      const payload = await readJson(req);
+      const { data, error } = await adminClient.from('councilor_profiles').upsert({
+        user_id: payload.user_id,
+        level_id: payload.level_id,
+        updated_at: nowIso()
+      }).select('*').single();
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
+
     // ═══════ PER-PERSON SALARY SUBMISSION ═══════
     // -- 1. Teacher Salary Submission --
     if (req.method === 'POST' && url.pathname === '/hr/payment-requests/teacher') {
@@ -550,6 +630,49 @@ export async function handleHR(req, res, url) {
       return true;
     }
 
+    // -- 1.5 Counselor Sales Report --
+    if (req.method === 'GET' && url.pathname === '/hr/councilors/sales-report') {
+      const year = parseInt(url.searchParams.get('year') || new Date().getFullYear(), 10);
+      const month = parseInt(url.searchParams.get('month') || (new Date().getMonth() + 1), 10);
+      
+      // Use broader UTC boundaries to safely catch local timezone offsets
+      // e.g. India time is UTC+5:30. A payment verified at 01:00 AM on Mar 1 IST
+      // is 19:30 on Feb 28th in UTC.
+      
+      const start = new Date(year, month - 1, 1);
+      // Give a 1 day buffer backwards for timezone 
+      start.setDate(start.getDate() - 1);
+      const startIso = start.toISOString().split('T')[0] + 'T00:00:00Z';
+
+      const end = new Date(year, month, 0);
+      // Give a 1 day buffer forwards for timezone
+      end.setDate(end.getDate() + 1);
+      const endIso = end.toISOString().split('T')[0] + 'T23:59:59Z';
+
+      const { data: verifiedPayments } = await adminClient
+        .from('payment_requests')
+        .select('total_amount, amount, leads!inner(counselor_id), verified_at')
+        .eq('status', 'verified')
+        .gte('verified_at', startIso)
+        .lte('verified_at', endIso);
+
+      const salesMap = {};
+      (verifiedPayments || []).forEach(p => {
+        // Double check it belongs in the requested month exactly using local month matching
+        const pDate = new Date(p.verified_at);
+        if (pDate.getMonth() + 1 === month && pDate.getFullYear() === year) {
+          const cId = p.leads?.counselor_id;
+          if (cId) {
+            salesMap[cId] = (salesMap[cId] || 0) + Number(p.total_amount || p.amount || 0);
+          }
+        }
+      });
+
+
+      sendJson(res, 200, { ok: true, report: salesMap });
+      return true;
+    }
+
     // -- 2. Employee Salary Submission --
     if (req.method === 'POST' && url.pathname === '/hr/payment-requests/employee') {
       const payload = await readJson(req);
@@ -582,6 +705,32 @@ export async function handleHR(req, res, url) {
       const sal = salRes.data;
       const attList = attRes.data || [];
 
+      // Fetch employee info for counselor check
+      const { data: empInfo } = await adminClient.from('employees').select('user_id').eq('id', payload.employeeId).single();
+
+      // Check if employee is a counselor with a level — default to Level 1
+      let counselorLevel = null;
+      if (empInfo?.user_id) {
+        const { data: cProf } = await adminClient
+          .from('councilor_profiles')
+          .select('*, councilor_levels(*)')
+          .eq('user_id', empInfo.user_id)
+          .maybeSingle();
+        if (cProf?.councilor_levels) {
+          counselorLevel = cProf.councilor_levels;
+        } else {
+          // Default to Level 1 (first level sorted by name)
+          const { data: defaultLevels } = await adminClient
+            .from('councilor_levels')
+            .select('*')
+            .order('level_name', { ascending: true })
+            .limit(1);
+          if (defaultLevels && defaultLevels.length > 0) {
+            counselorLevel = defaultLevels[0];
+          }
+        }
+      }
+
       let workingDays = 0;
       if (payload.workingDays && Number(payload.workingDays) > 0) {
         workingDays = Number(payload.workingDays);
@@ -597,7 +746,12 @@ export async function handleHR(req, res, url) {
         else if (a.status === 'half_day') half_day++;
       });
 
-      const baseSalary = sal ? Number(sal.base_salary) : 0;
+      let baseSalary = sal ? Number(sal.base_salary) : 0;
+      // Override basic salary from counselor level if applicable
+      if (counselorLevel) {
+        baseSalary = Number(counselorLevel.basic_salary);
+      }
+
       const totalAllowances = sal ? Number(sal.hra) + Number(sal.transport_allowance) + Number(sal.other_allowance) : 0;
       const totalDeductions = sal ? Number(sal.pf_deduction) + Number(sal.tax_deduction) + Number(sal.other_deduction) : 0;
       const grossSalary = baseSalary + totalAllowances;
@@ -611,6 +765,40 @@ export async function handleHR(req, res, url) {
       } else {
         proRatedGross = workingDays > 0 ? (grossSalary * effectiveDays / workingDays) : 0;
         calcNet = Math.round(proRatedGross - totalDeductions);
+      }
+
+      // Add Counselor Incentive
+      let achievedSales = 0;
+      let incentiveAmount = 0;
+      if (counselorLevel && empInfo?.user_id) {
+        
+        const start = new Date(payload.year, payload.month - 1, 1);
+        start.setDate(start.getDate() - 1);
+        const startIso = start.toISOString().split('T')[0] + 'T00:00:00Z';
+
+        const end = new Date(payload.year, payload.month, 0);
+        end.setDate(end.getDate() + 1);
+        const endIso = end.toISOString().split('T')[0] + 'T23:59:59Z';
+
+        const { data: verifiedPayments } = await adminClient
+          .from('payment_requests')
+          .select('total_amount, amount, leads!inner(counselor_id), verified_at')
+          .eq('status', 'verified')
+          .eq('leads.counselor_id', empInfo.user_id)
+          .gte('verified_at', startIso)
+          .lte('verified_at', endIso);
+
+        achievedSales = (verifiedPayments || []).reduce((sum, p) => {
+           const pDate = new Date(p.verified_at);
+           if (pDate.getMonth() + 1 === payload.month && pDate.getFullYear() === payload.year) {
+              return sum + Number(p.total_amount || p.amount || 0);
+           }
+           return sum;
+        }, 0);
+        
+        const extraSales = Math.max(0, achievedSales - Number(counselorLevel.target_amount));
+        incentiveAmount = Math.round(extraSales * Number(counselorLevel.incentive_percentage) / 100);
+        calcNet += incentiveAmount;
       }
 
       const adjustment = Number(payload.adjustment) || 0;
@@ -640,7 +828,10 @@ export async function handleHR(req, res, url) {
             half_days: half_day,
             base_salary: baseSalary,
             total_allowances: totalAllowances,
-            total_deductions: totalDeductions
+            total_deductions: totalDeductions,
+            counselor_level: counselorLevel ? counselorLevel.level_name : null,
+            achieved_sales: achievedSales,
+            incentive_amount: incentiveAmount
           }
         }
       }).select('*').single();
