@@ -37,17 +37,19 @@ export function TeacherDashboardPage() {
     const [todaySessions, setTodaySessions] = useState([]);
     const [allSessions, setAllSessions] = useState([]);
     const [hours, setHours] = useState({ items: [], total_hours: 0 });
+    const [salary, setSalary] = useState({ total_earned: 0, paid: 0, payable: 0, total_hours: 0, month: 0, year: 0 });
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         (async () => {
             try {
-                const [p, t, h, hist, demoRes] = await Promise.all([
+                const [p, t, h, hist, demoRes, salRes] = await Promise.all([
                     apiFetch('/teachers/me').catch(() => ({ teacher: null })),
                     apiFetch('/students/sessions/today').catch(() => ({ items: [] })),
                     apiFetch('/teachers/my-hours').catch(() => ({ items: [], total_hours: 0 })),
                     apiFetch('/students/sessions/history').catch(() => ({ items: [] })),
-                    apiFetch('/teachers/my-demos').catch(() => ({ items: [] }))
+                    apiFetch('/teachers/my-demos').catch(() => ({ items: [] })),
+                    apiFetch('/teachers/my-salary').catch(() => ({ salary: { total_earned: 0, paid: 0, payable: 0, total_hours: 0, month: 0, year: 0 } }))
                 ]);
                 setProfile(p.teacher);
                 // Merge today's demos into todaySessions
@@ -65,6 +67,7 @@ export function TeacherDashboardPage() {
                 setTodaySessions([...(t.items || []).map(s => ({ ...s, _type: 'session' })), ...todayDemos]);
                 setHours(h);
                 setAllSessions(hist.items || []);
+                if (salRes.salary) setSalary(salRes.salary);
             } catch (e) { }
             setLoading(false);
         })();
@@ -88,6 +91,33 @@ export function TeacherDashboardPage() {
                 <DashCard label="Sessions Completed" value={metrics.completed} tone="success" />
                 <DashCard label="My Students" value={metrics.uniqueStudents} />
             </div>
+
+            {/* Salary Summary */}
+            <article className="card" style={{ padding: '20px', marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px' }}>💰 Salary Summary</h3>
+                    {salary.month ? (
+                        <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 500 }}>
+                            {new Date(salary.year, salary.month - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
+                        </span>
+                    ) : null}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#1d4ed8' }}>₹{salary.total_earned.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#3b82f6', fontWeight: 600 }}>Total Earned</p>
+                        <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#6b7280' }}>{salary.total_hours}h this month</p>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#15803d' }}>₹{salary.paid.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#22c55e', fontWeight: 600 }}>Paid</p>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #fffbeb, #fef3c7)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#a16207' }}>₹{salary.payable.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#d97706', fontWeight: 600 }}>Payable</p>
+                    </div>
+                </div>
+            </article>
 
             <div className="grid-three" style={{ marginTop: '16px' }}>
                 {/* Today's Schedule */}

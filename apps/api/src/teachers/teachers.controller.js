@@ -347,6 +347,63 @@ export async function handleTeachers(req, res, url) {
       return true;
     }
 
+    // ── GET /teachers/my-salary — teacher's current month salary summary ──
+    if (req.method === 'GET' && url.pathname === '/teachers/my-salary') {
+      if (actor.role !== 'teacher') {
+        sendJson(res, 403, { ok: false, error: 'teacher role required' });
+        return true;
+      }
+
+      // Get teacher profile
+      const { data: profile, error: pErr } = await adminClient
+        .from('teacher_profiles')
+        .select('id, user_id')
+        .eq('user_id', actor.userId)
+        .maybeSingle();
+      if (pErr) throw new Error(pErr.message);
+      if (!profile) {
+        sendJson(res, 404, { ok: false, error: 'profile not found' });
+        return true;
+      }
+
+      const now = new Date();
+      const currentMonth = now.getMonth() + 1;
+      const currentYear = now.getFullYear();
+
+      // Dynamically calculate total earned from approved sessions
+      const { calculateAllTeacherSalaries } = await import('../hr/salary.service.js');
+      const report = await calculateAllTeacherSalaries(currentMonth, currentYear);
+      const teacherData = report.find(t => t.user_id === actor.userId);
+      const totalEarned = teacherData ? teacherData.total_salary : 0;
+      const totalHours = teacherData ? teacherData.total_hours : 0;
+
+      // Fetch all payment requests for this teacher (all-time)
+      const { data: paymentRequests } = await adminClient
+        .from('hr_payment_requests')
+        .select('total_amount, status')
+        .eq('teacher_id', profile.id);
+
+      let paid = 0;
+      let payable = 0;
+      (paymentRequests || []).forEach(pr => {
+        if (pr.status === 'paid') paid += Number(pr.total_amount || 0);
+        if (pr.status === 'pending' || pr.status === 'approved') payable += Number(pr.total_amount || 0);
+      });
+
+      sendJson(res, 200, {
+        ok: true,
+        salary: {
+          total_earned: Math.round(totalEarned * 100) / 100,
+          total_hours: Math.round(totalHours * 100) / 100,
+          paid: Math.round(paid * 100) / 100,
+          payable: Math.round(payable * 100) / 100,
+          month: currentMonth,
+          year: currentYear
+        }
+      });
+      return true;
+    }
+
     // ── GET /teachers/my-invoices — view paid HR payment requests as invoices ──
     if (req.method === 'GET' && url.pathname === '/teachers/my-invoices') {
       if (actor.role !== 'teacher') return sendJson(res, 403, { ok: false, error: 'teacher role required' });
