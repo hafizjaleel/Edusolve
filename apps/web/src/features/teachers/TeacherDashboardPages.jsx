@@ -37,17 +37,19 @@ export function TeacherDashboardPage() {
     const [todaySessions, setTodaySessions] = useState([]);
     const [allSessions, setAllSessions] = useState([]);
     const [hours, setHours] = useState({ items: [], total_hours: 0 });
+    const [salary, setSalary] = useState({ total_earned: 0, paid: 0, payable: 0, total_hours: 0, month: 0, year: 0 });
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
         (async () => {
             try {
-                const [p, t, h, hist, demoRes] = await Promise.all([
+                const [p, t, h, hist, demoRes, salRes] = await Promise.all([
                     apiFetch('/teachers/me').catch(() => ({ teacher: null })),
                     apiFetch('/students/sessions/today').catch(() => ({ items: [] })),
                     apiFetch('/teachers/my-hours').catch(() => ({ items: [], total_hours: 0 })),
                     apiFetch('/students/sessions/history').catch(() => ({ items: [] })),
-                    apiFetch('/teachers/my-demos').catch(() => ({ items: [] }))
+                    apiFetch('/teachers/my-demos').catch(() => ({ items: [] })),
+                    apiFetch('/teachers/my-salary').catch(() => ({ salary: { total_earned: 0, paid: 0, payable: 0, total_hours: 0, month: 0, year: 0 } }))
                 ]);
                 setProfile(p.teacher);
                 // Merge today's demos into todaySessions
@@ -65,6 +67,7 @@ export function TeacherDashboardPage() {
                 setTodaySessions([...(t.items || []).map(s => ({ ...s, _type: 'session' })), ...todayDemos]);
                 setHours(h);
                 setAllSessions(hist.items || []);
+                if (salRes.salary) setSalary(salRes.salary);
             } catch (e) { }
             setLoading(false);
         })();
@@ -109,6 +112,33 @@ export function TeacherDashboardPage() {
                 <DashCard label="Today" value={todaySessions.length} />
                 <DashCard label="My Students" value={metrics.uniqueStudents} />
             </div>
+
+            {/* Salary Summary */}
+            <article className="card" style={{ padding: '20px', marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                    <h3 style={{ margin: 0, fontSize: '15px' }}>💰 Salary Summary</h3>
+                    {salary.month ? (
+                        <span style={{ fontSize: '11px', color: '#6b7280', fontWeight: 500 }}>
+                            {new Date(salary.year, salary.month - 1).toLocaleString('en-IN', { month: 'long', year: 'numeric' })}
+                        </span>
+                    ) : null}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px' }}>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #eff6ff, #dbeafe)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#1d4ed8' }}>₹{salary.total_earned.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#3b82f6', fontWeight: 600 }}>Total Earned</p>
+                        <p style={{ margin: '2px 0 0', fontSize: '10px', color: '#6b7280' }}>{salary.total_hours}h this month</p>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #f0fdf4, #dcfce7)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#15803d' }}>₹{salary.paid.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#22c55e', fontWeight: 600 }}>Paid</p>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: '16px', background: 'linear-gradient(135deg, #fffbeb, #fef3c7)', borderRadius: '12px' }}>
+                        <p style={{ margin: 0, fontSize: '24px', fontWeight: 700, color: '#a16207' }}>₹{salary.payable.toLocaleString('en-IN')}</p>
+                        <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#d97706', fontWeight: 600 }}>Payable</p>
+                    </div>
+                </div>
+            </article>
 
             <div className="grid-three" style={{ marginTop: '16px' }}>
                 {/* Today's Schedule */}
@@ -1472,6 +1502,109 @@ function AddAvailabilityModal({ isOpen, onClose, onAdd }) {
                 </div>
             </div>
         </div>
+    );
+}
+
+/* ═══════ Teacher Students ═══════ */
+export function TeacherStudentsPage() {
+    const [assignments, setAssignments] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [savingId, setSavingId] = useState(null);
+    const [msg, setMsg] = useState('');
+
+    useEffect(() => {
+        apiFetch('/teachers/my-students').then(res => {
+            setAssignments(res.items || []);
+            setLoading(false);
+        }).catch(e => {
+            console.error(e);
+            setMsg('Error loading students.');
+            setLoading(false);
+        });
+    }, []);
+
+    const handleLinkChange = (id, newLink) => {
+        setAssignments(prev => prev.map(a => a.student_id === id ? { ...a, meeting_link: newLink } : a));
+    };
+
+    const saveMeetingLink = async (id, meeting_link) => {
+        setSavingId(id);
+        setMsg('');
+        try {
+            const res = await apiFetch(`/teachers/my-students/${id}/meeting-link`, {
+                method: 'PATCH',
+                body: JSON.stringify({ meeting_link })
+            });
+            if (!res.ok) throw new Error(res.error || 'Failed to update link');
+            setMsg('Link saved successfully.');
+            setTimeout(() => setMsg(''), 3000);
+        } catch (e) {
+            setMsg(`Error: ${e.message}`);
+        }
+        setSavingId(null);
+    };
+
+    if (loading) return <section className="panel"><p>Loading students...</p></section>;
+
+    return (
+        <section className="panel">
+            <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>My Students</h2>
+            {msg && (
+                <div style={{
+                    padding: '10px 16px', borderRadius: '8px', marginBottom: '16px', fontSize: '14px', fontWeight: 500,
+                    background: msg.startsWith('Error') ? '#fee2e2' : '#dcfce7',
+                    color: msg.startsWith('Error') ? '#dc2626' : '#15803d'
+                }}>
+                    {msg}
+                </div>
+            )}
+            
+            <article className="card" style={{ padding: '20px' }}>
+                <div className="table-wrap mobile-friendly-table">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Student Name</th>
+                                <th>Subject</th>
+                                <th>Meeting Link (Specific)</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {assignments.map(a => (
+                                <tr key={a.student_id}>
+                                    <td data-label="Student Name">{a.student_name || 'Unknown'}</td>
+                                    <td data-label="Subjects">{(a.subjects || []).join(', ') || '—'}</td>
+                                    <td data-label="Meeting Link">
+                                        <input 
+                                            type="url" 
+                                            value={a.meeting_link || ''}
+                                            onChange={e => handleLinkChange(a.student_id, e.target.value)}
+                                            placeholder="https://meet.google.com/..."
+                                            style={{
+                                                width: '100%', padding: '6px 10px', border: '1px solid #d1d5db',
+                                                borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                                            }}
+                                        />
+                                    </td>
+                                    <td data-label="Action">
+                                        <button 
+                                            className="small primary" 
+                                            onClick={() => saveMeetingLink(a.student_id, a.meeting_link)}
+                                            disabled={savingId === a.student_id}
+                                            style={{ padding: '6px 12px', fontSize: '13px' }}
+                                        >
+                                            {savingId === a.student_id ? 'Saving...' : 'Save Link'}
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))}
+                            {!assignments.length ? <tr><td colSpan="4" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No students assigned yet.</td></tr> : null}
+                        </tbody>
+                    </table>
+                </div>
+            </article>
+        </section>
     );
 }
 

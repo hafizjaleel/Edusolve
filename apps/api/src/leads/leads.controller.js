@@ -23,7 +23,7 @@ export async function handleLeads(req, res, url) {
       const page = parseInt(url.searchParams.get('page')) || 1;
       const limit = parseInt(url.searchParams.get('limit')) || 20;
       const status = url.searchParams.get('status') || null;
-      const counselor_id = url.searchParams.get('counselor_id') || null;
+      const counselor_id = url.searchParams.get('user_id') || url.searchParams.get('counselor_id') || null;
       const lead_type = url.searchParams.get('lead_type') || null;
       const result = await leadsService.list({ scope, actor, page, limit, status, counselor_id, lead_type });
       if (result?.error) {

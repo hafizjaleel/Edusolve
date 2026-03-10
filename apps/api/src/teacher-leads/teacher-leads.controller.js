@@ -51,10 +51,19 @@ export async function handleTeacherLeads(req, res, url) {
     try {
         // GET /teacher-leads — list all
         if (req.method === 'GET' && parts.length === 1) {
-            const { data, error } = await adminClient
+            let query = adminClient
                 .from('teacher_leads')
                 .select('*')
                 .order('created_at', { ascending: false });
+
+            const requestedUserId = url.searchParams.get('user_id');
+            if (actor.role === 'super_admin' && requestedUserId) {
+                query = query.eq('coordinator_id', requestedUserId);
+            } else if (actor.role !== 'super_admin') {
+                query = query.eq('coordinator_id', actor.userId);
+            }
+
+            const { data, error } = await query;
             if (error) throw new Error(error.message);
             sendJson(res, 200, { ok: true, items: data || [] });
             return true;
@@ -123,9 +132,18 @@ export async function handleTeacherLeads(req, res, url) {
             const id = parts[1];
             if (id === 'stats') {
                 // GET /teacher-leads/stats
-                const { data, error } = await adminClient
+                let query = adminClient
                     .from('teacher_leads')
                     .select('status');
+                
+                const requestedUserId = url.searchParams.get('user_id');
+                if (actor.role === 'super_admin' && requestedUserId) {
+                    query = query.eq('coordinator_id', requestedUserId);
+                } else if (actor.role !== 'super_admin') {
+                    query = query.eq('coordinator_id', actor.userId);
+                }
+
+                const { data, error } = await query;
                 if (error) throw new Error(error.message);
                 const stats = {};
                 (data || []).forEach(r => { stats[r.status] = (stats[r.status] || 0) + 1; });

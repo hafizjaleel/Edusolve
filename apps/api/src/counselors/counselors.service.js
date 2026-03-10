@@ -105,7 +105,7 @@ export class CounselorsService {
     }
 
     // Get aggregated stats for all counselors
-    async getStats({ from, to } = {}) {
+    async getStats({ from, to, userId, actorRole, actorId } = {}) {
         if (!this.admin) return { error: 'Admin client not available' };
 
         // Get all leads to aggregate
@@ -116,6 +116,11 @@ export class CounselorsService {
 
         if (from) query = query.gte('created_at', from);
         if (to) query = query.lte('created_at', to);
+        if (userId && actorRole === 'super_admin') {
+            query = query.eq('counselor_id', userId);
+        } else if (actorRole !== 'super_admin' && actorRole !== 'counselor_head' && actorRole !== 'hr') {
+             query = query.eq('counselor_id', actorId);
+        }
 
         const { data: leads, error } = await query;
 

@@ -9,7 +9,7 @@ const TICKET_ROUTING = {
     teacher: ['teacher_coordinator', 'hr', 'super_admin'],
     counselor_head: ['hr', 'super_admin'],
     teacher_coordinator: ['hr', 'super_admin'],
-    academic_coordinator: ['hr', 'super_admin'],
+    academic_coordinator: ['teacher_coordinator', 'hr', 'super_admin'],
     hr: ['super_admin'],
     finance: ['hr', 'super_admin'],
     super_admin: []
@@ -266,7 +266,7 @@ export class TicketsService {
     async create(userId, role, payload) {
         if (!this.admin) return { error: 'Admin client not available' };
 
-        const { title, description, target_role, priority, category } = payload;
+        const { title, description, target_role, target_user_id, priority, category } = payload;
 
         if (!this.canSendTo(role, target_role)) {
             return { error: `You cannot send tickets to ${target_role}` };
@@ -288,13 +288,23 @@ export class TicketsService {
 
         if (error) return { error: error.message };
 
-        // Create notifications for all users with the target role
-        await this._notifyRole(target_role, {
-            title: 'New Ticket Submitted',
-            message: `${payload.creatorName || 'A staff member'} submitted a ${priority || 'medium'} priority ticket: "${title}"`,
-            type: 'ticket',
-            reference_id: data.id
-        });
+        // If a specific target_user_id is provided, notify ONLY them. Otherwise, notify entire role.
+        if (target_user_id) {
+            await this._notifyUser(target_user_id, {
+                title: 'New Ticket Submitted',
+                message: `${payload.creatorName || 'A staff member'} submitted a ${priority || 'medium'} priority ticket: "${title}"`,
+                type: 'ticket',
+                reference_id: data.id
+            });
+        } else {
+            // Create notifications for all users with the target role
+            await this._notifyRole(target_role, {
+                title: 'New Ticket Submitted',
+                message: `${payload.creatorName || 'A staff member'} submitted a ${priority || 'medium'} priority ticket: "${title}"`,
+                type: 'ticket',
+                reference_id: data.id
+            });
+        }
 
         return data;
     }

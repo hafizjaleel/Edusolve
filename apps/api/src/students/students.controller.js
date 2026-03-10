@@ -44,7 +44,7 @@ export async function handleStudents(req, res, url) {
         return true;
       }
 
-      const acIdFilter = url.searchParams.get('ac_id') || '';
+      const acIdFilter = url.searchParams.get('ac_id') || url.searchParams.get('user_id') || '';
 
       let query = adminClient
         .from('students')
@@ -95,9 +95,19 @@ export async function handleStudents(req, res, url) {
         }
 
         for (const s of students) {
-          const hasTopupOut = (topupOutstandingMap[s.id] || 0) > 0;
-          const hasInitialOut = s.lead_id && (prOutstandingMap[s.lead_id] || 0) > 0;
-          s.pending_payment = hasTopupOut ? 'topup' : hasInitialOut ? 'initial' : null;
+          const topupOut = topupOutstandingMap[s.id] || 0;
+          const initialOut = s.lead_id ? (prOutstandingMap[s.lead_id] || 0) : 0;
+          
+          if (topupOut > 0) {
+            s.pending_payment = 'topup';
+            s.pending_amount = topupOut;
+          } else if (initialOut > 0) {
+            s.pending_payment = 'initial';
+            s.pending_amount = initialOut;
+          } else {
+            s.pending_payment = null;
+            s.pending_amount = 0;
+          }
         }
       }
 
@@ -114,10 +124,19 @@ export async function handleStudents(req, res, url) {
       const today = new Date().toISOString().slice(0, 10);
       let query = adminClient
         .from('academic_sessions')
-        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(id,type,status)')
+        .select('*, students!inner(student_code,student_name,academic_coordinator_id), users!academic_sessions_teacher_id_fkey(id,full_name,email), session_verifications(id,type,status)')
         .eq('session_date', today)
         .order('started_at', { ascending: true });
-      if (actor.role === 'teacher') query = query.eq('teacher_id', actor.userId);
+
+      const requestedUserId = url.searchParams.get('user_id');
+      if (actor.role === 'teacher') {
+        query = query.eq('teacher_id', actor.userId);
+      } else if (isAC(actor)) {
+        query = query.eq('students.academic_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        query = query.eq('students.academic_coordinator_id', requestedUserId);
+      }
+
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
@@ -165,12 +184,21 @@ export async function handleStudents(req, res, url) {
 
       let query = adminClient
         .from('academic_sessions')
-        .select('*, students(student_code,student_name), users!academic_sessions_teacher_id_fkey(id,full_name), session_verifications(id,type,status)')
+        .select('*, students!inner(student_code,student_name,academic_coordinator_id), users!academic_sessions_teacher_id_fkey(id,full_name), session_verifications(id,type,status)')
         .gte('session_date', startDate)
         .lte('session_date', endDate)
         .order('session_date', { ascending: true })
         .order('started_at', { ascending: true });
-      if (actor.role === 'teacher') query = query.eq('teacher_id', actor.userId);
+
+      const requestedUserId = url.searchParams.get('user_id');
+      if (actor.role === 'teacher') {
+        query = query.eq('teacher_id', actor.userId);
+      } else if (isAC(actor)) {
+        query = query.eq('students.academic_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        query = query.eq('students.academic_coordinator_id', requestedUserId);
+      }
+
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [], weekStart: startDate, weekEnd: endDate });
@@ -230,9 +258,17 @@ export async function handleStudents(req, res, url) {
       const status = url.searchParams.get('status') || 'all';
       let query = adminClient
         .from('student_topups')
-        .select('*, students(student_code,student_name)')
+        .select('*, students!inner(student_code,student_name,academic_coordinator_id)')
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
+
+      const requestedUserId = url.searchParams.get('user_id');
+      if (isAC(actor)) {
+        query = query.eq('students.academic_coordinator_id', actor.userId);
+      } else if (actor.role === 'super_admin' && requestedUserId) {
+        query = query.eq('students.academic_coordinator_id', requestedUserId);
+      }
+
       const { data, error } = await query;
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
@@ -812,6 +848,8 @@ export async function handleStudents(req, res, url) {
       if (payload.started_at) updateFields.started_at = payload.started_at;
       if (payload.ended_at) updateFields.ended_at = payload.ended_at;
       if (payload.status) updateFields.status = payload.status;
+      if (payload.subject !== undefined) updateFields.subject = payload.subject;
+      if (payload.teacher_id) updateFields.teacher_id = payload.teacher_id;
       if (Object.keys(updateFields).length === 0) {
         sendJson(res, 400, { ok: false, error: 'no fields to update' });
         return true;

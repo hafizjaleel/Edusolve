@@ -7,11 +7,12 @@ const counselorsService = new CounselorsService();
 export async function handleCounselors(req, res, url) {
     if (!req.url.startsWith('/counselors')) return false;
 
-    // Simple auth check: ensure header role is counselor_head or super_admin
+    // Simple auth check: ensure header role is HR, counselor_head or super_admin
     const role = req.headers['x-user-role'];
-    if (role !== 'counselor_head' && role !== 'super_admin') {
-        // Allow 'counselor' to view list? Maybe restricted.
-        // For now strict.
+    const isRestrictedManager = role === 'super_admin' || role === 'hr';
+    const isCounselorHead = role === 'counselor_head';
+
+    if (!isRestrictedManager && !isCounselorHead) {
         sendJson(res, 403, { error: 'Unauthorized' });
         return true;
     }
@@ -32,7 +33,8 @@ export async function handleCounselors(req, res, url) {
         if (req.method === 'GET' && url.pathname === '/counselors/stats') {
             const from = url.searchParams.get('from');
             const to = url.searchParams.get('to');
-            const stats = await counselorsService.getStats({ from, to });
+            const userId = url.searchParams.get('user_id');
+            const stats = await counselorsService.getStats({ from, to, userId, actorRole: role, actorId: req.headers['x-user-id'] });
             if (stats.error) {
                 sendJson(res, 500, { error: stats.error });
                 return true;
@@ -41,8 +43,12 @@ export async function handleCounselors(req, res, url) {
             return true;
         }
 
-        // POST /counselors (Create)
+        // POST /counselors (Create - Admin/HR only)
         if (req.method === 'POST' && url.pathname === '/counselors') {
+            if (!isRestrictedManager) {
+                sendJson(res, 403, { error: 'Only Admin or HR can create counselors' });
+                return true;
+            }
             const payload = await readJson(req);
             if (!payload.email || !payload.password || !payload.full_name || !payload.phone) {
                 sendJson(res, 400, { error: 'Email, password, full_name, and phone are required' });
