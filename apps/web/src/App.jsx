@@ -267,6 +267,7 @@ export default function App() {
     <AppShell
       role={role}
       roleLabel={roleLabel(role)}
+      user={user}
       pages={pages}
       activePath={activePath.split('?')[0]}
       onNavigate={onNavigate}

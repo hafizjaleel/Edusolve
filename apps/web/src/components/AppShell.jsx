@@ -91,7 +91,25 @@ function nowInKolkata() {
   }).format(new Date());
 }
 
-export default function AppShell({ roleLabel, role, pages, activePath, onNavigate, onLogout, onNavigateToTicket, children }) {
+function getSalutation(userName) {
+  const hour = new Date().getHours();
+  let greeting = 'Good evening';
+  if (hour < 12) greeting = 'Good morning';
+  else if (hour < 18) greeting = 'Good afternoon';
+
+  if (userName) {
+    const firstName = userName.split(' ')[0];
+    return (
+      <>
+        {greeting},{' '}
+        <span style={{ fontWeight: 'normal' }}>{firstName} !</span>
+      </>
+    );
+  }
+  return greeting;
+}
+
+export default function AppShell({ roleLabel, role, user, pages, activePath, onNavigate, onLogout, onNavigateToTicket, children }) {
   const navPages = useMemo(() => pages.filter((page) => page.showInNav !== false), [pages]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [expandedNav, setExpandedNav] = useState({});
@@ -243,7 +261,17 @@ export default function AppShell({ roleLabel, role, pages, activePath, onNavigat
           <div className="top-bar-title-section" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
             <div>
               <p className="eyebrow">{roleLabel}</p>
-              <h2>{activePage?.title || 'Dashboard'}</h2>
+              <h2>
+                {(() => {
+                  let title = activePage?.title || 'Dashboard';
+                  if (role !== 'super_admin' && role !== 'admin') {
+                    if (title.toLowerCase().includes('dashboard')) {
+                      return getSalutation(user?.full_name || user?.name || '');
+                    }
+                  }
+                  return title;
+                })()}
+              </h2>
             </div>
             <NotificationBell onNavigateToTicket={(ticketId) => onNavigateToTicket && onNavigateToTicket(ticketId)} />
           </div>
