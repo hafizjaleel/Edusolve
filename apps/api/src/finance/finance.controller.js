@@ -690,12 +690,14 @@ export async function handleFinance(req, res, url) {
       if (error) throw new Error(error.message);
       // Update account balance
       if (payload.account_id) {
-        await adminClient.rpc('increment_balance', { acc_id: payload.account_id, delta: payload.amount }).catch(() => {
+        try {
+          const rpcRes = await adminClient.rpc('increment_balance', { acc_id: payload.account_id, delta: payload.amount });
+          if (rpcRes.error) throw rpcRes.error;
+        } catch (_) {
           // If RPC doesn't exist, update manually
-          adminClient.from('finance_accounts').select('balance').eq('id', payload.account_id).single().then(({ data: acc }) => {
-            if (acc) adminClient.from('finance_accounts').update({ balance: Number(acc.balance) + Number(payload.amount), updated_at: nowIso() }).eq('id', payload.account_id);
-          });
-        });
+          const { data: acc } = await adminClient.from('finance_accounts').select('balance').eq('id', payload.account_id).single();
+          if (acc) await adminClient.from('finance_accounts').update({ balance: Number(acc.balance) + Number(payload.amount), updated_at: nowIso() }).eq('id', payload.account_id);
+        }
       }
       sendJson(res, 201, { ok: true, entry: data });
       return true;
@@ -726,9 +728,10 @@ export async function handleFinance(req, res, url) {
       if (error) throw new Error(error.message);
       // Update account balance
       if (payload.account_id) {
-        adminClient.from('finance_accounts').select('balance').eq('id', payload.account_id).single().then(({ data: acc }) => {
-          if (acc) adminClient.from('finance_accounts').update({ balance: Number(acc.balance) - Number(payload.amount), updated_at: nowIso() }).eq('id', payload.account_id);
-        }).catch(() => { });
+        try {
+          const { data: acc } = await adminClient.from('finance_accounts').select('balance').eq('id', payload.account_id).single();
+          if (acc) await adminClient.from('finance_accounts').update({ balance: Number(acc.balance) - Number(payload.amount), updated_at: nowIso() }).eq('id', payload.account_id);
+        } catch (_) { }
       }
       sendJson(res, 201, { ok: true, expense: data });
       return true;

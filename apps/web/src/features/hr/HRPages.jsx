@@ -599,6 +599,7 @@ export function EmployeesPage() {
     const [editEmp, setEditEmp] = useState(null);
     const [salaryEmp, setSalaryEmp] = useState(null);
     const [assignLevelEmp, setAssignLevelEmp] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
 
     function load() {
         setLoading(true);
@@ -611,6 +612,8 @@ export function EmployeesPage() {
         <section className="panel">
             <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px' }}>
                 <h2 style={{ margin: 0, fontSize: '18px', color: '#10233f' }}>Employees</h2>
+                <input type="text" placeholder="🔍 Search employees..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                    style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '180px' }} />
                 <div style={{ marginLeft: 'auto' }}>
                     <button onClick={() => setShowAdd(true)} className="primary">
                         + Add Employee
@@ -637,7 +640,15 @@ export function EmployeesPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {employees.map((emp, idx) => {
+                                {employees.filter(emp => {
+                                    if (!searchQuery.trim()) return true;
+                                    const q = searchQuery.toLowerCase();
+                                    return (emp.full_name || '').toLowerCase().includes(q) ||
+                                        (emp.designation || '').toLowerCase().includes(q) ||
+                                        (emp.department || '').toLowerCase().includes(q) ||
+                                        (emp.phone || '').toLowerCase().includes(q) ||
+                                        (emp.email || '').toLowerCase().includes(q);
+                                }).map((emp, idx) => {
                                     const sal = emp.salary_structures?.[0] || emp.salary_structures;
                                     const hasSalary = sal && sal.base_salary > 0;
                                     return (

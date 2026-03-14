@@ -231,6 +231,7 @@ export function IncomeManagementPage() {
   const [parties, setParties] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   async function load() {
     try {
@@ -245,6 +246,19 @@ export function IncomeManagementPage() {
 
   const total = items.reduce((s, r) => s + Number(r.amount || 0), 0);
 
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return items;
+    const q = searchQuery.toLowerCase();
+    return items.filter(i => (
+      (i.description || '').toLowerCase().includes(q) ||
+      (i.finance_accounts?.name || '').toLowerCase().includes(q) ||
+      (i.finance_parties?.name || '').toLowerCase().includes(q) ||
+      (i.students?.student_name || '').toLowerCase().includes(q) ||
+      (i.users?.full_name || '').toLowerCase().includes(q) ||
+      (i.employees?.full_name || '').toLowerCase().includes(q)
+    ));
+  }, [items, searchQuery]);
+
   return (
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
@@ -252,7 +266,11 @@ export function IncomeManagementPage() {
           <h2 style={{ margin: 0, fontSize: '20px' }}>Income</h2>
           <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '13px' }}>Total: ₹{total.toLocaleString()}</p>
         </div>
-        <button className="primary" onClick={() => setShowAdd(true)}>+ Add Income</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input type="text" placeholder="🔍 Search income..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '180px' }} />
+          <button className="primary" onClick={() => setShowAdd(true)}>+ Add Income</button>
+        </div>
       </div>
       {loading ? <p>Loading...</p> : (
         <article className="card" style={{ padding: '16px' }}>
@@ -260,7 +278,7 @@ export function IncomeManagementPage() {
             <table>
               <thead><tr><th>Date</th><th>Description</th><th>Account</th><th>Party</th><th>Amount</th></tr></thead>
               <tbody>
-                {items.map(i => (
+                {filteredItems.map(i => (
                   <tr key={i.id}>
                     <td data-label="Date">{i.entry_date}</td>
                     <td data-label="Description">{i.description || '—'}</td>
@@ -289,6 +307,7 @@ export function ExpenseManagementPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
 
   async function load() {
     try {
@@ -307,6 +326,20 @@ export function ExpenseManagementPage() {
 
   const categoryNames = categories.length > 0 ? categories.map(c => c.name) : ['salary', 'rent', 'marketing', 'software', 'travel', 'office supplies', 'utilities', 'maintenance', 'other'];
 
+  const filteredItems = useMemo(() => {
+    if (!searchQuery.trim()) return items;
+    const q = searchQuery.toLowerCase();
+    return items.filter(i => (
+      (i.description || '').toLowerCase().includes(q) ||
+      (i.category || '').toLowerCase().includes(q) ||
+      (i.finance_accounts?.name || '').toLowerCase().includes(q) ||
+      (i.finance_parties?.name || '').toLowerCase().includes(q) ||
+      (i.students?.student_name || '').toLowerCase().includes(q) ||
+      (i.users?.full_name || '').toLowerCase().includes(q) ||
+      (i.employees?.full_name || '').toLowerCase().includes(q)
+    ));
+  }, [items, searchQuery]);
+
   return (
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
@@ -314,7 +347,11 @@ export function ExpenseManagementPage() {
           <h2 style={{ margin: 0, fontSize: '20px' }}>Expenses</h2>
           <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '13px' }}>Total: ₹{total.toLocaleString()}</p>
         </div>
-        <button className="primary" onClick={() => setShowAdd(true)}>+ Add Expense</button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input type="text" placeholder="🔍 Search expenses..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '180px' }} />
+          <button className="primary" onClick={() => setShowAdd(true)}>+ Add Expense</button>
+        </div>
       </div>
       {loading ? <p>Loading...</p> : (
         <article className="card" style={{ padding: '16px' }}>
@@ -322,7 +359,7 @@ export function ExpenseManagementPage() {
             <table>
               <thead><tr><th>Date</th><th>Category</th><th>Description</th><th>Account</th><th>Party</th><th>Amount</th></tr></thead>
               <tbody>
-                {items.map(i => (
+                {filteredItems.map(i => (
                   <tr key={i.id}>
                     <td data-label="Date">{i.expense_date}</td>
                     <td data-label="Category"><span style={{ textTransform: 'capitalize' }}>{i.category}</span></td>
@@ -525,6 +562,7 @@ export function PartiesPage() {
   const [loading, setLoading] = useState(true);
   const [selectedParty, setSelectedParty] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const TABS = [
     { id: 'students', label: 'Students' },
@@ -544,7 +582,9 @@ export function PartiesPage() {
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
         <h2 style={{ margin: 0, fontSize: '20px' }}>Parties & Ledgers</h2>
-        <div style={{ display: 'flex', gap: '8px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <input type="text" placeholder="🔍 Search parties..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '180px' }} />
           {activeTab === 'others' && <button className="secondary" onClick={() => setShowCategories(true)}>Manage Categories</button>}
           {activeTab === 'others' && <button className="primary" onClick={() => setShowAdd(true)}>+ Add Party</button>}
         </div>
@@ -572,6 +612,7 @@ export function PartiesPage() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>ID</th>
                 {activeTab === 'others' && <th>Type</th>}
                 {activeTab === 'students' ? (
                   <>
@@ -596,9 +637,19 @@ export function PartiesPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map(p => (
+              {items.filter(p => {
+                if (!searchQuery.trim()) return true;
+                const q = searchQuery.toLowerCase();
+                return (p.name || '').toLowerCase().includes(q) ||
+                  (p.full_name || '').toLowerCase().includes(q) ||
+                  (p.student_name || '').toLowerCase().includes(q) ||
+                  (p.student_code || '').toLowerCase().includes(q) ||
+                  (p.id || '').toLowerCase().includes(q) ||
+                  (p.type || '').toLowerCase().includes(q);
+              }).map(p => (
                 <tr key={p.id}>
                   <td data-label="Name" style={{ fontWeight: 600 }}>{p.name || p.full_name || p.student_name}</td>
+                  <td data-label="ID" style={{ fontSize: '12px', color: '#6b7280' }}>{p.student_code || p.id?.slice(0, 8) || '—'}</td>
                   {activeTab === 'others' && <td data-label="Type" style={{ textTransform: 'capitalize' }}>{p.type}</td>}
                   {activeTab === 'students' ? (
                     <>
@@ -648,6 +699,8 @@ export function PayrollRequestsPage() {
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [loading, setLoading] = useState(true);
   const [paying, setPaying] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [typeFilter, setTypeFilter] = useState('all');
 
   async function loadData() {
     try {
@@ -693,6 +746,16 @@ export function PayrollRequestsPage() {
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
         <h2 style={{ margin: 0, fontSize: '20px' }}>HR Payroll Requests</h2>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)}
+            style={{ padding: '7px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', background: '#fff' }}>
+            <option value="all">All Types</option>
+            <option value="teacher">Teachers</option>
+            <option value="employee">Staff</option>
+          </select>
+          <input type="text" placeholder="🔍 Search by name..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '180px' }} />
+        </div>
       </div>
 
       {loading ? <p>Loading...</p> : null}
@@ -702,6 +765,7 @@ export function PayrollRequestsPage() {
           <thead>
             <tr>
               <th>Staff/Teacher</th>
+              <th>ID</th>
               <th>Type</th>
               <th>Period</th>
               <th>Calculated Amount</th>
@@ -713,7 +777,13 @@ export function PayrollRequestsPage() {
             </tr>
           </thead>
           <tbody>
-            {requests.map(req => {
+            {requests.filter(req => {
+              if (typeFilter !== 'all' && req.target_type !== typeFilter) return false;
+              if (!searchQuery.trim()) return true;
+              const q = searchQuery.toLowerCase();
+              const name = req.target_type === 'teacher' ? (req.teacher_profiles?.users?.full_name || '') : (req.employees?.full_name || '');
+              return name.toLowerCase().includes(q) || (req.hr_note || '').toLowerCase().includes(q) || (req.id || '').toLowerCase().includes(q);
+            }).map(req => {
               const name = req.target_type === 'teacher' ? (req.teacher_profiles?.users?.full_name || 'Unknown Teacher') : (req.employees?.full_name || 'Unknown Employee');
               const typeLabel = req.target_type === 'teacher' ? 'Teacher' : 'Staff';
               const calcAmount = req.breakdown?.base_calculated || 0;
@@ -721,6 +791,7 @@ export function PayrollRequestsPage() {
               return (
                 <tr key={req.id} style={{ background: selectedRequest?.id === req.id ? '#f0f4ff' : '' }}>
                   <td data-label="Name"><div style={{ fontWeight: 500 }}>{name}</div></td>
+                  <td data-label="ID" style={{ fontSize: '12px', color: '#6b7280' }}>{req.id?.slice(0, 8) || '—'}</td>
                   <td data-label="Type">
                     <span style={{ padding: '4px 8px', borderRadius: 6, fontSize: 11, background: req.target_type === 'teacher' ? 'rgba(139, 92, 246, 0.1)' : 'rgba(59, 130, 246, 0.1)', color: req.target_type === 'teacher' ? '#8b5cf6' : '#3b82f6', fontWeight: 600 }}>{typeLabel}</span>
                   </td>
@@ -928,6 +999,7 @@ export function PaymentVerificationPage() {
   const [selectedTopup, setSelectedTopup] = useState(null);
   const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [accounts, setAccounts] = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   async function load() {
     setLoading(true); setError('');
@@ -974,7 +1046,11 @@ export function PaymentVerificationPage() {
 
   return (
     <section className="panel">
-      <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Payment Verification</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
+        <h2 style={{ margin: 0, fontSize: '20px' }}>Payment Verification</h2>
+        <input type="text" placeholder="🔍 Search by name or phone..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          style={{ padding: '7px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '200px' }} />
+      </div>
       {error ? <p className="error">{error}</p> : null}
 
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
@@ -1003,7 +1079,13 @@ export function PaymentVerificationPage() {
                 <th>Actions</th>
               </tr></thead>
               <tbody>
-                {payments.map(item => (
+                {payments.filter(item => {
+                  if (!searchQuery.trim()) return true;
+                  const q = searchQuery.toLowerCase();
+                  return (item.users?.full_name || item.requested_by || '').toLowerCase().includes(q) ||
+                    (item.leads?.student_name || '').toLowerCase().includes(q) ||
+                    (item.leads?.contact_number || '').toLowerCase().includes(q);
+                }).map(item => (
                   <tr key={item.id}>
                     <td data-label="Requested By">{item.users?.full_name || item.requested_by || '—'}</td>
                     <td data-label="Lead" style={{ fontWeight: 500 }}>{item.leads?.student_name || item.lead_id}</td>
@@ -1040,7 +1122,13 @@ export function PaymentVerificationPage() {
             <table>
               <thead><tr><th>Requested By</th><th>Student</th><th>Hrs</th><th>Total ₹</th><th>Paid ₹</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {topups.map(item => (
+                {topups.filter(item => {
+                  if (!searchQuery.trim()) return true;
+                  const q = searchQuery.toLowerCase();
+                  return (item.users?.full_name || item.requested_by || '').toLowerCase().includes(q) ||
+                    (item.students?.student_name || '').toLowerCase().includes(q) ||
+                    (item.students?.student_code || '').toLowerCase().includes(q);
+                }).map(item => (
                   <tr key={item.id}>
                     <td data-label="Requested By">{item.users?.full_name || item.requested_by || '—'}</td>
                     <td data-label="Student">{item.students?.student_name || '—'} <span className="text-muted" style={{ fontSize: '11px' }}>({item.students?.student_code || ''})</span></td>
@@ -1084,7 +1172,12 @@ export function PaymentVerificationPage() {
                 <th>Actions</th>
               </tr></thead>
               <tbody>
-                {installments.map(item => (
+                {installments.filter(item => {
+                  if (!searchQuery.trim()) return true;
+                  const q = searchQuery.toLowerCase();
+                  return (item.users?.full_name || '').toLowerCase().includes(q) ||
+                    (item.parent?.leads?.student_name || item.parent?.students?.student_name || '').toLowerCase().includes(q);
+                }).map(item => (
                   <tr key={item.id}>
                     <td data-label="Submitted By">{item.users?.full_name || '—'}</td>
                     <td data-label="Student" style={{ fontWeight: 500 }}>
