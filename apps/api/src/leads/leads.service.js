@@ -668,19 +668,19 @@ export class LeadsService {
 
   async listPaymentRequests(actor, page, limit) {
     const adminClient = getSupabaseAdminClient();
-    if (!isCounselor(actor) && !isCounselorHead(actor) && !isSuperAdmin(actor)) {
+    if (!isCounselor(actor) && !isCounselorHead(actor) && !isSuperAdmin(actor) && actor.role !== 'academic_coordinator') {
       return { error: 'payment request access is not allowed for this role' };
     }
     if (!adminClient) return { items: [], total: 0, page: 1, limit: 10 };
 
     let query = adminClient
       .from('payment_requests')
-      .select('*, leads(student_name, subject, class_level, contact_number, counselor_id)', { count: 'exact' })
+      .select('*, leads(student_name, subject, class_level, contact_number, counselor_id, source, package_name)', { count: 'exact' })
       .order('status', { ascending: true })
       .order('created_at', { ascending: false });
 
-    // Counselors see only their own requests
-    if (isCounselor(actor)) {
+    // Counselors and ACs see only their own requests
+    if (isCounselor(actor) || actor.role === 'academic_coordinator') {
       query = query.eq('requested_by', actor.userId);
     }
 

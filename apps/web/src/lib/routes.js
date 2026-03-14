@@ -27,6 +27,7 @@ export const APP_PAGES = [
 
   /* ── Academics (Students/Teachers) ── */
   { path: '/students/hub', title: 'Students', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/students/pipeline', title: 'New Student Pipeline', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/students/today', title: 'Today Classes', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/sessions/manage', title: 'All Sessions', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/sessions/verifications', title: 'Verifications', group: 'Academics', roles: [ROLES.ACADEMIC_COORDINATOR, ROLES.SUPER_ADMIN], showInNav: true },
@@ -67,6 +68,7 @@ export const APP_PAGES = [
   { path: '/hr/employees', title: 'Employees', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/salary', title: 'Salary Calculator', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/councilor-levels', title: 'Councilor Levels', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/ac-incentive-config', title: 'AC Incentive Config', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/payment-requests', title: 'Payment Requests', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── System ── */

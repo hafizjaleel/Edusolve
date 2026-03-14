@@ -828,6 +828,94 @@ function LevelModal({ level, onClose, onDone }) {
     );
 }
 
+/* ═══════ AC INCENTIVE CONFIG PAGE ═══════ */
+export function ACIncentiveConfigPage() {
+    const [config, setConfig] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saving, setSaving] = useState(false);
+    const [form, setForm] = useState({
+        incentive_per_student: 500,
+        revenue_incentive_percentage: 5,
+        tax_percentage: 18
+    });
+
+    function load() {
+        setLoading(true);
+        apiFetch('/hr/ac-incentive-config')
+            .then(r => {
+                if (r.item) {
+                    setConfig(r.item);
+                    setForm({
+                        incentive_per_student: r.item.incentive_per_student,
+                        revenue_incentive_percentage: r.item.revenue_incentive_percentage,
+                        tax_percentage: r.item.tax_percentage
+                    });
+                }
+            })
+            .catch(() => {})
+            .finally(() => setLoading(false));
+    }
+
+    useEffect(() => { load(); }, []);
+
+    const upd = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+    async function submit(e) {
+        e.preventDefault();
+        setSaving(true);
+        try {
+            await apiFetch('/hr/ac-incentive-config', { method: 'PATCH', body: JSON.stringify(form) });
+            alert('Config saved successfully');
+            load();
+        } catch (err) { alert(err.message); }
+        finally { setSaving(false); }
+    }
+
+    return (
+        <section className="panel">
+            <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '12px' }}>
+                <h2 style={{ margin: 0, fontSize: '18px', color: '#10233f' }}>AC Student Admission Incentive Config</h2>
+            </div>
+
+            {loading ? <p>Loading config...</p> : (
+                <div className="card" style={{ maxWidth: 600 }}>
+                    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                        <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <h4 style={{ margin: '0 0 12px', fontSize: 16, color: '#334155' }}>1. New Student Incentive</h4>
+                            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>A fixed amount given for every new admission added by the AC.</p>
+                            <label style={labelStyle}>Incentive Per Student (₹)
+                                <input type="number" step="0.01" required value={form.incentive_per_student} onChange={e => upd('incentive_per_student', e.target.value)} style={inputStyle} />
+                            </label>
+                        </div>
+
+                        <div style={{ background: '#f8fafc', padding: 16, borderRadius: 8, border: '1px solid #e2e8f0' }}>
+                            <h4 style={{ margin: '0 0 12px', fontSize: 16, color: '#334155' }}>2. Revenue Incentive</h4>
+                            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>A percentage of the net revenue (verified student topups minus tax) collected by the AC.</p>
+                            
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                                <label style={labelStyle}>Tax Percentage (%)
+                                    <input type="number" step="0.01" required value={form.tax_percentage} onChange={e => upd('tax_percentage', e.target.value)} style={inputStyle} />
+                                </label>
+                                <label style={labelStyle}>Revenue Incentive Percentage (%)
+                                    <input type="number" step="0.01" required value={form.revenue_incentive_percentage} onChange={e => upd('revenue_incentive_percentage', e.target.value)} style={inputStyle} />
+                                </label>
+                            </div>
+                            <div style={{ marginTop: 12, padding: 12, background: '#e0e7ff', borderRadius: 6, fontSize: 12, color: '#3730a3' }}>
+                                <strong>Formula:</strong> Net Revenue = Total Topups - (Total Topups × {form.tax_percentage || 0}%)<br/>
+                                <strong>Incentive:</strong> Net Revenue × {form.revenue_incentive_percentage || 0}%
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 8 }}>
+                            <button type="submit" disabled={saving} style={btnPrimary}>{saving ? 'Saving...' : 'Save Configuration'}</button>
+                        </div>
+                    </form>
+                </div>
+            )}
+        </section>
+    );
+}
+
 function AssignCounselorLevelModal({ employee, onClose, onDone }) {
     const [levels, setLevels] = useState([]);
     const [selectedLevel, setSelectedLevel] = useState('');
@@ -1269,7 +1357,11 @@ export function SalaryCalculatorPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {employees.filter(e => e.is_active && (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head'))).map((emp, idx) => {
+                                {employees.filter(e => 
+                                    e.is_active && 
+                                    (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head')) &&
+                                    !e.designation?.toLowerCase().includes('academic')
+                                ).map((emp, idx) => {
                                     const pr = prMap.employee[emp.id];
                                     const isSubmitted = !!pr;
 
@@ -1320,7 +1412,11 @@ export function SalaryCalculatorPage() {
                                         </tr>
                                     );
                                 })}
-                                {employees.filter(e => e.is_active && (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head'))).length === 0 && (
+                                {employees.filter(e => 
+                                    e.is_active && 
+                                    (!e.designation?.toLowerCase().includes('counselor') || e.designation?.toLowerCase().includes('head')) &&
+                                    !e.designation?.toLowerCase().includes('academic')
+                                ).length === 0 && (
                                     <tr><td colSpan={7} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No staff employees</td></tr>
                                 )}
                             </tbody>
@@ -1429,6 +1525,107 @@ export function SalaryCalculatorPage() {
                                 })}
                                 {employees.filter(e => e.is_active && e.designation?.toLowerCase().includes('counselor') && !e.designation?.toLowerCase().includes('head')).length === 0 && (
                                     <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No counselors found</td></tr>
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {/* ─── Academic Coordinator Salaries ─── */}
+                    <h3 style={{ fontSize: 15, margin: '0 0 10px', color: '#10233f' }}>Academic Coordinator Salaries</h3>
+                    <div className="card" style={{ marginBottom: 24 }}>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>#</th>
+                                    <th>Academic Coordinator</th>
+                                    <th>Gross</th>
+                                    <th>Deductions</th>
+                                    <th style={{ textAlign: 'center' }}>Present</th>
+                                    <th>Payable Basic</th>
+                                    <th>AC Incentive</th>
+                                    <th>Total Net</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {employees.filter(e => e.is_active && e.designation?.toLowerCase().includes('academic')).map((emp, idx) => {
+                                    const pr = prMap.employee[emp.id];
+                                    const isSubmitted = !!pr;
+
+                                    const sal = salaryMap[emp.id];
+                                    const base = sal ? Number(sal.base_salary) : 0;
+                                    const hra = sal ? Number(sal.hra) : 0;
+                                    const allowances = sal ? Number(sal.transport_allowance) + Number(sal.other_allowance) : 0;
+                                    const deductions = sal ? Number(sal.pf_deduction) + Number(sal.tax_deduction) + Number(sal.other_deduction) : 0;
+                                    const gross = base + hra + allowances;
+
+                                    const att = attendanceMap[emp.id] || { present: 0, half_day: 0 };
+                                    const presentDays = att.present + (att.half_day * 0.5);
+                                    const wd = workingDaysOverride !== null ? workingDaysOverride : autoWorkingDays;
+
+                                    let calcNet = 0;
+                                    if (presentDays === 0) {
+                                        calcNet = Math.round(gross - deductions);
+                                    } else {
+                                        const proRatedGross = wd > 0 ? (gross * presentDays / wd) : 0;
+                                        calcNet = Math.round(proRatedGross - deductions);
+                                    }
+
+                                    let displayIncentive = 0;
+                                    let displayAcMetrics = null;
+
+                                    if (isSubmitted) {
+                                        displayAcMetrics = pr.breakdown?.details?.ac_incentive || null;
+                                        displayIncentive = displayAcMetrics?.total_ac_incentive || 0;
+                                    }
+
+                                    const displayNet = isSubmitted ? pr.total_amount : Math.max(0, calcNet);
+
+                                    return (
+                                        <tr key={emp.id}>
+                                            <td>{idx + 1}</td>
+                                            <td>
+                                                <div style={{ fontWeight: 500 }}>{emp.full_name}</div>
+                                                <div style={{ fontSize: 12, color: 'var(--muted)' }}>{emp.designation || ''}</div>
+                                            </td>
+                                            <td>₹{gross.toLocaleString()}</td>
+                                            <td>₹{deductions.toLocaleString()}</td>
+                                            <td style={{ textAlign: 'center', fontWeight: 500 }}>{presentDays}</td>
+                                            <td>₹{calcNet.toLocaleString()}</td>
+                                            <td>
+                                                {displayAcMetrics ? (
+                                                    <div>
+                                                        <div style={{ fontWeight: 600, color: 'var(--success)' }}>
+                                                            ₹{displayIncentive.toLocaleString()}
+                                                        </div>
+                                                        <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 2 }}>
+                                                            Students: {displayAcMetrics.students_added} | Rev: ₹{Math.round(Math.max(0, displayAcMetrics.total_topup_revenue) || 0).toLocaleString()}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <span style={{ color: 'var(--muted)', fontSize: 12 }}>Pending Submission</span>
+                                                )}
+                                            </td>
+                                            <td>
+                                                <div style={{ fontWeight: 700, color: '#10233f', fontSize: 14 }}>₹{displayNet.toLocaleString()}</div>
+                                            </td>
+                                            <td>
+                                                {isSubmitted ? (
+                                                    <span className="badge success" style={{ padding: '4px 8px', fontSize: 11, borderRadius: 12 }}>Submitted ✓</span>
+                                                ) : (
+                                                    <div style={{ display: 'flex', gap: 6 }}>
+                                                        <button onClick={() => setEditEmp(emp)} className={gross > 0 ? "secondary small" : "primary small"}>
+                                                            {gross > 0 ? 'Edit Salary' : 'Set Salary'}
+                                                        </button>
+                                                        <button onClick={() => setConfirmSubmit({ type: 'employee', data: { ...emp, calcNet: calcNet, workingDays: wd } })} className="primary small">Submit</button>
+                                                    </div>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {employees.filter(e => e.is_active && e.designation?.toLowerCase().includes('academic')).length === 0 && (
+                                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--muted)', padding: 24 }}>No academic coordinators found</td></tr>
                                 )}
                             </tbody>
                         </table>

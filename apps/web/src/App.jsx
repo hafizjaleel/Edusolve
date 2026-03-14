@@ -24,6 +24,7 @@ import { UsersPage, SystemSettingsPage } from './features/system/SystemPages.jsx
 import {
   AcademicCoordinatorDashboardPage,
   StudentsHubPage,
+  NewStudentPipelinePage,
   WeeklyCalendarPage,
   TodayClassesPage,
   SessionsManagePage,
@@ -44,7 +45,7 @@ import { TCDashboardPage, TeacherLeadsPage, TCAllLeadsPage, TCTeacherPoolPage, T
 import { TeacherSalesReportsPage } from './features/teachers/TeacherSalesReportsPage.jsx';
 import { TeacherDashboardPage, TeacherTodaySessionsPage, TeacherTimetablePage, TeacherMyProfilePage, TeacherStudentsPage, TeacherReportsPage, TeacherInvoicesPage, TeacherMaterialsPage } from './features/teachers/TeacherDashboardPages.jsx';
 import { MaterialTransfersPage } from './features/academic/MaterialTransfersPage.jsx';
-import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPaymentRequestsPage, CouncilorLevelsPage } from './features/hr/HRPages.jsx';
+import { HRDashboardPage, AttendancePage, EmployeesPage, SalaryCalculatorPage, HRPaymentRequestsPage, CouncilorLevelsPage, ACIncentiveConfigPage } from './features/hr/HRPages.jsx';
 import { getSession, logout } from './lib/auth.js';
 import { defaultPageForRole, getPageByPath, pagesForRole } from './lib/routes.js';
 import { ROLE_OPTIONS } from './lib/roles.js';
@@ -171,6 +172,7 @@ export default function App() {
 
     /* Students */
     if (page.path === '/students/hub') return <StudentsHubPage role={role} />;
+    if (page.path === '/students/pipeline') return <NewStudentPipelinePage />;
 
     /* Calendar */
     if (page.path === '/students/calendar') return <WeeklyCalendarPage />;
@@ -245,6 +247,7 @@ export default function App() {
     if (page.path === '/hr/employees') return <EmployeesPage />;
     if (page.path === '/hr/salary') return <SalaryCalculatorPage />;
     if (page.path === '/hr/councilor-levels') return <CouncilorLevelsPage />;
+    if (page.path === '/hr/ac-incentive-config') return <ACIncentiveConfigPage />;
     if (page.path === '/hr/payment-requests') return <HRPaymentRequestsPage />;
 
     /* Super Admin & System */
