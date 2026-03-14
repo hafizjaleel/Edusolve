@@ -489,6 +489,41 @@ export async function handleHR(req, res, url) {
       return true;
     }
 
+    // ═══════ AC INCENTIVE CONFIG ═══════
+    if (req.method === 'GET' && url.pathname === '/hr/ac-incentive-config') {
+      const { data, error } = await adminClient.from('ac_incentive_config').select('*').maybeSingle();
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
+
+    if (req.method === 'PATCH' && url.pathname === '/hr/ac-incentive-config') {
+      const payload = await readJson(req);
+      const { data: existing } = await adminClient.from('ac_incentive_config').select('id').maybeSingle();
+      
+      let resData;
+      if (existing) {
+        const { data, error } = await adminClient.from('ac_incentive_config').update({
+          incentive_per_student: payload.incentive_per_student,
+          revenue_incentive_percentage: payload.revenue_incentive_percentage,
+          tax_percentage: payload.tax_percentage,
+          updated_at: nowIso()
+        }).eq('id', existing.id).select('*').single();
+        if (error) throw new Error(error.message);
+        resData = data;
+      } else {
+        const { data, error } = await adminClient.from('ac_incentive_config').insert({
+          incentive_per_student: payload.incentive_per_student || 500,
+          revenue_incentive_percentage: payload.revenue_incentive_percentage || 5,
+          tax_percentage: payload.tax_percentage || 18
+        }).select('*').single();
+        if (error) throw new Error(error.message);
+        resData = data;
+      }
+      sendJson(res, 200, { ok: true, item: resData });
+      return true;
+    }
+
     // ═══════ COUNCILOR LEVELS ═══════
     if (req.method === 'GET' && url.pathname === '/hr/councilor-levels') {
       const { data, error } = await adminClient.from('councilor_levels').select('*').order('level_name');
@@ -770,8 +805,12 @@ export async function handleHR(req, res, url) {
       // Add Counselor Incentive
       let achievedSales = 0;
       let incentiveAmount = 0;
-      if (counselorLevel && empInfo?.user_id) {
-        
+      let acStudentIncentive = 0;
+      let acRevenueIncentive = 0;
+      let acTotalIncentive = 0;
+      let acMetrics = null;
+
+      if (empInfo?.user_id) {
         const start = new Date(payload.year, payload.month - 1, 1);
         start.setDate(start.getDate() - 1);
         const startIso = start.toISOString().split('T')[0] + 'T00:00:00Z';
@@ -780,25 +819,79 @@ export async function handleHR(req, res, url) {
         end.setDate(end.getDate() + 1);
         const endIso = end.toISOString().split('T')[0] + 'T23:59:59Z';
 
-        const { data: verifiedPayments } = await adminClient
-          .from('payment_requests')
-          .select('total_amount, amount, leads!inner(counselor_id), verified_at')
-          .eq('status', 'verified')
-          .eq('leads.counselor_id', empInfo.user_id)
-          .gte('verified_at', startIso)
-          .lte('verified_at', endIso);
+        // 1. Counselor Incentive
+        if (counselorLevel) {
+          const { data: verifiedPayments } = await adminClient
+            .from('payment_requests')
+            .select('total_amount, amount, leads!inner(counselor_id), verified_at')
+            .eq('status', 'verified')
+            .eq('leads.counselor_id', empInfo.user_id)
+            .gte('verified_at', startIso)
+            .lte('verified_at', endIso);
 
-        achievedSales = (verifiedPayments || []).reduce((sum, p) => {
-           const pDate = new Date(p.verified_at);
-           if (pDate.getMonth() + 1 === payload.month && pDate.getFullYear() === payload.year) {
-              return sum + Number(p.total_amount || p.amount || 0);
-           }
-           return sum;
-        }, 0);
-        
-        const extraSales = Math.max(0, achievedSales - Number(counselorLevel.target_amount));
-        incentiveAmount = Math.round(extraSales * Number(counselorLevel.incentive_percentage) / 100);
-        calcNet += incentiveAmount;
+          achievedSales = (verifiedPayments || []).reduce((sum, p) => {
+             const pDate = new Date(p.verified_at);
+             if (pDate.getMonth() + 1 === payload.month && pDate.getFullYear() === payload.year) {
+                return sum + Number(p.total_amount || p.amount || 0);
+             }
+             return sum;
+          }, 0);
+          
+          const extraSales = Math.max(0, achievedSales - Number(counselorLevel.target_amount));
+          incentiveAmount = Math.round(extraSales * Number(counselorLevel.incentive_percentage) / 100);
+          calcNet += incentiveAmount;
+        }
+
+        // 2. Academic Coordinator Incentive
+        const { data: userRow } = await adminClient.from('users').select('role').eq('id', empInfo.user_id).single();
+        if (userRow?.role === 'academic_coordinator') {
+          // Fetch config
+          const { data: config } = await adminClient.from('ac_incentive_config').select('*').maybeSingle();
+          if (config) {
+            // Count new students added by this AC in the month
+            const { count } = await adminClient.from('students')
+              .select('*', { count: 'exact', head: true })
+              .eq('academic_coordinator_id', empInfo.user_id)
+              .gte('joined_at', startIso)
+              .lte('joined_at', endIso);
+            
+            const studentsAdded = count || 0;
+            acStudentIncentive = studentsAdded * Number(config.incentive_per_student || 0);
+
+            // Sum verified student topups requested by this AC in the month
+            const { data: verifiedTopups } = await adminClient.from('student_topups')
+              .select('amount, verified_at')
+              .eq('status', 'verified')
+              .eq('requested_by', empInfo.user_id)
+              .gte('verified_at', startIso)
+              .lte('verified_at', endIso);
+
+            const totalTopupRevenue = (verifiedTopups || []).reduce((sum, t) => {
+              const tDate = new Date(t.verified_at);
+              if (tDate.getMonth() + 1 === payload.month && tDate.getFullYear() === payload.year) {
+                return sum + Number(t.amount || 0);
+              }
+              return sum;
+            }, 0);
+
+            const taxAmount = totalTopupRevenue * (Number(config.tax_percentage || 0) / 100);
+            const netRevenue = Math.max(0, totalTopupRevenue - taxAmount);
+            acRevenueIncentive = Math.round(netRevenue * (Number(config.revenue_incentive_percentage || 0) / 100));
+
+            acTotalIncentive = acStudentIncentive + acRevenueIncentive;
+            calcNet += acTotalIncentive;
+
+            acMetrics = {
+              students_added: studentsAdded,
+              student_incentive: acStudentIncentive,
+              total_topup_revenue: totalTopupRevenue,
+              tax_amount: taxAmount,
+              net_revenue: netRevenue,
+              revenue_incentive: acRevenueIncentive,
+              total_ac_incentive: acTotalIncentive
+            };
+          }
+        }
       }
 
       const adjustment = Number(payload.adjustment) || 0;
@@ -820,7 +913,7 @@ export async function handleHR(req, res, url) {
         requested_by: resolvedUserId2,
         hr_note: payload.hr_note || null,
         breakdown: {
-          base_calculated: calcNet,
+          base_calculated: calcNet - acTotalIncentive, // calcNet includes incentive now, so base_calculated is without it
           adjustment,
           details: {
             working_days: workingDays,
@@ -831,7 +924,8 @@ export async function handleHR(req, res, url) {
             total_deductions: totalDeductions,
             counselor_level: counselorLevel ? counselorLevel.level_name : null,
             achieved_sales: achievedSales,
-            incentive_amount: incentiveAmount
+            incentive_amount: incentiveAmount,
+            ac_incentive: acMetrics || null
           }
         }
       }).select('*').single();

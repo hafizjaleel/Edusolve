@@ -27,6 +27,23 @@ function isAC(actor) {
   return actor.role === 'academic_coordinator';
 }
 
+async function generateStudentCode(adminClient) {
+  const MONTH_CODES = ['JA', 'FB', 'MR', 'AP', 'MY', 'JN', 'JL', 'AG', 'SP', 'OC', 'NV', 'DC'];
+  const now = new Date();
+  const monthCode = MONTH_CODES[now.getMonth()];
+  const yearCode = String(now.getFullYear()).slice(-2);
+
+  // Get the current max sequential number
+  const { count: totalStudents, error } = await adminClient
+    .from('students')
+    .select('*', { count: 'exact', head: true });
+    
+  if (error) throw new Error(error.message);
+
+  const seq = (totalStudents || 0) + 1;
+  return `${monthCode}0${yearCode}0${seq}`;
+}
+
 function verificationStatusOf(session) {
   const row = Array.isArray(session.session_verifications) ? session.session_verifications[0] : session.session_verifications;
   return row?.status || 'pending';
@@ -120,6 +137,64 @@ export async function handleStudents(req, res, url) {
       }
 
       sendJson(res, 200, { ok: true, items: students });
+      return true;
+    }
+
+    // ─── POST /students ────────────────────────────────────────
+    if (req.method === 'POST' && url.pathname === '/students') {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator or super admin can create students directly' });
+        return true;
+      }
+      const payload = await readJson(req);
+      
+      const { data: acUserRow } = await adminClient.from('users').select('full_name').eq('id', actor.userId).maybeSingle();
+      const acName = acUserRow?.full_name || actor.userId || 'Unknown AC';
+      
+      // Auto-create a dummy lead to hold the source information
+      // Since student is tied to a lead
+      const { data: leadModel, error: leadErr } = await adminClient.from('leads').insert({
+        student_name: payload.student_name,
+        parent_name: payload.parent_name || null,
+        contact_number: payload.contact_number || null,
+        class_level: payload.class_level || null,
+        package_name: payload.package_name || null,
+        source: 'AC Direct Onboarding',
+        current_note: `Manually added by: ${acName}`,
+        owner_stage: 'finance',
+        status: 'payment_verification'
+      }).select('id').single();
+      
+      if (leadErr) throw new Error(`Lead creation failed: ${leadErr.message}`);
+
+      // Create a payment request for finance to verify
+      const { data: paymentReq, error: reqErr } = await adminClient.from('payment_requests').insert({
+        lead_id: leadModel.id,
+        requested_by: actor.userId,
+        amount: Number(payload.onboarding_paid) || 0,
+        total_amount: Number(payload.onboarding_fee) || 0,
+        hours: Number(payload.hours) || 0,
+        status: 'pending'
+      }).select('*').single();
+
+      if (reqErr) {
+         await adminClient.from('leads').delete().eq('id', leadModel.id);
+         throw new Error(`Payment request creation failed: ${reqErr.message}`);
+      }
+
+      // If a screenshot or finance note is provided, auto-create the first installment
+      if (payload.screenshot_url || payload.finance_note) {
+        await adminClient.from('installments').insert({
+          reference_type: 'payment_request',
+          reference_id: paymentReq.id,
+          amount: Number(payload.onboarding_paid) || 0,
+          finance_note: payload.finance_note || '',
+          screenshot_url: payload.screenshot_url || null,
+          created_by: actor.userId
+        });
+      }
+
+      sendJson(res, 201, { ok: true, msg: 'Onboarding payment request submitted to Finance.' });
       return true;
     }
 

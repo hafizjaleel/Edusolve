@@ -17,21 +17,43 @@ function isFinance(actor) {
 }
 
 async function generateStudentCode(adminClient) {
-  const { data, error } = await adminClient
+  const MONTH_CODES = ['JA', 'FB', 'MR', 'AP', 'MY', 'JN', 'JL', 'AG', 'SP', 'OC', 'NV', 'DC'];
+  const now = new Date();
+  const monthCode = MONTH_CODES[now.getMonth()];
+  const yearCode = String(now.getFullYear()).slice(-2);
+
+  // Get the current max sequential number
+  const { count: totalStudents, error } = await adminClient
     .from('students')
-    .select('student_code')
-    .not('student_code', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(200);
+    .select('*', { count: 'exact', head: true });
+    
   if (error) throw new Error(error.message);
 
-  let maxNum = 0;
-  for (const row of data || []) {
-    const code = row.student_code || '';
-    const num = Number(code.replace(/^STD/i, ''));
-    if (Number.isFinite(num) && num > maxNum) maxNum = num;
-  }
-  return `STD${String(maxNum + 1).padStart(6, '0')}`;
+  const seq = (totalStudents || 0) + 1;
+  return `${monthCode}0${yearCode}0${seq}`;
+}
+
+async function enrichTeachers(adminClient, items) {
+  const teacherIds = [...new Set(items.map(i => i.teacher_id).filter(Boolean))];
+  if (teacherIds.length === 0) return items;
+
+  // Try fetching from users first
+  const { data: users } = await adminClient.from('users').select('id, full_name').in('id', teacherIds);
+  // Also try teacher_profiles (since teacher_id might be profile id)
+  const { data: profiles } = await adminClient.from('teacher_profiles').select('id, users!teacher_profiles_user_id_fkey(full_name)').in('id', teacherIds);
+
+  const teacherMap = {};
+  (users || []).forEach(u => teacherMap[u.id] = u.full_name);
+  (profiles || []).forEach(p => {
+    if (p.users?.full_name) teacherMap[p.id] = p.users.full_name;
+  });
+
+  return items.map(item => {
+    if (item.teacher_id && teacherMap[item.teacher_id]) {
+      return { ...item, users: { full_name: teacherMap[item.teacher_id] } };
+    }
+    return item;
+  });
 }
 
 export async function handleFinance(req, res, url) {
@@ -197,7 +219,11 @@ export async function handleFinance(req, res, url) {
       let assignedAcId = null;
       let assignedAcName = null;
 
-      if (acUsers.length > 0) {
+      if (lead.source === 'AC Direct Onboarding') {
+        assignedAcId = request.requested_by;
+        const assignedAcUser = acUsers.find(u => u.id === assignedAcId);
+        assignedAcName = assignedAcUser ? assignedAcUser.name : 'Unknown AC';
+      } else if (acUsers.length > 0) {
         const { data: lastAssigned } = await adminClient
           .from('students')
           .select('academic_coordinator_id')
@@ -641,10 +667,11 @@ export async function handleFinance(req, res, url) {
 
     // ═══════ INCOME (Ledger Entries) ═══════
     if (req.method === 'GET' && url.pathname === '/finance/income') {
-      const { data, error } = await adminClient.from('ledger_entries').select('*, finance_accounts(name), finance_parties(name), students(student_name), users!teacher_id(full_name), employees(full_name)')
+      const { data, error } = await adminClient.from('ledger_entries').select('*, finance_accounts(name), finance_parties(name), students(student_name), employees(full_name)')
         .eq('entry_type', 'income').order('entry_date', { ascending: false }).limit(200);
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+      const enrichedData = await enrichTeachers(adminClient, data || []);
+      sendJson(res, 200, { ok: true, items: enrichedData });
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/finance/income') {
@@ -676,10 +703,11 @@ export async function handleFinance(req, res, url) {
 
     // ═══════ EXPENSES ═══════
     if (req.method === 'GET' && url.pathname === '/finance/expenses') {
-      const { data, error } = await adminClient.from('expenses').select('*, finance_accounts(name), finance_parties(name), students(student_name), users!teacher_id(full_name), employees(full_name)')
+      const { data, error } = await adminClient.from('expenses').select('*, finance_accounts(name), finance_parties(name), students(student_name), employees(full_name)')
         .order('expense_date', { ascending: false }).limit(200);
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+      const enrichedData = await enrichTeachers(adminClient, data || []);
+      sendJson(res, 200, { ok: true, items: enrichedData });
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/finance/expenses') {
@@ -770,10 +798,16 @@ export async function handleFinance(req, res, url) {
     // ═══════ PENDING INSTALLMENTS ═══════
     if (req.method === 'GET' && url.pathname === '/finance/pending-balances') {
       try {
-        const [payRes, topupRes] = await Promise.all([
-          adminClient.from('payment_requests').select('*, leads(student_name, contact_number)').eq('status', 'verified'),
-          adminClient.from('student_topups').select('*, students(student_name, student_code)').eq('status', 'verified')
-        ]);
+        let payQuery = adminClient.from('payment_requests').select('*, leads(student_name, contact_number)').eq('status', 'verified');
+        let topupQuery = adminClient.from('student_topups').select('*, students(student_name, student_code)').eq('status', 'verified');
+
+        // Counselors and ACs see only their own pending balances
+        if (['counselor', 'academic_coordinator'].includes(actor.role)) {
+          payQuery = payQuery.eq('requested_by', actor.userId);
+          topupQuery = topupQuery.eq('requested_by', actor.userId);
+        }
+
+        const [payRes, topupRes] = await Promise.all([payQuery, topupQuery]);
 
         const pendingPayments = (payRes.data || []).filter(p => Number(p.total_amount || 0) > Number(p.amount || 0)).map(p => ({
           ...p,

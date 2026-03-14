@@ -1440,7 +1440,7 @@ function StudentDetailPage({ studentId, onBack }) {
 }
 
 /* ═══════ Student Onboarding Form (multi-schedule, multi-assignment) ═══════ */
-function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }) {
+function StudentOnboardingForm({ onDone }) {
   const [f, setF] = useState({
     student_name: '',
     parent_name: '',
@@ -1448,23 +1448,85 @@ function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }
     alternative_number: '',
     parent_phone: '',
     class_level: '',
+    board: '',
+    medium: '',
     package_name: '',
     messaging_number: 'contact',
-    status: 'active'
+    status: 'active',
+    onboarding_fee: '',
+    onboarding_paid: ''
   });
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [boardsList, setBoardsList] = useState([]);
+  const [mediumsList, setMediumsList] = useState([]);
+
+  // New fields for Onboarding Payments
+  const [screenshotFile, setScreenshotFile] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    apiFetch('/boards').then(b => setBoardsList(b.boards || [])).catch(() => {});
+    apiFetch('/mediums').then(m => setMediumsList(m.mediums || [])).catch(() => {});
+  }, []);
+
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
 
   async function submit(e) {
     e.preventDefault(); setError(''); setMsg('');
-    setMsg('Student onboarding data captured. Backend integration pending.');
-    // TODO: POST /students with all fields, then POST assignments for each, then POST recurring sessions
+
+    if (!screenshotFile) {
+      setError('A payment screenshot is required for onboarding.');
+      return;
+    }
+
+    setSaving(true);
+    setUploading(true);
+
+    try {
+      // 1. Get presigned URL
+      const presignData = await apiFetch('/upload/presigned-url', {
+        method: 'POST',
+        body: JSON.stringify({
+          filename: screenshotFile.name,
+          contentType: screenshotFile.type
+        })
+      });
+
+      // 2. Upload directly to R2/S3
+      const uploadRes = await fetch(presignData.uploadUrl, {
+        method: 'PUT',
+        body: screenshotFile,
+        headers: { 'Content-Type': screenshotFile.type }
+      });
+
+      if (!uploadRes.ok) throw new Error('Failed to upload screenshot');
+
+      setUploading(false);
+
+      // 3. Submit Student Onboarding
+      await apiFetch('/students', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...f,
+          screenshot_url: presignData.publicUrl
+        })
+      });
+      setMsg('Student created and payment submitted to finance successfully!');
+      setTimeout(() => {
+        if (onDone) onDone();
+      }, 1500);
+    } catch (err) {
+      setUploading(false);
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <article className="card">
-      <h3>Onboard New Student</h3>
+    <div>
       <form onSubmit={submit}>
         <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -1490,6 +1552,18 @@ function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }
             <label>Class / Level
               <input value={f.class_level} onChange={e => set('class_level', e.target.value)} />
             </label>
+            <label>Board
+              <select value={f.board} onChange={e => set('board', e.target.value)}>
+                <option value="">Select Board</option>
+                {boardsList.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+              </select>
+            </label>
+            <label>Medium
+              <select value={f.medium} onChange={e => set('medium', e.target.value)}>
+                <option value="">Select Medium</option>
+                {mediumsList.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
+              </select>
+            </label>
             <label>Package
               <input value={f.package_name} onChange={e => set('package_name', e.target.value)} />
             </label>
@@ -1508,12 +1582,34 @@ function StudentOnboardingForm({ teachers, subjects, onDone, onNewSubjectAdded }
               </select>
             </label>
           </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginTop: '12px', paddingTop: '12px', borderTop: '1px solid #e5e7eb' }}>
+            <label>Total Onboarding Fee (Bill)
+              <input type="number" min="0" value={f.onboarding_fee} onChange={e => set('onboarding_fee', e.target.value)} required />
+            </label>
+            <label>Amount Paid Now
+              <input type="number" min="0" max={f.onboarding_fee || undefined} value={f.onboarding_paid} onChange={e => set('onboarding_paid', e.target.value)} required />
+            </label>
+            <label>Allocated Hours
+              <input type="number" min="1" value={f.hours || ''} onChange={e => set('hours', e.target.value)} placeholder="Total hours enrolled" required />
+            </label>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '8px' }}>
+            <label>Payment Screenshot *
+              <input type="file" accept="image/*" onChange={e => setScreenshotFile(e.target.files[0])} required style={{ width: '100%', marginTop: '4px' }} />
+            </label>
+            <label>Finance Note (Optional)
+              <textarea value={f.finance_note} onChange={e => set('finance_note', e.target.value)} rows={1} placeholder="Any notes for the finance team..." />
+            </label>
+          </div>
         </div>
-        <button type="submit" style={{ marginTop: 8 }}>Onboard Student</button>
-        {msg ? <p>{msg}</p> : null}
-        {error ? <p className="error">{error}</p> : null}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+          <button type="button" className="secondary" onClick={() => onDone && onDone()}>Cancel</button>
+          <button type="submit" disabled={saving || uploading}>{saving || uploading ? (uploading ? 'Uploading...' : 'Saving...') : 'Submit to Finance'}</button>
+        </div>
+        {msg ? <div className="status-tag success" style={{ marginTop: 12 }}>{msg}</div> : null}
+        {error ? <p className="error" style={{ marginTop: 12 }}>{error}</p> : null}
       </form>
-    </article>
+    </div>
   );
 }
 
@@ -1531,6 +1627,9 @@ export function StudentsHubPage({ role }) {
   const [paymentFilter, setPaymentFilter] = useState(''); // initial / topup / clear
   const [minHours, setMinHours] = useState('');
   const [maxHours, setMaxHours] = useState('');
+
+  // Add new student form
+  const [showAddForm, setShowAddForm] = useState(false);
 
   // Group creation modal
   const [groupModal, setGroupModal] = useState(null);
@@ -1608,6 +1707,13 @@ export function StudentsHubPage({ role }) {
 
   return (
     <section className="panel">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0 }}>Students</h2>
+        {(isAC || isSuperAdmin) && (
+          <button type="button" onClick={() => setShowAddForm(true)}>+ Add Student</button>
+        )}
+      </div>
+
       {error ? <p className="error">{error}</p> : null}
       <article className="card">
         <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', alignItems: 'end', flexWrap: 'wrap' }}>
@@ -1734,6 +1840,281 @@ export function StudentsHubPage({ role }) {
             </form>
           </div>
         </div>
+      )}
+
+      {showAddForm && (
+        <div className="modal-overlay" onClick={() => setShowAddForm(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>Add New Student</h3>
+              <button type="button" className="icon-btn" onClick={() => setShowAddForm(false)}>✕</button>
+            </div>
+            <StudentOnboardingForm onDone={() => {
+              setShowAddForm(false);
+              loadData();
+            }} />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ═══════ New Student Pipeline ═══════ */
+export function NewStudentPipelinePage() {
+  const [requests, setRequests] = useState([]);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [pageView, setPageView] = useState('requests'); // 'requests' | 'pending'
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  // Pending payments
+  const [pendingBalances, setPendingBalances] = useState([]);
+  const [loadingPending, setLoadingPending] = useState(false);
+  const [showInstallmentModal, setShowInstallmentModal] = useState(null);
+  const [myInstallments, setMyInstallments] = useState([]);
+  const [loadingMyInstallments, setLoadingMyInstallments] = useState(false);
+
+  const loadData = useCallback(async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const d = await apiFetch('/leads/payment-requests');
+      // Show all AC-submitted requests (the backend already filters by requested_by for AC role)
+      setRequests(d.items || []);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadPendingBalances = useCallback(async () => {
+    setLoadingPending(true);
+    try {
+      const data = await apiFetch('/finance/pending-balances');
+      setPendingBalances((data.items || []).filter(it => it._type === 'payment_request'));
+    } catch (e) { console.error(e); } finally { setLoadingPending(false); }
+  }, []);
+
+  const loadMyInstallments = useCallback(async () => {
+    setLoadingMyInstallments(true);
+    try {
+      const data = await apiFetch('/finance/my-installments');
+      setMyInstallments((data.items || []).filter(it => it.reference_type === 'payment_request'));
+    } catch (e) { console.error(e); } finally { setLoadingMyInstallments(false); }
+  }, []);
+
+  useEffect(() => { loadData(); }, [loadData]);
+  useEffect(() => { if (pageView === 'pending') { loadPendingBalances(); loadMyInstallments(); } }, [pageView]);
+
+  const statusBadge = (status) => {
+    const map = {
+      pending: { bg: '#fef3c7', color: '#92400e', label: '⏳ Pending' },
+      verified: { bg: '#dcfce7', color: '#15803d', label: '✅ Verified' },
+      rejected: { bg: '#fee2e2', color: '#dc2626', label: '❌ Rejected' }
+    };
+    const s = map[status] || { bg: '#f3f4f6', color: '#6b7280', label: status };
+    return (
+      <span style={{
+        display: 'inline-block', padding: '3px 10px', borderRadius: '12px',
+        fontSize: '11px', fontWeight: 600, background: s.bg, color: s.color
+      }}>{s.label}</span>
+    );
+  };
+
+  const counts = useMemo(() => {
+    const c = { all: requests.length, pending: 0, verified: 0, rejected: 0 };
+    requests.forEach(r => { if (c[r.status] !== undefined) c[r.status]++; });
+    return c;
+  }, [requests]);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === 'all') return requests;
+    return requests.filter(r => r.status === statusFilter);
+  }, [requests, statusFilter]);
+
+  if (loading) return <section className="panel"><p>Loading pipeline...</p></section>;
+
+  return (
+    <section className="panel">
+      {error ? <p className="error">{error}</p> : null}
+
+      {/* Tabs */}
+      <div className="tabs-row" style={{ marginBottom: '8px', flexWrap: 'nowrap', overflowX: 'auto', paddingBottom: '4px' }}>
+        {[{ key: 'requests', label: 'Verification Requests' }, { key: 'pending', label: 'Pending Payments' }].map(t => (
+          <button key={t.key} type="button" className={`tab-btn ${pageView === t.key ? 'active' : ''}`} onClick={() => setPageView(t.key)} style={{ whiteSpace: 'nowrap' }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ Tab: Pending Payments ═══ */}
+      {pageView === 'pending' && (
+        <div>
+          {loadingPending ? <p>Loading...</p> : (
+            <>
+              <div className="card">
+                <div className="table-wrap mobile-friendly-table">
+                  <table className="data-table">
+                    <thead><tr>
+                      <th>Student</th>
+                      <th>Phone</th>
+                      <th>Total ₹</th>
+                      <th>Paid ₹</th>
+                      <th>Remaining</th>
+                      <th>Action</th>
+                    </tr></thead>
+                    <tbody>
+                      {pendingBalances.map(item => (
+                        <tr key={item.id}>
+                          <td data-label="Student" style={{ fontWeight: 500 }}>{item.leads?.student_name || item.students?.student_name || '—'}</td>
+                          <td data-label="Phone">{item.leads?.contact_number || '—'}</td>
+                          <td data-label="Total ₹">₹{Number(item.total_amount).toLocaleString('en-IN')}</td>
+                          <td data-label="Paid ₹" style={{ color: '#16a34a', fontWeight: 600 }}>₹{Number(item.amount || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Remaining" style={{ color: '#dc2626', fontWeight: 700 }}>₹{Number(item.remaining_amount).toLocaleString('en-IN')}</td>
+                          <td data-label="Action">
+                            <button className="primary small" onClick={() => setShowInstallmentModal(item)}>Upload Installment</button>
+                          </td>
+                        </tr>
+                      ))}
+                      {!pendingBalances.length && (
+                        <tr><td colSpan="6" style={{ textAlign: 'center', color: '#6b7280', padding: '32px' }}>No pending balances.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* My Submitted Installments */}
+              <div className="card" style={{ marginTop: '24px' }}>
+                <h3 style={{ margin: '0 0 14px', fontSize: '16px', fontWeight: 700 }}>My Submitted Installments</h3>
+                {loadingMyInstallments ? <p style={{ color: '#6b7280' }}>Loading...</p> : (
+                  <div className="table-wrap mobile-friendly-table">
+                    <table className="data-table">
+                      <thead><tr>
+                        <th>Student</th>
+                        <th>Amount</th>
+                        <th>Note</th>
+                        <th>Screenshot</th>
+                        <th>Status</th>
+                        <th>Submitted</th>
+                      </tr></thead>
+                      <tbody>
+                        {myInstallments.map(inst => {
+                          const statusMap = {
+                            pending: { bg: '#fef3c7', color: '#92400e', label: '⏳ Pending' },
+                            verified: { bg: '#dcfce7', color: '#15803d', label: '✅ Verified' },
+                            rejected: { bg: '#fee2e2', color: '#dc2626', label: '❌ Rejected' }
+                          };
+                          const s = statusMap[inst.status] || { bg: '#f3f4f6', color: '#6b7280', label: inst.status };
+                          return (
+                            <tr key={inst.id}>
+                              <td data-label="Student" style={{ fontWeight: 500 }}>{inst.student_name || '—'}</td>
+                              <td data-label="Amount" style={{ fontWeight: 700, color: '#15803d' }}>₹{Number(inst.amount).toLocaleString('en-IN')}</td>
+                              <td data-label="Note" style={{ fontSize: '12px', color: '#6b7280', maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis' }}>{inst.finance_note || '—'}</td>
+                              <td data-label="Screenshot">{inst.screenshot_url ? <a href={inst.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca', fontSize: '12px' }}>View</a> : '—'}</td>
+                              <td data-label="Status"><span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: s.bg, color: s.color }}>{s.label}</span></td>
+                              <td data-label="Submitted" style={{ fontSize: '12px', color: '#6b7280' }}>{new Date(inst.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                            </tr>
+                          );
+                        })}
+                        {!myInstallments.length && (
+                          <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No installments submitted yet.</td></tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+          {showInstallmentModal && (
+            <UploadInstallmentModal
+              item={showInstallmentModal}
+              onClose={() => setShowInstallmentModal(null)}
+              onSuccess={() => { setShowInstallmentModal(null); loadPendingBalances(); loadMyInstallments(); }}
+            />
+          )}
+        </div>
+      )}
+
+      {/* ═══ Tab: Verification Requests ═══ */}
+      {pageView === 'requests' && (
+        <>
+          {/* Stats Cards */}
+          <div className="grid-four pill-stats-grid" style={{ marginBottom: '12px' }}>
+            {[
+              { key: 'all', label: 'Total', value: counts.all, color: '#111' },
+              { key: 'pending', label: 'Pending', value: counts.pending, color: '#92400e' },
+              { key: 'verified', label: 'Verified', value: counts.verified, color: '#15803d' },
+              { key: 'rejected', label: 'Rejected', value: counts.rejected, color: '#dc2626' }
+            ].map(s => (
+              <div key={s.key} className="card"
+                onClick={() => setStatusFilter(s.key)}
+                style={{
+                  padding: '14px', textAlign: 'center', cursor: 'pointer',
+                  border: statusFilter === s.key ? '2px solid #2563eb' : '2px solid transparent',
+                  transition: 'border 0.2s'
+                }}>
+                <p style={{ margin: 0, fontSize: '22px', fontWeight: 700, color: s.color }}>{s.value}</p>
+                <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '11px' }}>{s.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Table */}
+          <div className="card">
+            <div className="table-wrap mobile-friendly-table">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Student</th>
+                    <th>Phone</th>
+                    <th>Class</th>
+                    <th>Total Amt</th>
+                    <th>Hours</th>
+                    <th>Paid Amt</th>
+                    <th>Screenshot</th>
+                    <th>Status</th>
+                    <th>Finance Note</th>
+                    <th>Submitted</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => (
+                    <tr key={r.id}>
+                      <td data-label="Student" style={{ fontWeight: 500 }}>{r.leads?.student_name || '—'}</td>
+                      <td data-label="Phone">{r.leads?.contact_number || '—'}</td>
+                      <td data-label="Class">{r.leads?.class_level || '—'}</td>
+                      <td data-label="Total Amt" style={{ fontWeight: 600 }}>{r.total_amount ? `₹${Number(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
+                      <td data-label="Hours">{r.hours || '—'}</td>
+                      <td data-label="Paid Amt" style={{ fontWeight: 600, color: '#15803d' }}>₹{Number(r.amount).toLocaleString('en-IN')}</td>
+                      <td data-label="Screenshot">
+                        {r.screenshot_url ? (
+                          <a href={r.screenshot_url} target="_blank" rel="noopener noreferrer"
+                            style={{ color: '#2563eb', fontSize: '12px' }}>View</a>
+                        ) : '—'}
+                      </td>
+                      <td data-label="Status">{statusBadge(r.status)}</td>
+                      <td data-label="Finance Note" style={{ fontSize: '12px', color: '#6b7280', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {r.finance_note || '—'}
+                      </td>
+                      <td data-label="Submitted" style={{ fontSize: '12px', color: '#6b7280' }}>
+                        {new Date(r.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })}
+                      </td>
+                    </tr>
+                  ))}
+                  {!filtered.length && (
+                    <tr><td colSpan="10" style={{ textAlign: 'center', color: '#9ca3af', padding: '40px' }}>
+                      No onboarding requests found. Add a new student from the Students page to see them here.
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </section>
   );
