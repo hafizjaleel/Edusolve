@@ -1,0 +1,825 @@
+{
+  "Sheet1": [
+    {
+      "student_name": "HEZRIN THOMAS ",
+      "student_code": "AG0240473",
+      "country_code": 96,
+      "contact_number": 597643970,
+      "alternative_number": 550946177,
+      "class_level": 9,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active ",
+      "joined_at": "13/7/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Nimisha"
+    },
+    {
+      "student_name": "NAZRIN THOMAS ",
+      "student_code": "SP02501180",
+      "country_code": 96,
+      "contact_number": 597643970,
+      "alternative_number": 550946177,
+      "class_level": 8,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active ",
+      "joined_at": 45786,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ac2"
+    },
+    {
+      "student_name": "INAYA FELLAH ",
+      "student_code": "JU0240348",
+      "country_code": 97,
+      "contact_number": 431158704,
+      "alternative_number": 466878975,
+      "class_level": 4,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3 month",
+      "total_hours": 60,
+      "status": "Active",
+      "joined_at": "29/5/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "ATHMANA DJ",
+      "student_code": "JN0250700",
+      "country_code": 97,
+      "contact_number": 1508260445,
+      "class_level": 3,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45663,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Sruthy"
+    },
+    {
+      "student_name": "ROSHNI",
+      "student_code": "OC0240570",
+      "country_code": 97,
+      "contact_number": 1527925540,
+      "alternative_number": 8304041163,
+      "class_level": 3,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45663,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Sruthy"
+    },
+    {
+      "student_name": "Shauna ",
+      "student_code": "SP023086",
+      "country_code": 97,
+      "contact_number": 1555584913,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Yearly ",
+      "total_hours": 240,
+      "status": "Active",
+      "joined_at": "24/1/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "CCO"
+    },
+    {
+      "student_name": "Diya",
+      "student_code": "AR0240238",
+      "country_code": 97,
+      "contact_number": 450620010,
+      "class_level": 4,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 16,
+      "status": "Active",
+      "joined_at": "31/5/2024",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Cco"
+    },
+    {
+      "student_name": "Chris zion sajan",
+      "student_code": "AR0250972",
+      "country_code": 97,
+      "contact_number": 1509692025,
+      "class_level": 4,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "17/5/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ac2"
+    },
+    {
+      "student_name": "Yaseen abdulrahman",
+      "student_code": "AR0250853",
+      "country_code": 97,
+      "contact_number": 1581493700,
+      "alternative_number": 1505059290,
+      "class_level": 4,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45875,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ac2"
+    },
+    {
+      "student_name": "Jaiden pc",
+      "student_code": "MA0250973",
+      "country_code": 97,
+      "contact_number": 1501541824,
+      "alternative_number": 1589416063,
+      "class_level": 12,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": "17/5/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Devashree ",
+      "student_code": "JN0250682",
+      "country_code": 91,
+      "contact_number": 9495397917,
+      "class_level": 4,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45719,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Cco"
+    },
+    {
+      "student_name": "Prarthana Pradeep ",
+      "student_code": "SP02501137",
+      "country_code": 97,
+      "contact_number": 1558778569,
+      "alternative_number": 7907051355,
+      "class_level": 8,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45970,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Drishya"
+    },
+    {
+      "student_name": "Harshak",
+      "student_code": "SP02501179",
+      "country_code": 97,
+      "contact_number": 1567214762,
+      "alternative_number": 1566900283,
+      "parent_phone": 1507907252,
+      "class_level": 1,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 12,
+      "status": "Active",
+      "joined_at": "28/9/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ac2"
+    },
+    {
+      "student_name": "Hemanika ",
+      "student_code": "FB0250742",
+      "country_code": 97,
+      "contact_number": 1567214762,
+      "alternative_number": 1566900283,
+      "parent_phone": 1507907252,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "25/2/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Nimisha"
+    },
+    {
+      "student_name": "Akshara",
+      "student_code": "DC0240638",
+      "country_code": 96,
+      "contact_number": 878261365,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "17/4/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Thanvi",
+      "student_code": "MA0250980",
+      "country_code": 96,
+      "contact_number": 6598689196,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45658,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Sruthi"
+    },
+    {
+      "student_name": "Aziya ashkath ",
+      "student_code": "DC0230179",
+      "country_code": 97,
+      "contact_number": 477323254,
+      "alternative_number": 470967718,
+      "class_level": 12,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 24,
+      "status": "Active",
+      "joined_at": 45354,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ceo"
+    },
+    {
+      "student_name": "Ayra Ashkath ",
+      "student_code": "DC0230180",
+      "country_code": 97,
+      "contact_number": 477323254,
+      "alternative_number": 470967718,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 12,
+      "status": "Active",
+      "joined_at": 45385,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ceo"
+    },
+    {
+      "student_name": "Aaradya",
+      "student_code": "AG0240439",
+      "country_code": 96,
+      "contact_number": 596098834,
+      "class_level": 8,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3MONTH ",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45539,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Cco"
+    },
+    {
+      "student_name": "Aron",
+      "student_code": "NV0240602",
+      "country_code": 91,
+      "contact_number": 9495913551,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": 45719,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla "
+    },
+    {
+      "student_name": "Jake soby",
+      "student_code": "JL02501034",
+      "country_code": 97,
+      "contact_number": 9061085377,
+      "alternative_number": 1521148090,
+      "parent_phone": 1552724753,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "16/7/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Fidha"
+    },
+    {
+      "student_name": "Senon soby",
+      "student_code": "JL02501035",
+      "country_code": 97,
+      "contact_number": 9061085377,
+      "alternative_number": 1521148090,
+      "parent_phone": 1552724753,
+      "class_level": 8,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "16/7/2025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Fidha"
+    },
+    {
+      "student_name": "Parvana",
+      "student_code": "NV0240597",
+      "country_code": 97,
+      "contact_number": 1547322362,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3MONTH ",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45660,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Ameya Sooraj ",
+      "student_code": "JU0250999",
+      "country_code": 97,
+      "contact_number": 1504316651,
+      "class_level": 3,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 10,
+      "status": "Active",
+      "joined_at": 45814,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Drishya"
+    },
+    {
+      "student_name": "Maryam ",
+      "student_code": "AG0240446",
+      "country_code": 97,
+      "contact_number": 433210152,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "18/8/2024",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Ceo"
+    },
+    {
+      "student_name": "Muhammed ",
+      "student_code": "SP02501187",
+      "country_code": 97,
+      "contact_number": 1508388473,
+      "alternative_number": 1562116118,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Monthly ",
+      "total_hours": 20,
+      "status": "Active",
+      "joined_at": "30/1/2026",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Raheena "
+    },
+    {
+      "student_name": "Izza parveen",
+      "student_code": "AU02501069",
+      "country_code": 96,
+      "contact_number": 6896968025,
+      "alternative_number": 878696187,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45908,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Raheena "
+    },
+    {
+      "student_name": "Anita maria josh",
+      "student_code": "JN0250675",
+      "country_code": 97,
+      "contact_number": 1507716676,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45660,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Annie",
+      "student_code": "FB0250752",
+      "country_code": 97,
+      "contact_number": 1507716676,
+      "class_level": 10,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45660,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Jiya biju",
+      "student_code": "AR0250864",
+      "country_code": 96,
+      "contact_number": 6558782925,
+      "class_level": 10,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "3Month",
+      "total_hours": 63,
+      "status": "Active",
+      "joined_at": 45995,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "student_name": "Aysha Sulfikar ",
+      "student_code": "AP02501141",
+      "country_code": 97,
+      "contact_number": 1506612376,
+      "class_level": 8,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "6 month",
+      "total_hours": 128,
+      "status": "Active",
+      "joined_at": "3/92025",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "student_name": "Anvitha",
+      "student_code": "AR0250868",
+      "country_code": 97,
+      "contact_number": 1525919743,
+      "alternative_number": 1503933452,
+      "parent_phone": 1509216169,
+      "class_level": 7,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 24,
+      "status": "Active",
+      "joined_at": 45995,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com",
+      "counselor_name": "Shifla"
+    },
+    {
+      "student_name": "Ashmita",
+      "student_code": "AR0250875",
+      "country_code": 97,
+      "contact_number": 1525919743,
+      "alternative_number": 1503933452,
+      "parent_phone": 1509216169,
+      "class_level": 5,
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "package_name": "Customised ",
+      "total_hours": 24,
+      "status": "Active",
+      "joined_at": 45995,
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp ",
+      "ac_name": "Ac2",
+      "ac_email": "edusolve2ac@gmail.com"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active",
+      "source": "WhatsApp "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH ",
+      "status": "Active"
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "board": "CBSE",
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    },
+    {
+      "medium": "ENGLISH "
+    }
+  ]
+}

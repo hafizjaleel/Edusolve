@@ -651,7 +651,7 @@ export async function handleTeachers(req, res, url) {
       }
       const { data: profile, error: pErr } = await adminClient
         .from('teacher_profiles')
-        .select('id, user_id')
+        .select('id, user_id, onboarding_completed')
         .eq('user_id', actor.userId)
         .maybeSingle();
       if (pErr) throw new Error(pErr.message);
@@ -661,10 +661,31 @@ export async function handleTeachers(req, res, url) {
       }
 
       const payload = await readJson(req);
-      const selfAllowed = ['gender', 'dob', 'address', 'pincode', 'city', 'place', 'meeting_link'];
+      
+      // Fields allowed for self-edit after onboarding
+      const selfAllowedAfterOnboarding = ['gender', 'dob', 'address', 'pincode', 'city', 'place', 'meeting_link'];
+      
+      // Fields allowed during onboarding (includes professional and bank details)
+      const onboardingAllowed = [
+        'experience_level', 'per_hour_rate', 'phone', 'qualification',
+        'subjects_taught', 'syllabus', 'languages', 'experience_duration',
+        'experience_type', 'place', 'city', 'communication_level',
+        'account_holder_name', 'account_number', 'ifsc_code',
+        'gpay_holder_name', 'gpay_number', 'upi_id',
+        'gender', 'dob', 'address', 'pincode', 'meeting_link'
+      ];
+
+      const isDuringOnboarding = profile.onboarding_completed === false;
+      const allowedFields = isDuringOnboarding ? onboardingAllowed : selfAllowedAfterOnboarding;
+
       const updates = {};
-      for (const k of selfAllowed) {
+      for (const k of allowedFields) {
         if (payload[k] !== undefined) updates[k] = payload[k];
+      }
+
+      // Handle onboarding completion
+      if (payload.is_completing_onboarding === true) {
+        updates.onboarding_completed = true;
       }
 
       if (Object.keys(updates).length > 0) {
