@@ -62,10 +62,10 @@ export const APP_PAGES = [
   { path: '/finance/reports', title: 'Reports', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
 
   /* ── HR ── */
-  { path: '/dashboard/hr', title: 'HR Dashboard', group: 'Dashboards', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/dashboard/hr', title: 'Dashboard', group: 'Dashboards', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/attendance', title: 'Attendance', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/employees', title: 'Employees', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
-  { path: '/hr/salary', title: 'Salary Calculator', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/hr/salary', title: 'Salary', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/councilor-levels', title: 'Councilor Levels', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/hr/payment-requests', title: 'Payment Requests', group: 'HR', roles: [ROLES.HR, ROLES.SUPER_ADMIN], showInNav: true },
 

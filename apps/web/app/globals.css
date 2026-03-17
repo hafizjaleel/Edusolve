@@ -773,6 +773,10 @@ button.danger {
   align-items: center;
 }
 
+.desktop-hidden {
+  display: none;
+}
+
 @media (max-width: 960px) {
   .attendance-quick-actions {
     flex-wrap: wrap;
@@ -789,6 +793,10 @@ button.danger {
 
   .desktop-only {
     display: none !important;
+  }
+
+  .desktop-hidden {
+    display: block !important;
   }
 
   .ticket-filters-grid {
@@ -879,6 +887,7 @@ button.danger {
     transition: transform 220ms ease-out;
     box-shadow: 0 20px 44px rgba(16, 35, 63, 0.18);
     overflow-y: auto;
+    padding-bottom: 150px;
   }
 
   .sidebar.mobile-open {
@@ -1081,16 +1090,56 @@ button.danger {
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
+  /* Attendance Stat Pills on Mobile */
+  .grid-four {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+
   .grid-four .stat-card {
-    padding: 12px;
+    background: transparent !important;
+    box-shadow: none !important;
+    border: 1px solid var(--line) !important;
+    padding: 6px 12px !important;
+    border-radius: 999px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    margin: 0 !important;
   }
 
   .grid-four .stat-card h3 {
-    font-size: 22px;
+    font-size: 14px !important;
+    margin: 0 !important;
+    order: 2 !important;
+    /* Put number after text */
   }
 
   .grid-four .stat-card .eyebrow {
-    font-size: 10px;
+    font-size: 13px !important;
+    margin: 0 !important;
+    font-weight: 500 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    order: 1 !important;
+  }
+
+  .grid-four .stat-card.success h3,
+  .grid-four .stat-card.success .eyebrow {
+    color: var(--success) !important;
+  }
+
+  .grid-four .stat-card.danger h3,
+  .grid-four .stat-card.danger .eyebrow {
+    color: var(--danger) !important;
+  }
+
+  .grid-four .stat-card.warning h3,
+  .grid-four .stat-card.warning .eyebrow {
+    color: var(--warning) !important;
   }
 
   /* Counselor Head mobile stats */

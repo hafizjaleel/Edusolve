@@ -20,6 +20,7 @@ import { handleWaappa } from './waappa/waappa.routes.js';
 
 import { AuthService } from './auth/auth.service.js';
 import { getBearerToken } from './common/http.js';
+import { rateLimit } from './common/rate-limiter.js';
 
 const authService = new AuthService();
 
@@ -34,6 +35,9 @@ const server = http.createServer(async (req, res) => {
     });
     return res.end();
   }
+
+  // 1. Enforce strict Rate Limiting (100 requests / 15 minutes by default)
+  if (!rateLimit(req, res)) return;
 
   if (await handleAuth(req, res)) return;
 
