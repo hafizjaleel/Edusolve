@@ -12,5 +12,8 @@
     "build:web": "npm run build --workspace @ehms/web",
     "start:api": "npm run start --workspace @ehms/api",
     "start:web": "npm run start --workspace @ehms/web"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
   }
 }
