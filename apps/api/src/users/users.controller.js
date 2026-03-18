@@ -123,6 +123,45 @@ export async function handleUsers(req, res) {
                 if (empError) console.error('Failed to auto-add employee:', empError.message);
             }
 
+            // For teachers: auto-create public users row + teacher_profiles row
+            // so they appear in the Teacher Directory immediately
+            if (role === 'teacher') {
+                // 1. Upsert public users row (teacher_profiles FK references users.id)
+                await adminClient.from('users').upsert({
+                    id: data.user.id,
+                    full_name: name || email,
+                    email: email,
+                    phone: phone
+                }, { onConflict: 'id' });
+
+                // 2. Generate a unique teacher code (TCR000001, TCR000002, …)
+                const { data: existingCodes } = await adminClient
+                    .from('teacher_profiles')
+                    .select('teacher_code')
+                    .not('teacher_code', 'is', null)
+                    .order('created_at', { ascending: false })
+                    .limit(200);
+
+                let maxNum = 0;
+                for (const row of existingCodes || []) {
+                    const num = Number((row.teacher_code || '').replace(/^TCR/i, ''));
+                    if (Number.isFinite(num) && num > maxNum) maxNum = num;
+                }
+                const teacherCode = `TCR${String(maxNum + 1).padStart(6, '0')}`;
+
+                // 3. Insert a minimal teacher_profiles row
+                const now = new Date().toISOString();
+                const { error: tpError } = await adminClient.from('teacher_profiles').insert({
+                    user_id: data.user.id,
+                    teacher_code: teacherCode,
+                    is_in_pool: false,
+                    onboarding_completed: false,
+                    created_at: now,
+                    updated_at: now
+                });
+                if (tpError) console.error('Failed to auto-create teacher_profiles row:', tpError.message);
+            }
+
             sendJson(res, 201, { ok: true, user: data.user });
             return true;
         }
@@ -131,15 +170,27 @@ export async function handleUsers(req, res) {
         if (req.method === 'PATCH') {
             const id = req.url.split('/').pop();
             const body = await readJson(req);
-            const { role, password, name } = body;
+            const { role, password, name, phone } = body;
 
             const updates = { user_metadata: { ...body.user_metadata } };
             if (role) updates.user_metadata.role = role;
             if (name) updates.user_metadata.name = name;
+            if (phone) updates.user_metadata.phone = phone;
             if (password) updates.password = password;
 
             const { data, error } = await adminClient.auth.admin.updateUserById(id, updates);
             if (error) throw error;
+
+            // Also update the public users row if phone or name changed
+            const publicUpdate = {};
+            if (name) publicUpdate.full_name = name;
+            if (phone) publicUpdate.phone = phone;
+            if (Object.keys(publicUpdate).length > 0) {
+                await adminClient.from('users').update(publicUpdate).eq('id', id);
+                // Also update employees table phone/name if record exists
+                if (phone) await adminClient.from('employees').update({ phone }).eq('user_id', id);
+                if (name) await adminClient.from('employees').update({ full_name: name }).eq('user_id', id);
+            }
 
             sendJson(res, 200, { ok: true, user: data.user });
             return true;

@@ -172,15 +172,13 @@ export class LeadsService {
       return { items: filtered, total, page: 1, limit: total || 10 };
     }
 
-    let selectQuery = '*';
-    if (resolvedScope === 'joined') {
-      selectQuery = '*, students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))';
-    }
+    let selectQuery = '*, students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))';
 
     let query = adminClient
       .from('leads')
       .select(selectQuery, { count: 'exact' })
       .is('deleted_at', null)
+      .or('source.neq."AC Direct Onboarding",source.is.null')
       .order('created_at', { ascending: false });
 
     if (resolvedScope === 'mine') {
@@ -208,6 +206,7 @@ export class LeadsService {
         .select('*', { count: 'exact' })
         .is('deleted_at', null)
         .eq('status', 'joined')
+        .or('source.neq."AC Direct Onboarding",source.is.null')
         .order('updated_at', { ascending: false });
 
       if (counselor_id && counselor_id !== 'all') joinedQuery = joinedQuery.eq('counselor_id', counselor_id);
@@ -293,7 +292,7 @@ export class LeadsService {
 
     const { data, error } = await adminClient
       .from('leads')
-      .select('*, teacher_profiles(id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email))')
+      .select('*, teacher_profiles(id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email)), students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))')
       .eq('id', id)
       .is('deleted_at', null)
       .maybeSingle();
@@ -675,9 +674,13 @@ export class LeadsService {
 
     let query = adminClient
       .from('payment_requests')
-      .select('*, leads(student_name, subject, class_level, contact_number, counselor_id, source, package_name)', { count: 'exact' })
+      .select('*, leads!inner(student_name, subject, class_level, contact_number, counselor_id, source, package_name)', { count: 'exact' })
       .order('status', { ascending: true })
       .order('created_at', { ascending: false });
+
+    if (actor.role === 'counselor_head' || actor.role === 'counselor') {
+       query = query.or('source.neq."AC Direct Onboarding",source.is.null', { foreignTable: 'leads' });
+    }
 
     // Counselors and ACs see only their own requests
     if (isCounselor(actor) || actor.role === 'academic_coordinator') {
@@ -691,7 +694,27 @@ export class LeadsService {
 
     const { data, count, error } = await query;
     if (error) throw new Error(error.message);
-    return { items: data || [], total: count || 0, page, limit };
+
+    // Resolve counselor names to ensure counselor heads/super admins are also resolved
+    const userIds = [...new Set((data || []).map(r => r.leads?.counselor_id).filter(Boolean))];
+    let userMap = {};
+    if (userIds.length > 0) {
+      const { data: users } = await adminClient
+        .from('users')
+        .select('id, full_name, email')
+        .in('id', userIds);
+      (users || []).forEach(u => { userMap[u.id] = u.full_name || u.email || 'Unknown'; });
+    }
+
+    const items = (data || []).map(r => {
+      // Modify inline to add explicit name
+      if (r.leads && r.leads.counselor_id) {
+         r.leads.counselor_name = userMap[r.leads.counselor_id] || r.leads.counselor_id;
+      }
+      return r;
+    });
+
+    return { items, total: count || 0, page, limit };
   }
 
   async submitPaymentRequest(id, actor, payload) {

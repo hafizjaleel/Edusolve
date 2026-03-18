@@ -798,16 +798,84 @@ export async function handleFinance(req, res, url) {
 
 
 
+    // ═══════ GET ALL STUDENTS (for Student Hours page) ═══════
+    if (req.method === 'GET' && url.pathname === '/finance/students') {
+      const { data, error } = await adminClient
+        .from('students')
+        .select('id, student_name, student_code, status, class_level, total_hours, remaining_hours, joined_at, contact_number')
+        .order('student_name', { ascending: true });
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, items: data || [] });
+      return true;
+    }
+
+
+    if (req.method === 'PATCH' && parts.length === 4 && parts[1] === 'students' && parts[3] === 'hours') {
+      const studentId = parts[2];
+      const payload = await readJson(req);
+
+      if (payload.remaining_hours === undefined && payload.total_hours === undefined) {
+        sendJson(res, 400, { ok: false, error: 'remaining_hours or total_hours required' });
+        return true;
+      }
+
+      const { data: student, error: fetchErr } = await adminClient
+        .from('students')
+        .select('id, student_name, student_code, remaining_hours, total_hours')
+        .eq('id', studentId)
+        .maybeSingle();
+      if (fetchErr) throw new Error(fetchErr.message);
+      if (!student) { sendJson(res, 404, { ok: false, error: 'student not found' }); return true; }
+
+      const updateData = { updated_at: nowIso() };
+      if (payload.remaining_hours !== undefined) updateData.remaining_hours = Number(payload.remaining_hours);
+      if (payload.total_hours !== undefined) updateData.total_hours = Number(payload.total_hours);
+
+      const { data: updated, error: updateErr } = await adminClient
+        .from('students')
+        .update(updateData)
+        .eq('id', studentId)
+        .select('id, student_name, student_code, remaining_hours, total_hours')
+        .single();
+      if (updateErr) throw new Error(updateErr.message);
+
+      // Log the manual adjustment in ledger notes (informational audit entry)
+      const reason = payload.reason || 'Manual hour adjustment by finance';
+      const prevRemaining = Number(student.remaining_hours || 0);
+      const newRemaining = Number(updateData.remaining_hours ?? student.remaining_hours);
+      const diff = newRemaining - prevRemaining;
+      if (diff !== 0) {
+        try {
+          await adminClient.from('ledger_entries').insert({
+            entry_date: nowIso().slice(0, 10),
+            entry_type: 'income',
+            amount: 0,
+            description: `[Hour Adjustment] ${student.student_name}: ${diff > 0 ? '+' : ''}${diff} hrs remaining (${reason})`,
+            student_id: studentId,
+            posted_by: actor.userId
+          });
+        } catch (e) {
+          console.error('Audit log failed:', e);
+        }
+      }
+
+      sendJson(res, 200, { ok: true, student: updated });
+      return true;
+    }
+
     // ═══════ PENDING INSTALLMENTS ═══════
     if (req.method === 'GET' && url.pathname === '/finance/pending-balances') {
       try {
-        let payQuery = adminClient.from('payment_requests').select('*, leads(student_name, contact_number)').eq('status', 'verified');
+        let payQuery = adminClient.from('payment_requests').select('*, leads!inner(student_name, contact_number, source)').eq('status', 'verified');
         let topupQuery = adminClient.from('student_topups').select('*, students(student_name, student_code)').eq('status', 'verified');
 
         // Counselors and ACs see only their own pending balances
         if (['counselor', 'academic_coordinator'].includes(actor.role)) {
           payQuery = payQuery.eq('requested_by', actor.userId);
           topupQuery = topupQuery.eq('requested_by', actor.userId);
+        } else if (actor.role === 'counselor_head') {
+          // Counselor Head should not see AC Direct Onboarding Dummy pending balances
+          payQuery = payQuery.or('source.neq."AC Direct Onboarding",source.is.null', { foreignTable: 'leads' });
         }
 
         const [payRes, topupRes] = await Promise.all([payQuery, topupQuery]);

@@ -250,7 +250,7 @@ export function CounselorDashboardPage({ targetUserId }) {
                     {l.name} {l.id === targetUserId && '(You)'}
                   </span>
                 </div>
-                <span style={{ fontSize: '13px', fontWeight: 'bold' }}>{l.progress}%</span>
+                <span style={{ fontSize: '13px', fontWeight: 'bold' }}>₹{l.achieved.toLocaleString()} / ₹{l.targetAmt.toLocaleString()} <span style={{ color: l.progress >= 100 ? '#10b981' : '#6366f1' }}>({l.progress}%)</span></span>
               </div>
               <div style={{ background: '#f3f4f6', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${l.progress}%`, background: l.progress >= 100 ? '#10b981' : '#6366f1' }}></div>
@@ -432,7 +432,7 @@ export function CounselorHeadDashboardPage({ targetUserId }) {
                     {l.name} {l.id === targetUserId && '(You)'}
                   </span>
                 </div>
-                <span style={{ fontSize: '13px', fontWeight: 'bold' }}>{l.progress}%</span>
+                <span style={{ fontSize: '13px', fontWeight: 'bold' }}>₹{l.achieved.toLocaleString()} / ₹{l.targetAmt.toLocaleString()} <span style={{ color: l.progress >= 100 ? '#10b981' : '#6366f1' }}>({l.progress}%)</span></span>
               </div>
               <div style={{ background: '#f3f4f6', height: '4px', borderRadius: '2px', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${l.progress}%`, background: l.progress >= 100 ? '#10b981' : '#6366f1' }}></div>

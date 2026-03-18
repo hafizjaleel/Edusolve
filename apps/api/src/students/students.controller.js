@@ -16,6 +16,7 @@ const whatsappGroupSchema = z.object({
 const updateStudentSchema = z.object({
   student_name: z.string().max(150).optional(),
   parent_name: z.string().max(150).optional(),
+  country_code: z.string().max(10).optional(),
   contact_number: phoneSchema.optional(),
   alternative_number: phoneSchema.optional(),
   parent_phone: phoneSchema.optional(),
@@ -153,7 +154,7 @@ export async function handleStudents(req, res, url) {
 
       let query = adminClient
         .from('students')
-        .select('*, ac_user:academic_coordinator_id(id, full_name), student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name))')
+        .select('*, ac_user:academic_coordinator_id(id, full_name), student_teacher_assignments!student_teacher_assignments_student_id_fkey(id, teacher_id, subject, is_active, users!student_teacher_assignments_teacher_id_fkey(id, full_name)), leads!students_lead_id_fkey(source)')
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
@@ -236,6 +237,7 @@ export async function handleStudents(req, res, url) {
       const { data: leadModel, error: leadErr } = await adminClient.from('leads').insert({
         student_name: payload.student_name,
         parent_name: payload.parent_name || null,
+        country_code: payload.country_code || null,
         contact_number: payload.contact_number || null,
         class_level: payload.class_level || null,
         package_name: payload.package_name || null,
@@ -254,24 +256,13 @@ export async function handleStudents(req, res, url) {
         amount: Number(payload.onboarding_paid) || 0,
         total_amount: Number(payload.onboarding_fee) || 0,
         hours: Number(payload.hours) || 0,
+        screenshot_url: payload.screenshot_url || null,
         status: 'pending'
       }).select('*').single();
 
       if (reqErr) {
          await adminClient.from('leads').delete().eq('id', leadModel.id);
          throw new Error(`Payment request creation failed: ${reqErr.message}`);
-      }
-
-      // If a screenshot or finance note is provided, auto-create the first installment
-      if (payload.screenshot_url || payload.finance_note) {
-        await adminClient.from('installments').insert({
-          reference_type: 'payment_request',
-          reference_id: paymentReq.id,
-          amount: Number(payload.onboarding_paid) || 0,
-          finance_note: payload.finance_note || '',
-          screenshot_url: payload.screenshot_url || null,
-          created_by: actor.userId
-        });
       }
 
       sendJson(res, 201, { ok: true, msg: 'Onboarding payment request submitted to Finance.' });
@@ -974,29 +965,100 @@ export async function handleStudents(req, res, url) {
 
       const start = new Date(`${start_date}T00:00:00Z`);
       const end = new Date(`${end_date}T00:00:00Z`);
-      const sessionRecords = [];
       const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+      // Collect all target dates
+      const targetDates = [];
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const dayName = DAY_MAP[d.getUTCDay()];
         if (days_of_week.includes(dayName)) {
-          const dateStr = d.toISOString().split('T')[0];
+          targetDates.push(d.toISOString().split('T')[0]);
+        }
+      }
+
+      if (targetDates.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'no valid dates found in range' });
+        return true;
+      }
+
+      // Parse proposed session time window (in minutes, IST = UTC+5:30)
+      const [sH, sM] = started_at.split(':').map(Number);
+      const newStartMins = sH * 60 + sM;
+      const newEndMins = newStartMins + Number(duration_hours) * 60;
+
+      // Fetch existing sessions for teacher and student in the date range
+      const [teacherSessRes, studentSessRes] = await Promise.all([
+        adminClient
+          .from('academic_sessions')
+          .select('session_date, started_at, duration_hours, students(student_name)')
+          .eq('teacher_id', teacher_id)
+          .gte('session_date', start_date)
+          .lte('session_date', end_date)
+          .not('started_at', 'is', null),
+        adminClient
+          .from('academic_sessions')
+          .select('session_date, started_at, duration_hours, users!academic_sessions_teacher_id_fkey(full_name)')
+          .eq('student_id', studentId)
+          .gte('session_date', start_date)
+          .lte('session_date', end_date)
+          .not('started_at', 'is', null)
+      ]);
+
+      const teacherSessions = teacherSessRes.data || [];
+      const studentSessions = studentSessRes.data || [];
+
+      function toMins(timeStr) {
+        // timeStr can be ISO like "2026-03-18T10:00:00+05:30" or "HH:MM"
+        if (timeStr.includes('T')) {
+          const istStr = new Date(timeStr).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+          const [h, m] = istStr.split(':').map(Number);
+          return h * 60 + m;
+        }
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+      }
+
+      function hasOverlap(sessions, dateStr) {
+        return sessions.find(s => {
+          if (s.session_date !== dateStr) return false;
+          const existStart = toMins(s.started_at);
+          const existEnd = existStart + Number(s.duration_hours || 1) * 60;
+          return newStartMins < existEnd && newEndMins > existStart;
+        });
+      }
+
+      // Separate conflicted vs clean dates
+      const conflicts = [];
+      const sessionRecords = [];
+
+      for (const dateStr of targetDates) {
+        const teacherConflict = hasOverlap(teacherSessions, dateStr);
+        const studentConflict = !teacherConflict && hasOverlap(studentSessions, dateStr);
+
+        if (teacherConflict) {
+          conflicts.push({
+            date: dateStr,
+            reason: 'teacher',
+            conflict_with: teacherConflict.students?.student_name || 'another student'
+          });
+        } else if (studentConflict) {
+          conflicts.push({
+            date: dateStr,
+            reason: 'student',
+            conflict_with: studentConflict.users?.full_name || 'another teacher'
+          });
+        } else {
           sessionRecords.push({
             student_id: studentId,
             teacher_id: teacher_id,
             session_date: dateStr,
-            started_at: started_at ? `${dateStr}T${started_at}:00+05:30` : null,
+            started_at: `${dateStr}T${started_at}:00+05:30`,
             duration_hours: Number(duration_hours),
             subject: subject || null,
             status: 'scheduled',
             created_at: nowIso()
           });
         }
-      }
-
-      if (sessionRecords.length === 0) {
-        sendJson(res, 400, { ok: false, error: 'no valid dates found in range' });
-        return true;
       }
 
       const { data, error } = await adminClient

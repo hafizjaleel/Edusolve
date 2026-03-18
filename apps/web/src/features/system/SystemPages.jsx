@@ -8,7 +8,10 @@ export function UsersPage() {
     const [loading, setLoading] = useState(true);
     const [editingUser, setEditingUser] = useState(null);
     const [showAdd, setShowAdd] = useState(false);
-    const [deleteConfirm, setDeleteConfirm] = useState(null); // user object to delete
+    const [deleteConfirm, setDeleteConfirm] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [usersPage, setUsersPage] = useState(1);
+    const USERS_PAGE_SIZE = 20;
 
     async function load() {
         try {
@@ -22,10 +25,18 @@ export function UsersPage() {
     }
 
     useEffect(() => { load(); }, []);
+    useEffect(() => { setUsersPage(1); }, [searchQuery]);
 
     return (
         <section className="panel">
-            <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+                <input
+                    type="text"
+                    placeholder="🔍 Search by name, email, role, phone..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    style={{ padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '260px', flex: 1 }}
+                />
                 <button className="primary" onClick={() => setShowAdd(true)}>+ Add User</button>
             </div>
 
@@ -44,37 +55,65 @@ export function UsersPage() {
                                 </tr>
                             </thead>
                             <tbody>
-                                {users.map(u => (
-                                    <tr key={u.id}>
-                                        <td data-label="Email" style={{ fontWeight: 600 }}>
-                                            {u.email}
-                                            {u.name && <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 400 }}>{u.name}</div>}
-                                        </td>
-                                        <td data-label="Role">
-                                            <span className={`tag ${u.role === 'unknown' ? 'warning' : ''}`} style={{ textTransform: 'uppercase', fontSize: '11px' }}>
-                                                {ROLE_OPTIONS.find(r => r.value === u.role)?.label || u.role}
-                                            </span>
-                                        </td>
-                                        <td data-label="Phone">
-                                            {u.phone || '-'}
-                                        </td>
-                                        <td data-label="Last Sign In" className="text-muted" style={{ fontSize: '13px' }}>
-                                            {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString() : 'Never'}
-                                        </td>
-                                        <td data-label="Created" className="text-muted" style={{ fontSize: '13px' }}>
-                                            {new Date(u.created_at).toLocaleDateString()}
-                                        </td>
-                                        <td data-label="Actions">
-                                            <div style={{ display: 'flex', gap: '8px' }}>
-                                                <button className="secondary small" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => setEditingUser(u)}>
-                                                    Edit
-                                                </button>
-                                                <button className="text-danger" style={{ fontSize: '12px' }} onClick={() => setDeleteConfirm(u)}>Remove</button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))}
-                                {!users.length && <tr><td colSpan="5" style={{ textAlign: 'center', padding: '20px' }}>No users found</td></tr>}
+                                {(() => {
+                                    const q = searchQuery.toLowerCase().trim();
+                                    const filtered = q ? users.filter(u =>
+                                        (u.name || '').toLowerCase().includes(q) ||
+                                        (u.email || '').toLowerCase().includes(q) ||
+                                        (u.role || '').toLowerCase().includes(q) ||
+                                        (u.phone || '').toLowerCase().includes(q)
+                                    ) : users;
+                                    const totalPages = Math.max(1, Math.ceil(filtered.length / USERS_PAGE_SIZE));
+                                    const paginated = filtered.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE);
+                                    if (!filtered.length) return <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>No users found</td></tr>;
+                                    return (<>
+                                        {paginated.map(u => (
+                                            <tr key={u.id}>
+                                                <td data-label="Email" style={{ fontWeight: 600 }}>
+                                                    {u.email}
+                                                    {u.name && <div style={{ fontSize: '11px', color: 'var(--muted)', fontWeight: 400 }}>{u.name}</div>}
+                                                </td>
+                                                <td data-label="Role">
+                                                    <span className={`tag ${u.role === 'unknown' ? 'warning' : ''}`} style={{ textTransform: 'uppercase', fontSize: '11px' }}>
+                                                        {ROLE_OPTIONS.find(r => r.value === u.role)?.label || u.role}
+                                                    </span>
+                                                </td>
+                                                <td data-label="Phone">{u.phone || '-'}</td>
+                                                <td data-label="Last Sign In" className="text-muted" style={{ fontSize: '13px' }}>
+                                                    {u.last_sign_in_at ? new Date(u.last_sign_in_at).toLocaleString() : 'Never'}
+                                                </td>
+                                                <td data-label="Created" className="text-muted" style={{ fontSize: '13px' }}>
+                                                    {new Date(u.created_at).toLocaleDateString()}
+                                                </td>
+                                                <td data-label="Actions">
+                                                    <div style={{ display: 'flex', gap: '8px' }}>
+                                                        <button className="secondary small" style={{ fontSize: '12px', padding: '4px 8px' }} onClick={() => setEditingUser(u)}>Edit</button>
+                                                        <button className="text-danger" style={{ fontSize: '12px' }} onClick={() => setDeleteConfirm(u)}>Remove</button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                        {totalPages > 1 && (
+                                            <tr>
+                                                <td colSpan={6} style={{ padding: '12px 0' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                                        <button className="small secondary" onClick={() => setUsersPage(1)} disabled={usersPage === 1}>«</button>
+                                                        <button className="small secondary" onClick={() => setUsersPage(p => Math.max(1, p - 1))} disabled={usersPage === 1}>‹ Prev</button>
+                                                        {Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p === 1 || p === totalPages || Math.abs(p - usersPage) <= 2).map((p, i, arr) => (
+                                                            <span key={p}>
+                                                                {i > 0 && arr[i - 1] !== p - 1 && <span style={{ color: '#9ca3af' }}>…</span>}
+                                                                <button className={`small ${p === usersPage ? 'primary' : 'secondary'}`} onClick={() => setUsersPage(p)}>{p}</button>
+                                                            </span>
+                                                        ))}
+                                                        <button className="small secondary" onClick={() => setUsersPage(p => Math.min(totalPages, p + 1))} disabled={usersPage === totalPages}>Next ›</button>
+                                                        <button className="small secondary" onClick={() => setUsersPage(totalPages)} disabled={usersPage === totalPages}>»</button>
+                                                        <span style={{ fontSize: '12px', color: '#6b7280' }}>{(usersPage - 1) * USERS_PAGE_SIZE + 1}–{Math.min(usersPage * USERS_PAGE_SIZE, filtered.length)} of {filtered.length}</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
+                                    </>);
+                                })()}
                             </tbody>
                         </table>
                     </div>
@@ -241,6 +280,13 @@ function UserModal({ user, onClose, onDone }) {
                         <div>
                             <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Phone Number *</label>
                             <PhoneInput name="phone" required={true} />
+                        </div>
+                    )}
+
+                    {isEdit && (
+                        <div>
+                            <label style={{ fontSize: '12px', fontWeight: 600, display: 'block', marginBottom: '4px' }}>Phone Number</label>
+                            <PhoneInput name="phone" value={user.phone || ''} required={false} />
                         </div>
                     )}
 

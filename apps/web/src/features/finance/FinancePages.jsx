@@ -554,6 +554,120 @@ function LedgerModal({ type, party, onClose }) {
   );
 }
 
+
+/* ═══════ EDIT HOURS MODAL (Finance Only) ═══════ */
+function EditHoursModal({ student, onClose, onDone }) {
+  const [remainingHours, setRemainingHours] = useState(String(student.remaining_hours ?? ''));
+  const [totalHours, setTotalHours] = useState(String(student.total_hours ?? ''));
+  const [reason, setReason] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSave() {
+    if (remainingHours === '' && totalHours === '') {
+      setError('Enter at least one value to update.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const body = { reason: reason || undefined };
+      if (remainingHours !== '') body.remaining_hours = Number(remainingHours);
+      if (totalHours !== '') body.total_hours = Number(totalHours);
+
+      await apiFetch(`/finance/students/${student.id}/hours`, {
+        method: 'PATCH',
+        body: JSON.stringify(body)
+      });
+      onDone();
+    } catch (e) {
+      setError(e.message || 'Failed to update hours');
+    }
+    setSaving(false);
+  }
+
+  const name = student.student_name || student.name || student.full_name || 'Student';
+  const code = student.student_code || '';
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal card" onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '420px', width: '95%', padding: '28px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <h3 style={{ margin: 0, fontSize: '18px' }}>Edit Student Hours</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#6b7280' }}>×</button>
+        </div>
+        <p className="text-muted" style={{ margin: '0 0 20px', fontSize: '13px' }}>
+          {name}{code ? ` · ${code}` : ''}
+        </p>
+
+        {/* Current values banner */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
+          <div style={{ background: '#f0fdf4', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: '#166534' }}>CURRENT REMAINING</p>
+            <p style={{ margin: '4px 0 0', fontSize: '22px', fontWeight: 700, color: '#15803d' }}>{student.remaining_hours ?? '—'} hrs</p>
+          </div>
+          <div style={{ background: '#eff6ff', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: '11px', fontWeight: 600, color: '#1e40af' }}>CURRENT TOTAL</p>
+            <p style={{ margin: '4px 0 0', fontSize: '22px', fontWeight: 700, color: '#1d4ed8' }}>{student.total_hours ?? '—'} hrs</p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+              New Remaining Hours <span style={{ color: '#6b7280', fontWeight: 400 }}>(leave blank to keep same)</span>
+            </label>
+            <input
+              type="number" min="0" step="0.5"
+              value={remainingHours}
+              onChange={e => setRemainingHours(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+              placeholder={`Current: ${student.remaining_hours ?? 0}`}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+              New Total Hours <span style={{ color: '#6b7280', fontWeight: 400 }}>(optional)</span>
+            </label>
+            <input
+              type="number" min="0" step="0.5"
+              value={totalHours}
+              onChange={e => setTotalHours(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+              placeholder={`Current: ${student.total_hours ?? 0}`}
+            />
+          </div>
+
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>
+              Reason / Note <span style={{ color: '#6b7280', fontWeight: 400 }}>(optional)</span>
+            </label>
+            <input
+              type="text"
+              value={reason}
+              onChange={e => setReason(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+              placeholder="e.g. Correction after login review"
+            />
+          </div>
+        </div>
+
+        {error && <p style={{ color: '#dc2626', fontSize: '13px', margin: '12px 0 0' }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px', justifyContent: 'flex-end' }}>
+          <button className="secondary" onClick={onClose} disabled={saving}>Cancel</button>
+          <button className="primary" onClick={handleSave} disabled={saving}
+            style={{ background: '#7c3aed', borderColor: '#7c3aed' }}>
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ═══════ PARTIES PAGE ═══════ */
 export function PartiesPage() {
   const [activeTab, setActiveTab] = useState('students');
@@ -563,6 +677,8 @@ export function PartiesPage() {
   const [selectedParty, setSelectedParty] = useState(null);
   const [showCategories, setShowCategories] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [partiesPage, setPartiesPage] = useState(1);
+  const PARTIES_PAGE_SIZE = 25;
 
   const TABS = [
     { id: 'students', label: 'Students' },
@@ -577,6 +693,8 @@ export function PartiesPage() {
     setLoading(false);
   }
   useEffect(() => { load(); }, [activeTab]);
+  // Reset to page 1 on tab or search change
+  useEffect(() => { setPartiesPage(1); }, [activeTab, searchQuery]);
 
   return (
     <section className="panel">
@@ -637,49 +755,82 @@ export function PartiesPage() {
               </tr>
             </thead>
             <tbody>
-              {items.filter(p => {
-                if (!searchQuery.trim()) return true;
-                const q = searchQuery.toLowerCase();
-                return (p.name || '').toLowerCase().includes(q) ||
-                  (p.full_name || '').toLowerCase().includes(q) ||
-                  (p.student_name || '').toLowerCase().includes(q) ||
-                  (p.student_code || '').toLowerCase().includes(q) ||
-                  (p.id || '').toLowerCase().includes(q) ||
-                  (p.type || '').toLowerCase().includes(q);
-              }).map(p => (
-                <tr key={p.id}>
-                  <td data-label="Name" style={{ fontWeight: 600 }}>{p.name || p.full_name || p.student_name}</td>
-                  <td data-label="ID" style={{ fontSize: '12px', color: '#6b7280' }}>{p.student_code || p.id?.slice(0, 8) || '—'}</td>
-                  {activeTab === 'others' && <td data-label="Type" style={{ textTransform: 'capitalize' }}>{p.type}</td>}
-                  {activeTab === 'students' ? (
-                    <>
-                      <td data-label="Total Receivable" style={{ textAlign: 'right' }}>₹{Number(p.total_receivable || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Received" style={{ color: '#15803d', fontWeight: 600, textAlign: 'right' }}>₹{Number(p.total_income || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Outstanding" style={{ fontWeight: 700, textAlign: 'right', color: Number(p.outstanding || 0) > 0 ? '#dc2626' : '#15803d' }}>
-                        ₹{Number(p.outstanding || 0).toLocaleString('en-IN')}
+              {(() => {
+                const filteredItems = items.filter(p => {
+                  if (!searchQuery.trim()) return true;
+                  const q = searchQuery.toLowerCase();
+                  return (p.name || '').toLowerCase().includes(q) ||
+                    (p.full_name || '').toLowerCase().includes(q) ||
+                    (p.student_name || '').toLowerCase().includes(q) ||
+                    (p.student_code || '').toLowerCase().includes(q) ||
+                    (p.id || '').toLowerCase().includes(q) ||
+                    (p.type || '').toLowerCase().includes(q);
+                });
+                const totalPagesP = Math.max(1, Math.ceil(filteredItems.length / PARTIES_PAGE_SIZE));
+                const paginatedItems = filteredItems.slice((partiesPage - 1) * PARTIES_PAGE_SIZE, partiesPage * PARTIES_PAGE_SIZE);
+                return (<>
+                  {paginatedItems.map(p => (
+                    <tr key={p.id}>
+                      <td data-label="Name" style={{ fontWeight: 600 }}>{p.name || p.full_name || p.student_name}</td>
+                      <td data-label="ID" style={{ fontSize: '12px', color: '#6b7280' }}>{p.student_code || p.id?.slice(0, 8) || '—'}</td>
+                      {activeTab === 'others' && <td data-label="Type" style={{ textTransform: 'capitalize' }}>{p.type}</td>}
+                      {activeTab === 'students' ? (
+                        <>
+                          <td data-label="Total Receivable" style={{ textAlign: 'right' }}>₹{Number(p.total_receivable || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Received" style={{ color: '#15803d', fontWeight: 600, textAlign: 'right' }}>₹{Number(p.total_income || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Outstanding" style={{ fontWeight: 700, textAlign: 'right', color: Number(p.outstanding || 0) > 0 ? '#dc2626' : '#15803d' }}>
+                            ₹{Number(p.outstanding || 0).toLocaleString('en-IN')}
+                          </td>
+                        </>
+                      ) : (activeTab === 'teachers' || activeTab === 'employees') ? (
+                        <>
+                          <td data-label="Total Payable" style={{ textAlign: 'right' }}>₹{Number(p.total_payable || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Paid" style={{ color: '#15803d', fontWeight: 600, textAlign: 'right' }}>₹{Number(p.total_paid || p.total_expense || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Balance Owed" style={{ fontWeight: 700, textAlign: 'right', color: Number(p.balance_owed || 0) > 0 ? '#dc2626' : '#15803d' }}>
+                            ₹{Number(p.balance_owed || 0).toLocaleString('en-IN')}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td data-label="Income" style={{ color: '#15803d', textAlign: 'right' }}>₹{Number(p.total_income || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Expense" style={{ color: '#dc2626', textAlign: 'right' }}>₹{Number(p.total_expense || 0).toLocaleString('en-IN')}</td>
+                          <td data-label="Net Balance" style={{ fontWeight: 700, textAlign: 'right' }}>₹{Number(p.balance || 0).toLocaleString('en-IN')}</td>
+                        </>
+                      )}
+                      <td data-label="Action" style={{ textAlign: 'center' }}>
+                        <button className="small secondary" onClick={() => setSelectedParty(p)}>View Ledger</button>
                       </td>
-                    </>
-                  ) : (activeTab === 'teachers' || activeTab === 'employees') ? (
-                    <>
-                      <td data-label="Total Payable" style={{ textAlign: 'right' }}>₹{Number(p.total_payable || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Paid" style={{ color: '#15803d', fontWeight: 600, textAlign: 'right' }}>₹{Number(p.total_paid || p.total_expense || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Balance Owed" style={{ fontWeight: 700, textAlign: 'right', color: Number(p.balance_owed || 0) > 0 ? '#dc2626' : '#15803d' }}>
-                        ₹{Number(p.balance_owed || 0).toLocaleString('en-IN')}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td data-label="Income" style={{ color: '#15803d', textAlign: 'right' }}>₹{Number(p.total_income || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Expense" style={{ color: '#dc2626', textAlign: 'right' }}>₹{Number(p.total_expense || 0).toLocaleString('en-IN')}</td>
-                      <td data-label="Net Balance" style={{ fontWeight: 700, textAlign: 'right' }}>₹{Number(p.balance || 0).toLocaleString('en-IN')}</td>
-                    </>
+                    </tr>
+                  ))}
+                  {!filteredItems.length && (
+                    <tr><td colSpan={6} style={{ textAlign: 'center' }}>No records found.</td></tr>
                   )}
-                  <td data-label="Action" style={{ textAlign: 'center' }}>
-                    <button className="small secondary" onClick={() => setSelectedParty(p)}>View Ledger</button>
-                  </td>
-                </tr>
-              ))}
-              {!items.length ? <tr><td colSpan={6} style={{ textAlign: 'center' }}>No records found.</td></tr> : null}
+                  {filteredItems.length > 0 && totalPagesP > 1 && (
+                    <tr>
+                      <td colSpan={6} style={{ padding: '12px 0' }}>
+                        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <button className="small secondary" onClick={() => setPartiesPage(1)} disabled={partiesPage === 1}>«</button>
+                          <button className="small secondary" onClick={() => setPartiesPage(p => Math.max(1, p - 1))} disabled={partiesPage === 1}>‹ Prev</button>
+                          {Array.from({ length: totalPagesP }, (_, i) => i + 1).filter(p => p === 1 || p === totalPagesP || Math.abs(p - partiesPage) <= 2).map((p, i, arr) => (
+                            <span key={p}>
+                              {i > 0 && arr[i - 1] !== p - 1 && <span style={{ color: '#9ca3af' }}>…</span>}
+                              <button
+                                className={`small ${p === partiesPage ? 'primary' : 'secondary'}`}
+                                onClick={() => setPartiesPage(p)}
+                              >{p}</button>
+                            </span>
+                          ))}
+                          <button className="small secondary" onClick={() => setPartiesPage(p => Math.min(totalPagesP, p + 1))} disabled={partiesPage === totalPagesP}>Next ›</button>
+                          <button className="small secondary" onClick={() => setPartiesPage(totalPagesP)} disabled={partiesPage === totalPagesP}>»</button>
+                          <span style={{ fontSize: '12px', color: '#6b7280' }}>
+                            {(partiesPage - 1) * PARTIES_PAGE_SIZE + 1}–{Math.min(partiesPage * PARTIES_PAGE_SIZE, filteredItems.length)} of {filteredItems.length}
+                          </span>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </>);
+              })()}
             </tbody>
           </table>
         </div>
@@ -1831,3 +1982,176 @@ function CategoriesModal({ type, onClose, onUpdate }) {
     </div></div>
   );
 }
+
+/* ═══════ STUDENT HOURS PAGE (Finance) ═══════ */
+export function StudentHoursPage() {
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [editStudent, setEditStudent] = useState(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  async function load() {
+    setLoading(true);
+    try {
+      const d = await apiFetch('/finance/students');
+      setStudents(d.items || []);
+    } catch (e) { }
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); }, []);
+
+  // Reset to page 1 on search change
+  useEffect(() => { setPage(1); }, [searchQuery]);
+
+  const filtered = useMemo(() => {
+    if (!searchQuery.trim()) return students;
+    const q = searchQuery.toLowerCase();
+    return students.filter(s =>
+      (s.student_name || '').toLowerCase().includes(q) ||
+      (s.student_code || '').toLowerCase().includes(q) ||
+      (s.class_level || '').toLowerCase().includes(q) ||
+      (s.contact_number || '').toLowerCase().includes(q)
+    );
+  }, [students, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const statusColors = {
+    active: { bg: '#dcfce7', color: '#166534' },
+    inactive: { bg: '#fee2e2', color: '#991b1b' },
+    on_hold: { bg: '#fef3c7', color: '#92400e' },
+  };
+
+  const totalRemaining = students.reduce((s, r) => s + Number(r.remaining_hours || 0), 0);
+  const totalHoursAll = students.reduce((s, r) => s + Number(r.total_hours || 0), 0);
+
+  return (
+    <section className="panel">
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: '20px' }}>Student Hours</h2>
+          <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '13px' }}>
+            {students.length} students · {totalHoursAll.toLocaleString()} total hrs · {totalRemaining.toLocaleString()} remaining
+          </p>
+        </div>
+        <input
+          type="text"
+          placeholder="🔍 Search by name, code, class..."
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          style={{ padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '240px' }}
+        />
+      </div>
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '10px', marginBottom: '20px' }}>
+        <div style={{ background: '#eff6ff', borderRadius: '10px', padding: '14px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#1e40af', letterSpacing: '0.5px' }}>TOTAL STUDENTS</p>
+          <p style={{ margin: '6px 0 0', fontSize: '26px', fontWeight: 700, color: '#1d4ed8' }}>{students.length}</p>
+        </div>
+        <div style={{ background: '#f0fdf4', borderRadius: '10px', padding: '14px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#166534', letterSpacing: '0.5px' }}>TOTAL HOURS SOLD</p>
+          <p style={{ margin: '6px 0 0', fontSize: '26px', fontWeight: 700, color: '#15803d' }}>{totalHoursAll.toLocaleString()}</p>
+        </div>
+
+        <div style={{ background: '#fdf2f8', borderRadius: '10px', padding: '14px', textAlign: 'center' }}>
+          <p style={{ margin: 0, fontSize: '11px', fontWeight: 700, color: '#86198f', letterSpacing: '0.5px' }}>HOURS REMAINING</p>
+          <p style={{ margin: '6px 0 0', fontSize: '26px', fontWeight: 700, color: '#a21caf' }}>{totalRemaining.toLocaleString()}</p>
+        </div>
+      </div>
+
+      {/* Table */}
+      {loading ? <p>Loading students...</p> : (
+        <article className="card" style={{ padding: '16px' }}>
+          <div className="table-wrap mobile-friendly-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Name</th>
+                  <th>Code</th>
+                  <th>Class</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Total Hrs</th>
+                  <th style={{ textAlign: 'right' }}>Remaining Hrs</th>
+                  <th style={{ textAlign: 'center' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.map((s, idx) => {
+                  const st = statusColors[s.status] || { bg: '#f3f4f6', color: '#6b7280' };
+                  return (
+                    <tr key={s.id}>
+                      <td data-label="#" style={{ color: '#9ca3af', fontSize: '12px' }}>{(page - 1) * PAGE_SIZE + idx + 1}</td>
+                      <td data-label="Name" style={{ fontWeight: 600 }}>{s.student_name || '—'}</td>
+                      <td data-label="Code" style={{ fontSize: '12px', color: '#6b7280', fontFamily: 'monospace' }}>{s.student_code || '—'}</td>
+                      <td data-label="Class">{s.class_level || '—'}</td>
+                      <td data-label="Status">
+                        <span style={{ padding: '3px 9px', borderRadius: '20px', fontSize: '11px', fontWeight: 700, background: st.bg, color: st.color, textTransform: 'capitalize' }}>
+                          {s.status || 'unknown'}
+                        </span>
+                      </td>
+                      <td data-label="Total Hrs" style={{ textAlign: 'right', fontWeight: 600, color: '#1d4ed8' }}>
+                        {Number(s.total_hours || 0)}
+                      </td>
+                      <td data-label="Remaining Hrs" style={{ textAlign: 'right', fontWeight: 700, color: Number(s.remaining_hours) <= 0 ? '#dc2626' : Number(s.remaining_hours) <= 5 ? '#f59e0b' : '#15803d' }}>
+                        {Number(s.remaining_hours || 0)}
+                      </td>
+                      <td data-label="Action" style={{ textAlign: 'center' }}>
+                        <button
+                          className="small primary"
+                          onClick={() => setEditStudent(s)}
+                          style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
+                        >✏️ Edit Hrs</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {!paginated.length && (
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: '32px', color: '#9ca3af' }}>No students found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginTop: '16px', flexWrap: 'wrap' }}>
+              <button className="small secondary" onClick={() => setPage(1)} disabled={page === 1}>«</button>
+              <button className="small secondary" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹ Prev</button>
+              {Array.from({ length: totalPages }, (_, i) => i + 1).filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2).map((p, i, arr) => (
+                <span key={p}>
+                  {i > 0 && arr[i - 1] !== p - 1 && <span style={{ color: '#9ca3af', padding: '0 2px' }}>…</span>}
+                  <button
+                    className={`small ${p === page ? 'primary' : 'secondary'}`}
+                    onClick={() => setPage(p)}
+                    style={p === page ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}}
+                  >{p}</button>
+                </span>
+              ))}
+              <button className="small secondary" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Next ›</button>
+              <button className="small secondary" onClick={() => setPage(totalPages)} disabled={page === totalPages}>»</button>
+              <span style={{ color: '#6b7280', fontSize: '12px' }}>
+                {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+              </span>
+            </div>
+          )}
+        </article>
+      )}
+
+      {editStudent && (
+        <EditHoursModal
+          student={editStudent}
+          onClose={() => setEditStudent(null)}
+          onDone={() => { setEditStudent(null); load(); }}
+        />
+      )}
+    </section>
+  );
+}
+

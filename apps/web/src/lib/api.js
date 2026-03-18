@@ -25,7 +25,13 @@ export async function apiFetch(path, options = {}) {
 
   const data = await response.json().catch(() => ({}));
 
-  if (response.status === 401 && !options._isRetry && session?.refreshToken && path !== '/auth/refresh') {
+  const isErrorTokenExpired =
+    response.status === 401 ||
+    (response.status === 403 &&
+      typeof data.error === 'string' &&
+      data.error.toLowerCase().includes('token is expired'));
+
+  if (isErrorTokenExpired && !options._isRetry && session?.refreshToken && path !== '/auth/refresh') {
     try {
       const refreshRes = await fetch(`${API_BASE_URL}/auth/refresh`, {
         method: 'POST',
@@ -42,6 +48,7 @@ export async function apiFetch(path, options = {}) {
         throw new Error('Session expired. Please log in again.');
       }
     } catch (e) {
+      if (e.message.includes('Session expired')) throw e;
       localStorage.removeItem(STORAGE_KEY);
       if (typeof window !== 'undefined') window.location.href = '/login';
       throw new Error('Session expired. Please log in again.');

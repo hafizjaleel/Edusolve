@@ -258,6 +258,8 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
   const [fTime, setFTime] = useState('');
   const [fEndTime, setFEndTime] = useState('');
   const [logPage, setLogPage] = useState(1);
+  const [scheduleResult, setScheduleResult] = useState(null); // { count, conflicts }
+  const [schedulePreview, setSchedulePreview] = useState(null); // [{date, status, conflict_type, conflict_with}]
 
   const [teacherAvail, setTeacherAvail] = useState(null);
   const [studentAvail, setStudentAvail] = useState(null);
@@ -541,6 +543,60 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
     return false;
   }
 
+  function computePreview() {
+    if (!fTime || !fEndTime || !fStart || !fEnd || !fDays.length || !teacherAvail || !studentAvail) return;
+    const DAY_MAP_P = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const [sh, sm] = fTime.split(':').map(Number);
+    const [eh, em] = fEndTime.split(':').map(Number);
+    const newStartMins = sh * 60 + sm;
+    const newEndMins = eh * 60 + em;
+
+    function toMins(timeStr) {
+      if (!timeStr) return 0;
+      if (timeStr.includes('T')) {
+        const s = new Date(timeStr).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' });
+        const [h, m] = s.split(':').map(Number); return h * 60 + m;
+      }
+      const [h, m] = timeStr.split(':').map(Number); return h * 60 + m;
+    }
+
+    const rows = [];
+    for (let d = new Date(fStart + 'T00:00:00Z'); d <= new Date(fEnd + 'T00:00:00Z'); d.setDate(d.getDate() + 1)) {
+      const dayName = DAY_MAP_P[d.getUTCDay()];
+      if (!fDays.includes(dayName)) continue;
+      const dateStr = d.toISOString().split('T')[0];
+
+      const tConflict = teacherAvail.classes.find(c => {
+        if (c.session_date !== dateStr || !c.started_at) return false;
+        const cs = toMins(c.started_at), ce = cs + Number(c.duration_hours || 1) * 60;
+        return newStartMins < ce && newEndMins > cs;
+      }) || teacherAvail.demos.find(dem => {
+        if (!dem.scheduled_at || dem.scheduled_at.split('T')[0] !== dateStr) return false;
+        const ds = toMins(dem.scheduled_at);
+        const de = dem.ends_at ? toMins(dem.ends_at) : ds + 60;
+        return newStartMins < de && newEndMins > ds;
+      });
+
+      const sConflict = !tConflict && studentAvail.classes.find(c => {
+        if (c.session_date !== dateStr || !c.started_at) return false;
+        const cs = toMins(c.started_at), ce = cs + Number(c.duration_hours || 1) * 60;
+        return newStartMins < ce && newEndMins > cs;
+      });
+
+      rows.push({
+        date: dateStr,
+        day: dayName,
+        status: tConflict ? 'teacher' : sConflict ? 'student' : 'ok',
+        conflict_with: tConflict
+          ? (tConflict.leads?.student_name || tConflict.subject || 'another class')
+          : sConflict
+            ? (sConflict.users?.full_name || sConflict.subject || 'another teacher')
+            : null
+      });
+    }
+    setSchedulePreview(rows);
+  }
+
   async function handleBulkSubmit(e) {
     e.preventDefault();
     setError(''); setMsg('');
@@ -565,10 +621,10 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
           subject: fSubject
         })
       });
-      setMsg(`Successfully scheduled ${res.count} class(es)!`);
-      setTimeout(() => setMsg(''), 4000);
       setShowForm(false);
+      setSchedulePreview(null);
       onClassesChanged();
+      setScheduleResult({ count: res.count, conflicts: res.conflicts || [] });
     } catch (err) { setError(err.message); }
   }
 
@@ -769,9 +825,112 @@ function StudentClassesTab({ studentId, initialSessions, teachers, onClassesChan
               </label>
             </div>
 
-            <button type="submit" style={{ gridColumn: '1 / -1', marginTop: '8px' }} disabled={availLoading || !fEndTime}>Confirm & Schedule</button>
+            <button type="button" style={{ gridColumn: '1 / -1', marginTop: '8px' }} disabled={availLoading || !fEndTime}
+              onClick={computePreview}
+            >
+              Preview Schedule
+            </button>
           </form>
+
+          {/* Per-date preview table */}
+          {schedulePreview && (
+            <div style={{ marginTop: '16px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <strong style={{ fontSize: '14px' }}>
+                  Preview: {schedulePreview.filter(r => r.status === 'ok').length} will be scheduled,{' '}
+                  <span style={{ color: '#dc2626' }}>{schedulePreview.filter(r => r.status !== 'ok').length} conflict{schedulePreview.filter(r => r.status !== 'ok').length !== 1 ? 's' : ''}</span>
+                </strong>
+                <button type="button" className="secondary small" onClick={() => setSchedulePreview(null)}>Clear Preview</button>
+              </div>
+              <div style={{ maxHeight: '260px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {schedulePreview.map(row => (
+                  <div key={row.date} style={{
+                    display: 'flex', alignItems: 'center', gap: '10px',
+                    padding: '7px 12px', borderRadius: '6px', fontSize: '13px',
+                    background: row.status === 'ok' ? '#f0fdf4' : row.status === 'teacher' ? '#fef3c7' : '#faf5ff',
+                    border: `1px solid ${row.status === 'ok' ? '#86efac' : row.status === 'teacher' ? '#fcd34d' : '#c4b5fd'}`
+                  }}>
+                    <span style={{ flex: '0 0 24px', fontSize: '16px' }}>
+                      {row.status === 'ok' ? '✅' : '⚠️'}
+                    </span>
+                    <span style={{ flex: '0 0 120px', fontWeight: 600 }}>
+                      {new Date(row.date + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short' })}
+                    </span>
+                    {row.status !== 'ok' && (
+                      <>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: '8px', fontSize: '11px', fontWeight: 700,
+                          background: row.status === 'teacher' ? '#fde68a' : '#ddd6fe',
+                          color: row.status === 'teacher' ? '#92400e' : '#5b21b6'
+                        }}>
+                          {row.status === 'teacher' ? '🧑‍🏫 Teacher busy' : '🎓 Student busy'}
+                        </span>
+                        <span style={{ color: '#6b7280', fontSize: '12px' }}>with {row.conflict_with}</span>
+                      </>
+                    )}
+                    {row.status === 'ok' && <span style={{ color: '#15803d' }}>Will be scheduled</span>}
+                  </div>
+                ))}
+              </div>
+              {schedulePreview.some(r => r.status === 'ok') ? (
+                <button
+                  style={{ marginTop: '12px', width: '100%' }}
+                  onClick={handleBulkSubmit}
+                >
+                  Confirm &amp; Schedule ({schedulePreview.filter(r => r.status === 'ok').length} sessions)
+                </button>
+              ) : (
+                <p style={{ marginTop: '10px', color: '#dc2626', fontSize: '13px', fontWeight: 600 }}>
+                  All dates conflict — please choose a different time or days.
+                </p>
+              )}
+            </div>
+          )}
         </article>
+      )}
+
+      {/* Schedule Result Modal - shows conflicts after bulk scheduling */}
+      {scheduleResult && (
+        <div className="modal-overlay" onClick={() => setScheduleResult(null)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '520px' }}>
+            <h3 style={{ margin: '0 0 4px' }}>Scheduling Complete</h3>
+            <p style={{ margin: '0 0 20px', color: '#6b7280', fontSize: '13px' }}>
+              {scheduleResult.count > 0
+                ? `✅ ${scheduleResult.count} session${scheduleResult.count > 1 ? 's' : ''} scheduled successfully.`
+                : 'No sessions were scheduled.'}
+              {scheduleResult.conflicts.length > 0 && (
+                <span> {scheduleResult.conflicts.length} date{scheduleResult.conflicts.length > 1 ? 's were' : ' was'} skipped due to conflicts.</span>
+              )}
+            </p>
+
+            {scheduleResult.conflicts.length > 0 && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: '8px', padding: '12px 16px', marginBottom: '16px' }}>
+                <p style={{ margin: '0 0 10px', fontWeight: 700, fontSize: '13px', color: '#dc2626' }}>⚠️ Skipped Dates (Conflicts)</p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {scheduleResult.conflicts.map(c => (
+                    <div key={c.date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                      <span style={{ fontWeight: 600 }}>
+                        {new Date(c.date + 'T00:00:00Z').toLocaleDateString('en-IN', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
+                      </span>
+                      <span style={{
+                        padding: '2px 10px', borderRadius: '10px', fontSize: '11px', fontWeight: 700,
+                        background: c.reason === 'teacher' ? '#fef3c7' : '#ede9fe',
+                        color: c.reason === 'teacher' ? '#92400e' : '#5b21b6'
+                      }}>
+                        {c.reason === 'teacher' ? '🧑‍🏫 Teacher busy' : '🎓 Student busy'}
+                      </span>
+                      <span style={{ color: '#6b7280', fontSize: '12px' }}>with {c.conflict_with}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={() => setScheduleResult(null)}>Done</button>
+            </div>
+          </div>
+        </div>
       )}
 
       <article className="card">
@@ -1105,13 +1264,31 @@ function StudentDetailPage({ studentId, onBack }) {
     try { await apiFetch(`/students/${studentId}/messages/send-reminder`, { method: 'POST', body: JSON.stringify({ message: msgText, type: 'general' }) }); setMsgText(''); await load(); } catch (e) { setError(e.message); }
   }
 
+  const parsePhone = (raw) => {
+    if (!raw) return { code: '+91', num: '' };
+    const codes = ['+971', '+966', '+91', '+44', '+61', '+65', '+60', '+1'];
+    for (const c of codes) {
+      if (raw.startsWith(c)) {
+        return { code: c, num: raw.substring(c.length).trim() };
+      }
+    }
+    return { code: '+91', num: raw.trim() };
+  };
+
   function openEditModal() {
+    const mainPhone = parsePhone(student.contact_number);
+    const altPhone = parsePhone(student.alternative_number);
+    const parPhone = parsePhone(student.parent_phone);
+
     setEditForm({
       student_name: student.student_name || '',
       parent_name: student.parent_name || '',
-      contact_number: student.contact_number || '',
-      alternative_number: student.alternative_number || '',
-      parent_phone: student.parent_phone || '',
+      country_code: student.country_code || mainPhone.code,
+      contact_number: mainPhone.num || student.contact_number || '',
+      alt_country_code: altPhone.code,
+      alternative_number: altPhone.num,
+      parent_country_code: parPhone.code,
+      parent_phone: parPhone.num,
       class_level: student.class_level || '',
       board: student.board || '',
       medium: student.medium || '',
@@ -1126,9 +1303,20 @@ function StudentDetailPage({ studentId, onBack }) {
     e.preventDefault();
     setEditSaving(true); setError('');
     try {
+      const payload = { ...editForm };
+      
+      const stripNum = (n) => (n || '').replace(/[^0-9]/g, '');
+
+      if (payload.contact_number) payload.contact_number = (payload.country_code || '+91') + stripNum(payload.contact_number);
+      if (payload.alternative_number) payload.alternative_number = (payload.alt_country_code || '+91') + stripNum(payload.alternative_number);
+      if (payload.parent_phone) payload.parent_phone = (payload.parent_country_code || '+91') + stripNum(payload.parent_phone);
+
+      delete payload.alt_country_code;
+      delete payload.parent_country_code;
+
       await apiFetch(`/students/${studentId}`, {
         method: 'PUT',
-        body: JSON.stringify(editForm)
+        body: JSON.stringify(payload)
       });
       setShowEdit(false);
       await load();
@@ -1157,6 +1345,12 @@ function StudentDetailPage({ studentId, onBack }) {
     { id: 'lead_data', label: 'Lead Data' }
   ];
 
+  const displayPhone = (raw, code) => {
+    if (!raw) return '—';
+    if (raw.startsWith('+')) return raw;
+    return (code ? code + ' ' : '') + raw;
+  };
+
   return (
     <section className="panel">
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
@@ -1180,9 +1374,9 @@ function StudentDetailPage({ studentId, onBack }) {
             <div><span className="eyebrow">Medium</span><p>{student.medium || '—'}</p></div>
             <div><span className="eyebrow">Subjects</span><p>{uniqueSubjects.length ? uniqueSubjects.join(', ') : '—'}</p></div>
             <div><span className="eyebrow">Parent</span><p>{student.parent_name || student.leads?.parent_name || '—'}</p></div>
-            <div><span className="eyebrow">Contact No.</span><p>{(student.country_code ? student.country_code + ' ' : '') + (student.contact_number || '—')}</p></div>
-            <div><span className="eyebrow">Alternative No.</span><p>{student.alternative_number || '—'}</p></div>
-            <div><span className="eyebrow">Parent Phone</span><p>{student.parent_phone || '—'}</p></div>
+            <div><span className="eyebrow">Contact No.</span><p>{displayPhone(student.contact_number, student.country_code)}</p></div>
+            <div><span className="eyebrow">Alternative No.</span><p>{displayPhone(student.alternative_number)}</p></div>
+            <div><span className="eyebrow">Parent Phone</span><p>{displayPhone(student.parent_phone)}</p></div>
             <div><span className="eyebrow">Messaging No.</span><p>{messagingLabel[student.messaging_number] || 'Contact Number'}</p></div>
             <div><span className="eyebrow">Package</span><p>{student.package_name || student.leads?.package_name || '—'}</p></div>
             <div><span className="eyebrow">Source</span><p>{student.counselor_id ? (student.leads?.source || 'Lead') : 'Manual'}</p></div>
@@ -1247,7 +1441,7 @@ function StudentDetailPage({ studentId, onBack }) {
         {/* Edit Details Modal */}
         {showEdit && (
           <div className="modal-overlay" onClick={() => setShowEdit(false)}>
-            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '680px' }}>
+            <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px' }}>
               <h3>Edit Student Details</h3>
               <form onSubmit={saveEdit}>
                 <div style={{ display: 'grid', gap: '12px', marginBottom: '20px' }}>
@@ -1259,15 +1453,51 @@ function StudentDetailPage({ studentId, onBack }) {
                       <input value={editForm.parent_name} onChange={e => setEditForm({ ...editForm, parent_name: e.target.value })} />
                     </label>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-                    <label>Contact Number
-                      <input value={editForm.contact_number} onChange={e => setEditForm({ ...editForm, contact_number: e.target.value })} />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
+                    <label style={{ gridColumn: 'span 1' }}>Contact Number
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <select value={editForm.country_code || '+91'} onChange={e => setEditForm({ ...editForm, country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
+                          <option value="+91">+91</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
+                          <option value="+971">+971</option>
+                          <option value="+966">+966</option>
+                          <option value="+61">+61</option>
+                          <option value="+65">+65</option>
+                          <option value="+60">+60</option>
+                        </select>
+                        <input value={editForm.contact_number} onChange={e => setEditForm({ ...editForm, contact_number: e.target.value })} placeholder="Phone" style={{ flex: 1 }} />
+                      </div>
                     </label>
-                    <label>Alternative No.
-                      <input value={editForm.alternative_number} onChange={e => setEditForm({ ...editForm, alternative_number: e.target.value })} />
+                    <label style={{ gridColumn: 'span 1' }}>Alternative No.
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <select value={editForm.alt_country_code || '+91'} onChange={e => setEditForm({ ...editForm, alt_country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
+                          <option value="+91">+91</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
+                          <option value="+971">+971</option>
+                          <option value="+966">+966</option>
+                          <option value="+61">+61</option>
+                          <option value="+65">+65</option>
+                          <option value="+60">+60</option>
+                        </select>
+                        <input value={editForm.alternative_number} onChange={e => setEditForm({ ...editForm, alternative_number: e.target.value })} placeholder="Alt Phone" style={{ flex: 1 }} />
+                      </div>
                     </label>
-                    <label>Parent Phone
-                      <input value={editForm.parent_phone} onChange={e => setEditForm({ ...editForm, parent_phone: e.target.value })} />
+                    <label style={{ gridColumn: 'span 1' }}>Parent Phone
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <select value={editForm.parent_country_code || '+91'} onChange={e => setEditForm({ ...editForm, parent_country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
+                          <option value="+91">+91</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
+                          <option value="+971">+971</option>
+                          <option value="+966">+966</option>
+                          <option value="+61">+61</option>
+                          <option value="+65">+65</option>
+                          <option value="+60">+60</option>
+                        </select>
+                        <input value={editForm.parent_phone} onChange={e => setEditForm({ ...editForm, parent_phone: e.target.value })} placeholder="Parent Phone" style={{ flex: 1 }} />
+                      </div>
                     </label>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
@@ -1444,14 +1674,9 @@ function StudentOnboardingForm({ onDone }) {
   const [f, setF] = useState({
     student_name: '',
     parent_name: '',
+    country_code: '+91',
     contact_number: '',
-    alternative_number: '',
-    parent_phone: '',
     class_level: '',
-    board: '',
-    medium: '',
-    package_name: '',
-    messaging_number: 'contact',
     status: 'active',
     onboarding_fee: '',
     onboarding_paid: ''
@@ -1459,17 +1684,10 @@ function StudentOnboardingForm({ onDone }) {
   const [error, setError] = useState('');
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
-  const [boardsList, setBoardsList] = useState([]);
-  const [mediumsList, setMediumsList] = useState([]);
 
   // New fields for Onboarding Payments
   const [screenshotFile, setScreenshotFile] = useState(null);
   const [uploading, setUploading] = useState(false);
-
-  useEffect(() => {
-    apiFetch('/boards').then(b => setBoardsList(b.boards || [])).catch(() => {});
-    apiFetch('/mediums').then(m => setMediumsList(m.mediums || [])).catch(() => {});
-  }, []);
 
   const set = (k, v) => setF(prev => ({ ...prev, [k]: v }));
 
@@ -1538,42 +1756,26 @@ function StudentOnboardingForm({ onDone }) {
             </label>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
-            <label>Contact Number
-              <input value={f.contact_number} onChange={e => set('contact_number', e.target.value)} />
+            <label style={{ gridColumn: 'span 2' }}>Contact Number
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <select value={f.country_code} onChange={e => set('country_code', e.target.value)} style={{ width: '120px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
+                  <option value="+91">+91 (IND)</option>
+                  <option value="+1">+1 (US/CA)</option>
+                  <option value="+44">+44 (UK)</option>
+                  <option value="+971">+971 (UAE)</option>
+                  <option value="+966">+966 (KSA)</option>
+                  <option value="+61">+61 (AUS)</option>
+                  <option value="+65">+65 (SG)</option>
+                  <option value="+60">+60 (MY)</option>
+                </select>
+                <input value={f.contact_number} onChange={e => set('contact_number', e.target.value)} placeholder="Phone Number" style={{ flex: 1 }} />
+              </div>
             </label>
-            <label>Alternative No.
-              <input value={f.alternative_number} onChange={e => set('alternative_number', e.target.value)} />
-            </label>
-            <label>Parent Phone
-              <input value={f.parent_phone} onChange={e => set('parent_phone', e.target.value)} />
+            <label>Class / Level
+              <input value={f.class_level} onChange={e => set('class_level', e.target.value)} style={{ marginTop: '4px' }} />
             </label>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
-            <label>Class / Level
-              <input value={f.class_level} onChange={e => set('class_level', e.target.value)} />
-            </label>
-            <label>Board
-              <select value={f.board} onChange={e => set('board', e.target.value)}>
-                <option value="">Select Board</option>
-                {boardsList.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
-              </select>
-            </label>
-            <label>Medium
-              <select value={f.medium} onChange={e => set('medium', e.target.value)}>
-                <option value="">Select Medium</option>
-                {mediumsList.map(m => <option key={m.id} value={m.name}>{m.name}</option>)}
-              </select>
-            </label>
-            <label>Package
-              <input value={f.package_name} onChange={e => set('package_name', e.target.value)} />
-            </label>
-            <label>Messaging Number
-              <select value={f.messaging_number} onChange={e => set('messaging_number', e.target.value)}>
-                <option value="contact">Contact Number</option>
-                <option value="alternative">Alternative Number</option>
-                <option value="parent">Parent Phone</option>
-              </select>
-            </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '12px' }}>
             <label>Status
               <select value={f.status} onChange={e => set('status', e.target.value)}>
                 <option value="active">Active</option>
@@ -1625,6 +1827,7 @@ export function StudentsHubPage({ role }) {
   const [classFilter, setClassFilter] = useState('');
   const [acFilter, setAcFilter] = useState(''); // super_admin filter by AC
   const [paymentFilter, setPaymentFilter] = useState(''); // initial / topup / clear
+  const [originFilter, setOriginFilter] = useState(''); // ac_direct / converted / old
   const [minHours, setMinHours] = useState('');
   const [maxHours, setMaxHours] = useState('');
 
@@ -1678,6 +1881,11 @@ export function StudentsHubPage({ role }) {
     if (paymentFilter === 'initial') items = items.filter(s => s.pending_payment === 'initial');
     else if (paymentFilter === 'topup') items = items.filter(s => s.pending_payment === 'topup');
     else if (paymentFilter === 'clear') items = items.filter(s => !s.pending_payment);
+
+    if (originFilter === 'ac_direct') items = items.filter(s => s.leads?.source === 'AC Direct Onboarding');
+    else if (originFilter === 'converted') items = items.filter(s => s.lead_id && s.leads?.source !== 'AC Direct Onboarding');
+    else if (originFilter === 'old') items = items.filter(s => !s.lead_id);
+
     if (minHours !== '') items = items.filter(s => Number(s.remaining_hours) >= Number(minHours));
     if (maxHours !== '') items = items.filter(s => Number(s.remaining_hours) <= Number(maxHours));
     if (search.trim()) {
@@ -1688,7 +1896,7 @@ export function StudentsHubPage({ role }) {
       );
     }
     return items;
-  }, [students, statusFilter, classFilter, acFilter, paymentFilter, minHours, maxHours, search]);
+  }, [students, statusFilter, classFilter, acFilter, paymentFilter, originFilter, minHours, maxHours, search]);
 
   async function quickStatusChange(studentId, newStatus, e) {
     e.stopPropagation();
@@ -1752,6 +1960,14 @@ export function StudentsHubPage({ role }) {
               <option value="initial">Initial Pending</option>
               <option value="topup">Topup Pending</option>
               <option value="clear">Clear</option>
+            </select>
+          </label>
+          <label style={{ flex: '1', margin: 0, minWidth: '130px' }}>Origin
+            <select value={originFilter} onChange={e => setOriginFilter(e.target.value)} style={{ marginTop: '4px' }}>
+              <option value="">All Origins</option>
+              <option value="converted">Converted from Leads</option>
+              <option value="ac_direct">Added by Coordinator</option>
+              <option value="old">Old Data (Direct)</option>
             </select>
           </label>
           <label style={{ flex: '1.5', margin: 0, minWidth: '140px' }}>Hours Left

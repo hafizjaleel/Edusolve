@@ -58,6 +58,7 @@ export const APP_PAGES = [
   { path: '/finance/expenses', title: 'Expenses', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/accounts', title: 'Accounts', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/parties', title: 'Parties', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
+  { path: '/finance/student-hours', title: 'Student Hours', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/payroll', title: 'Payroll Requests', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/payment-verification', title: 'Payment Verification', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },
   { path: '/finance/reports', title: 'Reports', group: 'Finance', roles: [ROLES.FINANCE, ROLES.SUPER_ADMIN], showInNav: true },

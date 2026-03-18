@@ -500,6 +500,9 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
                 {user?.role !== 'counselor' ? (
                   <th>Assigned To</th>
                 ) : null}
+                {filters.status === 'joined' && (
+                  <th>Assigned Coordinator</th>
+                )}
                 <th>Actions</th>
               </tr>
             </thead>
@@ -537,6 +540,9 @@ export function AllLeadsPage({ onOpenDetails, onViewInPipeline, selectedLeadId }
                   {user?.role !== 'counselor' ? (
                     <td>{counselorMap[lead.counselor_id] || <span className="text-dim">Unassigned</span>}</td>
                   ) : null}
+                  {filters.status === 'joined' && (
+                    <td>{lead.students?.users?.full_name || lead.students?.users?.email || '-'}</td>
+                  )}
                   <td className="actions" style={{ display: 'flex', gap: '4px', flexWrap: 'nowrap' }}>
                     {user?.role === 'counselor' && onViewInPipeline && (
                       <button
@@ -1919,6 +1925,12 @@ export function LeadDetailsPage({ leadId, initialTab = 'profile' }) {
                     <p style={{ color: '#dc2626', fontWeight: 600 }}>{lead.drop_reason || '-'}</p>
                   </div>
                 )}
+                {lead.status === 'joined' && (
+                  <div>
+                    <label>Assigned Coordinator</label>
+                    <p style={{ color: '#059669', fontWeight: 600 }}>{lead.students?.users?.full_name || lead.students?.users?.email || 'Unassigned'}</p>
+                  </div>
+                )}
                 <div>
                   <label>Class</label>
                   <p>{lead.class_level || '-'}</p>
@@ -2136,7 +2148,7 @@ export function ConvertedLeadsPage() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkAcId, setBulkAcId] = useState('');
   const [bulkAssigning, setBulkAssigning] = useState(false);
-  const [tab, setTab] = useState('unassigned'); // 'unassigned' | 'all'
+  const [tab, setTab] = useState('all'); // 'unassigned' | 'all'
 
   // Load initial dropdowns
   useEffect(() => {
@@ -3210,7 +3222,7 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                       <td>{r.leads?.contact_number || '—'}</td>
                       {isCounselorHead && (
                         <td style={{ fontSize: '12px', color: '#4338ca' }}>
-                          {counselorMap[r.leads?.counselor_id] || '—'}
+                          {r.leads?.counselor_name || (r.leads?.counselor_id ? (counselorMap[r.leads.counselor_id] || r.leads.counselor_id.substring(0,8)) : '—')}
                         </td>
                       )}
                       <td style={{ fontWeight: 600 }}>{r.total_amount ? `₹${Number(r.total_amount).toLocaleString('en-IN')}` : '—'}</td>
@@ -3255,7 +3267,7 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                   }
                   expandedContent={
                     <>
-                      {isCounselorHead && <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#4338ca' }}>👤 {counselorMap[r.leads?.counselor_id] || '—'}</p>}
+                      {isCounselorHead && <p style={{ margin: '0 0 12px', fontSize: '13px', color: '#4338ca' }}>👤 {r.leads?.counselor_name || (r.leads?.counselor_id ? (counselorMap[r.leads.counselor_id] || r.leads.counselor_id.substring(0,8)) : '—')}</p>}
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', background: '#f9fafb', padding: '12px', borderRadius: '8px', marginBottom: '12px' }}>
                         <div><span style={{ fontSize: '11px', color: '#6b7280', display: 'block' }}>Total</span><strong style={{ fontSize: '14px' }}>{r.total_amount ? `₹${Number(r.total_amount).toLocaleString('en-IN')}` : '—'}</strong></div>
                         <div><span style={{ fontSize: '11px', color: '#6b7280', display: 'block' }}>Paid</span><strong style={{ fontSize: '14px', color: '#15803d' }}>{r.amount ? `₹${Number(r.amount).toLocaleString('en-IN')}` : '—'}</strong></div>

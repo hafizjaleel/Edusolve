@@ -112,7 +112,8 @@ export class CounselorsService {
         // Note: large dataset in future might need SQL grouping/view
         let query = this.admin
             .from('leads')
-            .select('counselor_id, status, created_at');
+            .select('counselor_id, status, created_at')
+            .or('source.neq."AC Direct Onboarding",source.is.null');
 
         if (from) query = query.gte('created_at', from);
         if (to) query = query.lte('created_at', to);
