@@ -1,6 +1,78 @@
 import { getSupabaseAdminClient } from '../config/supabase.js';
 import { readJson, sendJson } from '../common/http.js';
 import { WaappaService } from '../waappa/waappa.service.js';
+import { z } from 'zod';
+import { phoneSchema, validatePayload } from '../common/validation.js';
+
+// -- Zod Schemas --
+const assignTcSchema = z.object({
+  teacher_coordinator_id: z.string().uuid().nullable().optional()
+});
+
+const poolStatusSchema = z.object({
+  is_in_pool: z.boolean().optional()
+});
+
+const meetingLinkSchema = z.object({
+  meeting_link: z.string().max(500).optional().or(z.literal(''))
+});
+
+const updateTeacherSchema = z.object({
+  experience_level: z.string().max(100).nullable().optional(),
+  per_hour_rate: z.number().positive().max(10000).nullable().optional(),
+  phone: phoneSchema.nullable().optional(),
+  qualification: z.string().max(200).nullable().optional(),
+  subjects_taught: z.array(z.string().max(100)).nullable().optional(),
+  syllabus: z.array(z.string().max(100)).nullable().optional(),
+  languages: z.array(z.string().max(100)).nullable().optional(),
+  experience_duration: z.string().max(100).nullable().optional(),
+  experience_type: z.string().max(100).nullable().optional(),
+  place: z.string().max(100).nullable().optional(),
+  city: z.string().max(100).nullable().optional(),
+  communication_level: z.string().max(50).nullable().optional(),
+  account_holder_name: z.string().max(150).nullable().optional(),
+  account_number: z.string().max(50).nullable().optional(),
+  ifsc_code: z.string().max(20).nullable().optional(),
+  gpay_holder_name: z.string().max(150).nullable().optional(),
+  gpay_number: phoneSchema.nullable().optional(),
+  upi_id: z.string().max(100).nullable().optional(),
+  gender: z.string().max(20).nullable().optional(),
+  dob: z.string().max(20).nullable().optional(),
+  address: z.string().max(500).nullable().optional(),
+  pincode: z.string().max(20).nullable().optional(),
+  meeting_link: z.string().max(500).nullable().optional().or(z.literal('')),
+  full_name: z.string().min(2).max(100).nullable().optional()
+});
+
+const recruitSuccessSchema = z.object({
+  user_id: z.string().uuid(),
+  experience_level: z.string().max(100).nullable().optional(),
+  per_hour_rate: z.coerce.number().positive().max(10000).nullable().optional()
+});
+
+const teacherProfileUpdateSchema = z.object({
+  gender: z.string().max(20).nullable().optional(),
+  dob: z.string().max(20).nullable().optional(),
+  address: z.string().max(500).nullable().optional(),
+  pincode: z.string().max(20).nullable().optional(),
+  city: z.string().max(100).nullable().optional(),
+  place: z.string().max(100).nullable().optional(),
+  meeting_link: z.string().max(500).nullable().optional().or(z.literal('')),
+  full_name: z.string().min(2).max(100).nullable().optional()
+});
+
+const updateAvailabilitySchema = z.object({
+  slots: z.array(z.object({
+    day_of_week: z.enum(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']),
+    start_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time (HH:MM)'),
+    end_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time (HH:MM)')
+  }))
+});
+
+const rescheduleSchema = z.object({
+  reason: z.string().min(5).max(500)
+});
+
 
 const waappaService = new WaappaService();
 
@@ -94,8 +166,10 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
       const teacherId = assignTcMatch[1];
-      const body = await readJson(req);
-      const teacher_coordinator_id = body?.teacher_coordinator_id ?? null;
+      const rawBody = await readJson(req);
+      const body = validatePayload(res, assignTcSchema, rawBody);
+      if (!body) return true;
+      const teacher_coordinator_id = body.teacher_coordinator_id ?? null;
       const { data, error } = await adminClient
         .from('teacher_profiles')
         .update({ teacher_coordinator_id, updated_at: nowIso() })
@@ -115,8 +189,10 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
       const teacherId = poolStatusMatch[1];
-      const body = await readJson(req);
-      const is_in_pool = !!body?.is_in_pool;
+      const rawBody = await readJson(req);
+      const body = validatePayload(res, poolStatusSchema, rawBody);
+      if (!body) return true;
+      const is_in_pool = !!body.is_in_pool;
 
       const { data, error } = await adminClient
         .from('teacher_profiles')
@@ -304,7 +380,9 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
       const studentId = studentMatch[1];
-      const payload = await readJson(req);
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, meetingLinkSchema, rawBody);
+      if (!payload) return true;
 
       // Verify the student is assigned to this teacher
       const { data: assignments, error: checkErr } = await adminClient
@@ -518,25 +596,14 @@ export async function handleTeachers(req, res, url) {
           return true;
         }
         const teacherId = parts[1];
-        const payload = await readJson(req);
+        const rawBody = await readJson(req);
+        const payload = validatePayload(res, updateTeacherSchema, rawBody);
+        if (!payload) return true;
 
-        // Whitelist allowed fields for update
-        const allowed = [
-          'experience_level', 'per_hour_rate', 'phone', 'qualification',
-          'subjects_taught', 'syllabus', 'languages', 'experience_duration',
-          'experience_type', 'place', 'city', 'communication_level',
-          'account_holder_name', 'account_number', 'ifsc_code',
-          'gpay_holder_name', 'gpay_number', 'upi_id',
-          'gender', 'dob', 'address', 'pincode', 'meeting_link'
-        ];
-
-        const updates = {};
-        for (const k of allowed) {
-          if (payload[k] !== undefined) updates[k] = payload[k];
-        }
+        const { full_name, ...updates } = payload;
 
         // Check if full_name is the only thing being updated
-        if (Object.keys(updates).length === 0 && !payload.full_name) {
+        if (Object.keys(updates).length === 0 && !full_name) {
           sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
           return true;
         }
@@ -551,12 +618,12 @@ export async function handleTeachers(req, res, url) {
         }
 
         // Also allow updating user full name if provided
-        if (payload.full_name) {
+        if (full_name) {
           // efficient way: get user_id from profile first? NO, we can do it in one go if we knew user_id
           // But we need to return the updated object anyway.
           const { data: current } = await adminClient.from('teacher_profiles').select('user_id').eq('id', teacherId).single();
           if (current && current.user_id) {
-            await adminClient.from('users').update({ full_name: payload.full_name }).eq('id', current.user_id);
+            await adminClient.from('users').update({ full_name }).eq('id', current.user_id);
           }
         }
 
@@ -583,11 +650,9 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
 
-      const payload = await readJson(req);
-      if (!payload.user_id) {
-        sendJson(res, 400, { ok: false, error: 'user_id is required' });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, recruitSuccessSchema, rawBody);
+      if (!payload) return true;
 
       const { data: existing, error: existingError } = await adminClient
         .from('teacher_profiles')
@@ -660,7 +725,11 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
 
-      const payload = await readJson(req);
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, teacherProfileUpdateSchema, rawBody);
+      if (!payload) return true;
+
+      const { full_name } = payload;
       
       // Fields allowed for self-edit after onboarding
       const selfAllowedAfterOnboarding = ['gender', 'dob', 'address', 'pincode', 'city', 'place', 'meeting_link'];
@@ -698,15 +767,15 @@ export async function handleTeachers(req, res, url) {
       }
 
       // Update full_name in users table if provided
-      if (payload.full_name) {
+      if (full_name) {
         const { error: nameErr } = await adminClient
           .from('users')
-          .update({ full_name: payload.full_name })
+          .update({ full_name })
           .eq('id', profile.user_id);
         if (nameErr) throw new Error(nameErr.message);
       }
 
-      if (Object.keys(updates).length === 0 && !payload.full_name) {
+      if (Object.keys(updates).length === 0 && !full_name) {
         sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
         return true;
       }
@@ -738,7 +807,9 @@ export async function handleTeachers(req, res, url) {
         sendJson(res, 404, { ok: false, error: 'teacher profile not found' });
         return true;
       }
-      const payload = await readJson(req);
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, updateAvailabilitySchema, rawBody);
+      if (!payload) return true;
       const slots = payload.slots || [];
 
       // Delete existing slots
@@ -813,11 +884,9 @@ export async function handleTeachers(req, res, url) {
         return true;
       }
       const sessionId = parts[2];
-      const payload = await readJson(req);
-      if (!payload.reason) {
-        sendJson(res, 400, { ok: false, error: 'reason is required for rescheduling' });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, rescheduleSchema, rawBody);
+      if (!payload) return true;
 
       const { data: session, error: sErr } = await adminClient
         .from('academic_sessions')

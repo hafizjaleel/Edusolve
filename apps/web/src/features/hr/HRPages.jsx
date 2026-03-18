@@ -257,6 +257,96 @@ export function HRDashboardPage() {
 
 
 /* ═══════ ATTENDANCE PAGE ═══════ */
+
+function MobileAttendanceCard({ emp, currentStatus, onUpdateStatus, statuses, statusLabels, statusIcons, statusColors, isSelected, onToggleSelect }) {
+    const [expanded, setExpanded] = useState(false);
+
+    return (
+        <div
+            className="card list-mobile-card desktop-hidden"
+            style={{ padding: '16px', position: 'relative', marginBottom: '8px', border: isSelected ? '2px solid #3b82f6' : '1px solid #e5e7eb', background: '#fff' }}
+        >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1, paddingRight: 8, display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+                    <div style={{ marginTop: '2px' }} onClick={e => e.stopPropagation()}>
+                        <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => onToggleSelect(emp.id)}
+                            style={{ width: '16px', height: '16px' }}
+                        />
+                    </div>
+                    <div style={{ cursor: 'pointer', flex: 1 }} onClick={() => setExpanded(!expanded)}>
+                        <h4 style={{ margin: '0 0 4px', fontSize: '15px', fontWeight: 600, color: '#1e293b' }}>
+                            {emp.full_name}
+                        </h4>
+                        <div style={{ margin: 0, fontSize: '13px', color: '#6b7280' }}>
+                            {emp.designation || emp.department || '—'}
+                        </div>
+                    </div>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '8px', cursor: 'pointer' }} onClick={() => setExpanded(!expanded)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {currentStatus ? (
+                            <span style={{
+                                padding: '4px 8px', borderRadius: '12px', fontSize: '12px', fontWeight: 600,
+                                background: statusColors[currentStatus] + '20', color: statusColors[currentStatus],
+                                display: 'flex', alignItems: 'center', gap: '4px'
+                            }}>
+                                {statusIcons[currentStatus]} {statusLabels[currentStatus]}
+                            </span>
+                        ) : (
+                            <span style={{ fontSize: '12px', color: '#9ca3af', fontWeight: 500 }}>Unmarked</span>
+                        )}
+                        <span style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            width: '24px', height: '24px', borderRadius: '50%', background: '#f3f4f6', color: '#6b7280',
+                            transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s'
+                        }}>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </span>
+                    </div>
+                    <span style={{
+                        padding: '2px 10px', borderRadius: 20, fontSize: '11px', fontWeight: 500,
+                        background: emp.employee_type === 'student' ? '#dbeafe' : '#eff6ff',
+                        color: emp.employee_type === 'student' ? '#1d4ed8' : '#3b82f6',
+                        marginTop: '4px'
+                    }}>
+                        {emp.employee_type}
+                    </span>
+                </div>
+            </div>
+
+            {expanded && (
+                <div style={{ marginTop: '16px', animation: 'fadeIn 0.2s ease-in', borderTop: '1px solid #f1f5f9', paddingTop: '16px' }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                        {statuses.map(s => {
+                            const isActive = currentStatus === s;
+                            return (
+                                <button key={s} onClick={() => onUpdateStatus(emp.id, s)}
+                                    title={statusLabels[s]}
+                                    style={{
+                                        padding: '8px 16px', borderRadius: '8px', border: '1px solid', borderColor: isActive ? statusColors[s] : '#e5e7eb', cursor: 'pointer',
+                                        fontSize: '13px', fontWeight: isActive ? 600 : 500,
+                                        background: isActive ? statusColors[s] : '#f8fafc',
+                                        color: isActive ? '#fff' : '#64748b',
+                                        transition: 'all 0.15s', flex: '1 1 auto', minWidth: '80px',
+                                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px'
+                                    }}>
+                                    <span style={{ fontSize: '14px' }}>{statusIcons[s]}</span>
+                                    {statusLabels[s]}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+}
+
 export function AttendancePage() {
     const [viewReport, setViewReport] = useState(false);
     const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
@@ -265,11 +355,12 @@ export function AttendancePage() {
     const [saving, setSaving] = useState(false);
     const [changes, setChanges] = useState({});
     const [filter, setFilter] = useState('all');
+    const [selectedIds, setSelectedIds] = useState([]);
 
     function load() {
         setLoading(true);
         apiFetch(`/hr/attendance?date=${date}`)
-            .then(r => { setItems(r.items || []); setChanges({}); })
+            .then(r => { setItems(r.items || []); setChanges({}); setSelectedIds([]); })
             .catch(() => { })
             .finally(() => setLoading(false));
     }
@@ -344,7 +435,7 @@ export function AttendancePage() {
         <section className="panel" style={{ paddingBottom: changesCount > 0 ? 80 : 24 }}>
             {/* Header */}
             <div className="card filters-bar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-                <div>
+                <div className="desktop-only">
                     <h2 style={{ margin: 0, marginBottom: 4 }}>Attendance</h2>
                     <p style={{ margin: 0, fontSize: 14, color: 'var(--muted)' }}>{dateLabel} · {items.length} employees</p>
                 </div>
@@ -363,7 +454,8 @@ export function AttendancePage() {
                     </div>
                     <button onClick={() => setViewReport(true)}
                         className="primary">
-                        View Monthly Report
+                        <span className="desktop-only">View Monthly Report</span>
+                        <span className="mobile-only desktop-hidden">Reports</span>
                     </button>
                 </div>
             </div>
@@ -410,71 +502,140 @@ export function AttendancePage() {
 
             {/* Table */}
             {loading ? <p>Loading...</p> : (
-                <div className="card">
-                    <div className="table-wrap">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th style={{ width: 40 }}>#</th>
-                                    <th>Employee</th>
-                                    <th style={{ width: 100 }}>Department</th>
-                                    <th style={{ width: 80 }}>Type</th>
-                                    <th style={{ textAlign: 'center' }}>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {filteredItems.map((emp, idx) => {
-                                    const currentStatus = changes[emp.id]?.status || emp.attendance?.status || null;
-                                    return (
-                                        <tr key={emp.id}>
-                                            <td>{idx + 1}</td>
-                                            <td>
-                                                <div style={{ fontWeight: 500 }}>{emp.full_name}</div>
-                                                {emp.designation && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{emp.designation}</div>}
-                                            </td>
-                                            <td>{emp.department || '—'}</td>
-                                            <td>
-                                                <span style={{
-                                                    padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
-                                                    background: emp.employee_type === 'student' ? '#dbeafe' : '#eff6ff',
-                                                    color: emp.employee_type === 'student' ? '#1d4ed8' : '#3b82f6'
-                                                }}>
-                                                    {emp.employee_type}
-                                                </span>
-                                            </td>
-                                            <td style={{ ...tdStyle, textAlign: 'center' }}>
-                                                <div style={{ display: 'inline-flex', gap: 4, background: '#eff6ff', borderRadius: 8, padding: 3, border: '1px solid #bfdbfe' }}>
-                                                    {statuses.map(s => {
-                                                        const isActive = currentStatus === s;
-                                                        return (
-                                                            <button key={s} onClick={() => updateStatus(emp.id, s)}
-                                                                title={statusLabels[s]}
-                                                                style={{
-                                                                    padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                                                                    fontSize: 12, fontWeight: isActive ? 700 : 400,
-                                                                    background: isActive ? statusColors[s] : 'transparent',
-                                                                    color: isActive ? '#fff' : '#6b7280',
-                                                                    transition: 'all 0.15s', minWidth: 70
-                                                                }}>
-                                                                <span style={{ marginRight: 4 }}>{statusIcons[s]}</span>
-                                                                {statusLabels[s]}
-                                                            </button>
-                                                        );
-                                                    })}
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                                {filteredItems.length === 0 && (
-                                    <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>
-                                        {filter !== 'all' ? 'No employees match this filter' : 'No employees found. Add employees first.'}
-                                    </td></tr>
-                                )}
-                            </tbody>
-                        </table>
+                <>
+                    <div className="card desktop-only">
+                        <div className="table-wrap">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th style={{ width: 40 }}>#</th>
+                                        <th>Employee</th>
+                                        <th style={{ width: 100 }}>Department</th>
+                                        <th style={{ width: 80 }}>Type</th>
+                                        <th style={{ textAlign: 'center' }}>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {filteredItems.map((emp, idx) => {
+                                        const currentStatus = changes[emp.id]?.status || emp.attendance?.status || null;
+                                        return (
+                                            <tr key={emp.id}>
+                                                <td>{idx + 1}</td>
+                                                <td>
+                                                    <div style={{ fontWeight: 500 }}>{emp.full_name}</div>
+                                                    {emp.designation && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 1 }}>{emp.designation}</div>}
+                                                </td>
+                                                <td>{emp.department || '—'}</td>
+                                                <td>
+                                                    <span style={{
+                                                        padding: '2px 10px', borderRadius: 20, fontSize: 11, fontWeight: 500,
+                                                        background: emp.employee_type === 'student' ? '#dbeafe' : '#eff6ff',
+                                                        color: emp.employee_type === 'student' ? '#1d4ed8' : '#3b82f6'
+                                                    }}>
+                                                        {emp.employee_type}
+                                                    </span>
+                                                </td>
+                                                <td style={{ textAlign: 'center' }}>
+                                                    <div style={{ display: 'inline-flex', gap: 4, background: '#eff6ff', borderRadius: 8, padding: 3, border: '1px solid #bfdbfe' }}>
+                                                        {statuses.map(s => {
+                                                            const isActive = currentStatus === s;
+                                                            return (
+                                                                <button key={s} onClick={() => updateStatus(emp.id, s)}
+                                                                    title={statusLabels[s]}
+                                                                    style={{
+                                                                        padding: '5px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                                                                        fontSize: 12, fontWeight: isActive ? 700 : 400,
+                                                                        background: isActive ? statusColors[s] : 'transparent',
+                                                                        color: isActive ? '#fff' : '#6b7280',
+                                                                        transition: 'all 0.15s', minWidth: 70
+                                                                    }}>
+                                                                    <span style={{ marginRight: 4 }}>{statusIcons[s]}</span>
+                                                                    {statusLabels[s]}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                                    {filteredItems.length === 0 && (
+                                        <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>
+                                            {filter !== 'all' ? 'No employees match this filter' : 'No employees found. Add employees first.'}
+                                        </td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
-                </div>
+
+                    <div className="mobile-only desktop-hidden">
+                        {/* Mobile Select All & Bulk Actions */}
+                        {filteredItems.length > 0 && (
+                            <div style={{ marginBottom: '12px', padding: '0 4px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={selectedIds.length > 0 && selectedIds.length === filteredItems.length}
+                                        onChange={(e) => {
+                                            if (e.target.checked) setSelectedIds(filteredItems.map(i => i.id));
+                                            else setSelectedIds([]);
+                                        }}
+                                        style={{ width: '16px', height: '16px' }}
+                                        id="mobile-attendance-select-all"
+                                    />
+                                    <label htmlFor="mobile-attendance-select-all" style={{ fontSize: '13px', color: '#4b5563', fontWeight: 500 }}>
+                                        Select All ({filteredItems.length})
+                                    </label>
+                                </div>
+                                {selectedIds.length > 0 && (
+                                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '4px' }}>
+                                        {statuses.map(s => (
+                                            <button key={s} onClick={() => {
+                                                const bulk = {};
+                                                selectedIds.forEach(id => {
+                                                    bulk[id] = { employee_id: id, status: s };
+                                                });
+                                                setChanges(prev => ({ ...prev, ...bulk }));
+                                                setSelectedIds([]);
+                                            }}
+                                                style={{
+                                                    padding: '6px 12px', borderRadius: '6px', border: '1px solid ' + statusColors[s], cursor: 'pointer',
+                                                    fontSize: '12px', fontWeight: 600, background: statusColors[s] + '1A', color: statusColors[s],
+                                                    display: 'flex', alignItems: 'center', gap: '4px'
+                                                }}>
+                                                {statusIcons[s]} {statusLabels[s]}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {filteredItems.map(emp => (
+                            <MobileAttendanceCard
+                                key={emp.id}
+                                emp={emp}
+                                currentStatus={changes[emp.id]?.status || emp.attendance?.status || null}
+                                onUpdateStatus={updateStatus}
+                                statuses={statuses}
+                                statusLabels={statusLabels}
+                                statusIcons={statusIcons}
+                                statusColors={statusColors}
+                                isSelected={selectedIds.includes(emp.id)}
+                                onToggleSelect={(id) => {
+                                    if (selectedIds.includes(id)) setSelectedIds(selectedIds.filter(sid => sid !== id));
+                                    else setSelectedIds([...selectedIds, id]);
+                                }}
+                            />
+                        ))}
+                        {filteredItems.length === 0 && (
+                            <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--muted)' }}>
+                                {filter !== 'all' ? 'No employees match this filter' : 'No employees found. Add employees first.'}
+                            </div>
+                        )}
+                    </div>
+                </>
             )}
             {/* Sticky Save Bar */}
             {changesCount > 0 && (

@@ -1,6 +1,86 @@
 import { getSupabaseAdminClient } from '../config/supabase.js';
 import { readJson, sendJson } from '../common/http.js';
 import { WaappaService } from '../waappa/waappa.service.js';
+import { z } from 'zod';
+import { phoneSchema, validatePayload } from '../common/validation.js';
+
+// -- Zod Schemas --
+const sendReminderSchema = z.object({
+  text: z.string().max(1000).optional()
+});
+
+const whatsappGroupSchema = z.object({
+  name: z.string().max(100).optional()
+});
+
+const updateStudentSchema = z.object({
+  student_name: z.string().max(150).optional(),
+  parent_name: z.string().max(150).optional(),
+  contact_number: phoneSchema.optional(),
+  alternative_number: phoneSchema.optional(),
+  parent_phone: phoneSchema.optional(),
+  messaging_number: z.enum(['contact', 'alternative', 'parent']).optional(),
+  class_level: z.string().max(100).optional(),
+  package_name: z.string().max(100).optional(),
+  board: z.string().max(100).optional(),
+  medium: z.string().max(50).optional()
+});
+
+const studentStatusSchema = z.object({
+  status: z.enum(['active', 'vacation', 'inactive'])
+});
+
+const createAssignmentSchema = z.object({
+  teacher_id: z.string().uuid(),
+  subject: z.string().max(100),
+  day: z.string().max(20).nullable().optional(),
+  time: z.string().max(20).nullable().optional(),
+  schedule_note: z.string().max(500).nullable().optional()
+});
+
+const createSessionSchema = z.object({
+  teacher_id: z.string().uuid(),
+  session_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'YYYY-MM-DD required'),
+  started_at: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
+  ended_at: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).nullable().optional(),
+  duration_hours: z.coerce.number().positive(),
+  subject: z.string().max(100).nullable().optional(),
+  homework: z.string().max(500).nullable().optional()
+});
+
+const bulkSessionSchema = z.object({
+  teacher_id: z.string().uuid(),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  end_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  days_of_week: z.array(z.enum(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'])).min(1),
+  started_at: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/),
+  duration_hours: z.coerce.number().positive(),
+  subject: z.string().max(100).optional()
+});
+
+const rescheduleSessionSchema = z.object({
+  session_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  started_at: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).optional(),
+  ended_at: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).optional(),
+  status: z.enum(['scheduled', 'rescheduled', 'completed', 'cancelled', 'held']).optional(),
+  subject: z.string().max(100).optional(),
+  teacher_id: z.string().uuid().optional()
+});
+
+const messageReminderSchema = z.object({
+  message: z.string().max(1000).optional(),
+  type: z.string().max(50).optional(),
+  session_id: z.string().uuid().optional()
+});
+
+const topupSchema = z.object({
+  hours_added: z.coerce.number().positive(),
+  total_amount: z.coerce.number().positive(),
+  amount: z.coerce.number().positive(),
+  finance_note: z.string().max(1000).optional(),
+  screenshot_url: z.string().url().max(500).optional()
+});
+
 
 const waappaService = new WaappaService();
 
@@ -502,7 +582,9 @@ export async function handleStudents(req, res, url) {
       }
       const phone = phoneRaw.replace(/[^0-9]/g, '');
 
-      const body = await readJson(req).catch(() => ({}));
+      const rawBody = await readJson(req).catch(() => ({}));
+      const body = validatePayload(res, sendReminderSchema, rawBody);
+      if (!body) return true;
       const text = body.text || `Hello ${st.student_name}, this is a gentle reminder regarding your upcoming classes.`;
 
       const { data: sessRow } = await adminClient.from('whatsapp_sessions').select('session_name, api_key').eq('status', 'WORKING').order('updated_at', { ascending: false }).limit(1).maybeSingle();
@@ -585,7 +667,9 @@ export async function handleStudents(req, res, url) {
         return true;
       }
 
-      const body = await readJson(req).catch(() => ({}));
+      const rawBody = await readJson(req).catch(() => ({}));
+      const body = validatePayload(res, whatsappGroupSchema, rawBody);
+      if (!body) return true;
       const groupName = body.name || (st.student_name ? `Edusolve - ${st.student_name}` : 'Edusolve Group');
 
       const waappaUrl = process.env.WAAPPA_BASE_URL || 'http://localhost:3001';
@@ -644,28 +728,12 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
-
-      const allowedFields = [
-        'student_name', 'parent_name', 'contact_number',
-        'alternative_number', 'parent_phone', 'messaging_number',
-        'class_level', 'package_name', 'board', 'medium'
-      ];
-      const updateFields = {};
-      for (const key of allowedFields) {
-        if (payload[key] !== undefined) {
-          updateFields[key] = payload[key];
-        }
-      }
+      const rawBody = await readJson(req);
+      const updateFields = validatePayload(res, updateStudentSchema, rawBody);
+      if (!updateFields) return true;
 
       if (Object.keys(updateFields).length === 0) {
         sendJson(res, 400, { ok: false, error: 'no valid fields to update' });
-        return true;
-      }
-
-      // Validate messaging_number value
-      if (updateFields.messaging_number && !['contact', 'alternative', 'parent'].includes(updateFields.messaging_number)) {
-        sendJson(res, 400, { ok: false, error: 'messaging_number must be one of: contact, alternative, parent' });
         return true;
       }
 
@@ -694,12 +762,9 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
-      const validStatuses = ['active', 'vacation', 'inactive'];
-      if (!payload.status || !validStatuses.includes(payload.status)) {
-        sendJson(res, 400, { ok: false, error: `status must be one of: ${validStatuses.join(', ')}` });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, studentStatusSchema, rawBody);
+      if (!payload) return true;
       const { data, error } = await adminClient
         .from('students')
         .update({ status: payload.status, updated_at: nowIso() })
@@ -767,11 +832,9 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
-      if (!payload.teacher_id || !payload.subject) {
-        sendJson(res, 400, { ok: false, error: 'teacher_id and subject are required' });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, createAssignmentSchema, rawBody);
+      if (!payload) return true;
       const { data, error } = await adminClient
         .from('student_teacher_assignments')
         .insert({
@@ -856,11 +919,9 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
-      if (!payload.teacher_id || !payload.session_date || !payload.duration_hours) {
-        sendJson(res, 400, { ok: false, error: 'teacher_id, session_date, and duration_hours are required' });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, createSessionSchema, rawBody);
+      if (!payload) return true;
       const { data, error } = await adminClient
         .from('academic_sessions')
         .insert({
@@ -906,13 +967,10 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, bulkSessionSchema, rawBody);
+      if (!payload) return true;
       const { teacher_id, start_date, end_date, days_of_week, started_at, duration_hours, subject } = payload;
-
-      if (!teacher_id || !start_date || !end_date || !days_of_week || !days_of_week.length || !started_at || !duration_hours) {
-        sendJson(res, 400, { ok: false, error: 'missing required fields' });
-        return true;
-      }
 
       const start = new Date(`${start_date}T00:00:00Z`);
       const end = new Date(`${end_date}T00:00:00Z`);
@@ -974,14 +1032,10 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const sessionId = parts[2];
-      const payload = await readJson(req);
-      const updateFields = {};
-      if (payload.session_date) updateFields.session_date = payload.session_date;
-      if (payload.started_at) updateFields.started_at = payload.started_at;
-      if (payload.ended_at) updateFields.ended_at = payload.ended_at;
-      if (payload.status) updateFields.status = payload.status;
-      if (payload.subject !== undefined) updateFields.subject = payload.subject;
-      if (payload.teacher_id) updateFields.teacher_id = payload.teacher_id;
+      const rawBody = await readJson(req);
+      const updateFields = validatePayload(res, rescheduleSessionSchema, rawBody);
+      if (!updateFields) return true;
+
       if (Object.keys(updateFields).length === 0) {
         sendJson(res, 400, { ok: false, error: 'no fields to update' });
         return true;
@@ -1022,7 +1076,9 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, messageReminderSchema, rawBody);
+      if (!payload) return true;
       const messageContent = payload.message || 'Session reminder: You have an upcoming class today.';
 
       // Fetch student for contact number
@@ -1069,22 +1125,13 @@ export async function handleStudents(req, res, url) {
         return true;
       }
       const studentId = parts[1];
-      const payload = await readJson(req);
-      const hoursAdded = Number(payload.hours_added);
-      const totalAmount = Number(payload.total_amount);
-      const amount = Number(payload.amount);
-      if (!Number.isFinite(hoursAdded) || hoursAdded <= 0) {
-        sendJson(res, 400, { ok: false, error: 'hours_added must be positive number' });
-        return true;
-      }
-      if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
-        sendJson(res, 400, { ok: false, error: 'total_amount must be positive number' });
-        return true;
-      }
-      if (!Number.isFinite(amount) || amount <= 0) {
-        sendJson(res, 400, { ok: false, error: 'amount must be positive number' });
-        return true;
-      }
+      const rawBody = await readJson(req);
+      const payload = validatePayload(res, topupSchema, rawBody);
+      if (!payload) return true;
+
+      const hoursAdded = payload.hours_added;
+      const totalAmount = payload.total_amount;
+      const amount = payload.amount;
       const { data: student, error: studentError } = await adminClient
         .from('students')
         .select('id')
