@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
+import { ReceiptModal, PaySlipModal, CompanyBrandingSettings } from './InvoiceTemplate.jsx';
 
 /* ═══════ FINANCE DASHBOARD ═══════ */
 export function FinanceDashboardPage() {
@@ -384,6 +385,8 @@ export function ExpenseManagementPage() {
 export function AccountsPage() {
   const [items, setItems] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [editingAccount, setEditingAccount] = useState(null);
   const [loading, setLoading] = useState(true);
 
   async function load() {
@@ -393,40 +396,198 @@ export function AccountsPage() {
   useEffect(() => { load(); }, []);
 
   const totalBalance = items.reduce((s, r) => s + Number(r.balance || 0), 0);
+  const computedBalance = items.reduce((s, r) => s + Number(r.computed_balance || 0), 0);
 
   return (
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '8px' }}>
         <div>
           <h2 style={{ margin: 0, fontSize: '20px' }}>Accounts</h2>
-          <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '13px' }}>Total Balance: ₹{totalBalance.toLocaleString()}</p>
+          <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '13px' }}>Total Balance: ₹{totalBalance.toLocaleString()}
+            {computedBalance !== totalBalance && (
+              <span style={{ marginLeft: '8px', color: '#6b7280', fontSize: '11px' }}>
+                (Computed: ₹{computedBalance.toLocaleString()})
+              </span>
+            )}
+          </p>
         </div>
         <button className="primary" onClick={() => setShowAdd(true)}>+ Add Account</button>
       </div>
       {loading ? <p>Loading...</p> : (
         <div className="today-leads-grid">
-          {items.map(acc => (
-            <div key={acc.id} className="card" style={{
-              padding: '20px', borderLeft: `4px solid ${acc.is_main ? '#4338ca' : '#6b7280'}`
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{acc.name}</h3>
-                  <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '12px', textTransform: 'capitalize' }}>{acc.type}</p>
+          {items.map(acc => {
+            const storedBal = Number(acc.balance || 0);
+            const computedBal = Number(acc.computed_balance ?? storedBal);
+            const isOutOfSync = acc.computed_balance !== undefined && Math.abs(computedBal - storedBal) > 0.01;
+            return (
+              <div key={acc.id} className="card" style={{
+                padding: '20px', borderLeft: `4px solid ${acc.is_main ? '#4338ca' : isOutOfSync ? '#f59e0b' : '#6b7280'}`
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{acc.name}</h3>
+                    <p className="text-muted" style={{ margin: '2px 0 0', fontSize: '12px', textTransform: 'capitalize' }}>{acc.type}</p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    {acc.is_main ? <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700, background: '#e0e7ff', color: '#4338ca' }}>MAIN</span> : null}
+                    <button onClick={() => { setEditingAccount(acc); setShowEdit(true); }} title="Edit Account"
+                      style={{ background: 'none', border: '1px solid #d1d5db', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer', color: '#6b7280', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style={{ width: '13px', height: '13px' }}>
+                        <path d="M2.695 14.763l-1.262 3.154a.5.5 0 00.65.65l3.155-1.262a4 4 0 001.343-.885L17.5 5.5a2.121 2.121 0 00-3-3L3.58 13.42a4 4 0 00-.885 1.343z" />
+                      </svg>
+                      Edit
+                    </button>
+                  </div>
                 </div>
-                {acc.is_main ? <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700, background: '#e0e7ff', color: '#4338ca' }}>MAIN</span> : null}
+
+                {/* Stored balance */}
+                <p style={{ margin: '12px 0 0', fontSize: '28px', fontWeight: 700, color: storedBal >= 0 ? '#15803d' : '#dc2626' }}>
+                  ₹{storedBal.toLocaleString()}
+                </p>
+                {acc.description ? <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>{acc.description}</p> : null}
+
+                {/* Out-of-sync warning */}
+                {isOutOfSync && (
+                  <div style={{ marginTop: '10px', padding: '8px 10px', background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '8px' }}>
+                    <p style={{ margin: 0, fontSize: '11px', color: '#92400e', fontWeight: 600 }}>
+                      ⚠ Balance may be out of sync
+                    </p>
+                    <p style={{ margin: '2px 0 4px', fontSize: '11px', color: '#78350f' }}>
+                      Computed from transactions: <strong>₹{computedBal.toLocaleString()}</strong>
+                    </p>
+                    <button
+                      style={{ fontSize: '11px', padding: '3px 10px', border: '1px solid #f59e0b', borderRadius: '5px', background: '#fef3c7', color: '#92400e', cursor: 'pointer', fontWeight: 600 }}
+                      onClick={async () => {
+                        try {
+                          await apiFetch(`/finance/accounts/${acc.id}`, { method: 'PATCH', body: JSON.stringify({ balance: computedBal }) });
+                          load();
+                        } catch (e) { alert(e.message); }
+                      }}
+                    >Sync Balance</button>
+                  </div>
+                )}
               </div>
-              <p style={{ margin: '12px 0 0', fontSize: '28px', fontWeight: 700, color: Number(acc.balance) >= 0 ? '#15803d' : '#dc2626' }}>
-                ₹{Number(acc.balance).toLocaleString()}
-              </p>
-              {acc.description ? <p className="text-muted" style={{ margin: '4px 0 0', fontSize: '12px' }}>{acc.description}</p> : null}
-            </div>
-          ))}
+            );
+          })}
           {!items.length ? <div className="card" style={{ padding: '40px', textAlign: 'center' }}><p className="text-muted">No accounts. Add your first account.</p></div> : null}
         </div>
       )}
       {showAdd ? <AddAccountModal onClose={() => setShowAdd(false)} onDone={() => { setShowAdd(false); load(); }} /> : null}
+      {showEdit && editingAccount ? <EditAccountModal account={editingAccount} onClose={() => setShowEdit(false)} onDone={() => { setShowEdit(false); setEditingAccount(null); load(); }} /> : null}
     </section>
+  );
+}
+
+/* ═══════ EDIT ACCOUNT MODAL ═══════ */
+function EditAccountModal({ account, onClose, onDone }) {
+  const [name, setName] = useState(account.name);
+  const [type, setType] = useState(account.type);
+  const [balance, setBalance] = useState(String(account.balance));
+  const [description, setDescription] = useState(account.description || '');
+  const [isMain, setIsMain] = useState(account.is_main);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSave() {
+    if (!name || !type || balance === '') {
+      setError('Name, type, and balance are required.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await apiFetch(`/finance/accounts/${account.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name,
+          type,
+          balance: Number(balance),
+          description: description || null,
+          is_main: isMain,
+        })
+      });
+      onDone();
+    } catch (e) {
+      setError(e.message || 'Failed to update account');
+    }
+    setSaving(false);
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal card" onClick={e => e.stopPropagation()}
+        style={{ maxWidth: '420px', width: '95%', padding: '28px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h3 style={{ margin: 0, fontSize: '18px' }}>Edit Account</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#6b7280' }}>×</button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>Account Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>Account Type</label>
+            <select
+              value={type}
+              onChange={e => setType(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box', backgroundColor: 'white' }}
+            >
+              <option value="cash">Cash</option>
+              <option value="bank">Bank</option>
+              <option value="credit">Credit Card</option>
+              <option value="ewallet">E-Wallet</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>Current Balance</label>
+            <input
+              type="number"
+              value={balance}
+              onChange={e => setBalance(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '13px', fontWeight: 600, display: 'block', marginBottom: '5px' }}>Description (Optional)</label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows="3"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }}
+            ></textarea>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input
+              type="checkbox"
+              id="isMainAccount"
+              checked={isMain}
+              onChange={e => setIsMain(e.target.checked)}
+              style={{ width: '16px', height: '16px' }}
+            />
+            <label htmlFor="isMainAccount" style={{ fontSize: '13px', fontWeight: 600 }}>Set as Main Account</label>
+          </div>
+
+          {error && <p style={{ color: '#dc2626', fontSize: '13px', margin: '0' }}>{error}</p>}
+
+          <button
+            className="primary"
+            onClick={handleSave}
+            disabled={saving}
+            style={{ width: '100%', padding: '10px 15px', fontSize: '14px', fontWeight: 600, borderRadius: '8px', cursor: saving ? 'not-allowed' : 'pointer' }}
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -852,6 +1013,7 @@ export function PayrollRequestsPage() {
   const [paying, setPaying] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [payslipRequest, setPayslipRequest] = useState(null);
 
   async function loadData() {
     try {
@@ -957,7 +1119,12 @@ export function PayrollRequestsPage() {
                   </td>
                   <td data-label="HR Note" style={{ fontSize: 13, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={req.hr_note}>{req.hr_note || '—'}</td>
                   <td data-label="Actions" className="actions">
-                    {req.status === 'pending' ? <button className="small primary" onClick={() => setSelectedRequest(req)}>Pay</button> : <button className="small secondary" onClick={() => setSelectedRequest(req)}>View</button>}
+                    {req.status === 'pending' ? <button className="small primary" onClick={() => setSelectedRequest(req)}>Pay</button> : (
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <button className="small secondary" onClick={() => setSelectedRequest(req)}>View</button>
+                        <button onClick={() => setPayslipRequest(req)} style={{ fontSize: '11px', padding: '3px 8px', background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>📋 Pay Slip</button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               )
@@ -990,6 +1157,7 @@ export function PayrollRequestsPage() {
           </div>
         </div>
       )}
+      {payslipRequest && <PaySlipModal request={payslipRequest} onClose={() => setPayslipRequest(null)} />}
     </section>
   );
 }
@@ -1041,6 +1209,13 @@ export function FinanceReportsPage() {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  // Date Filters
+  const [dateFilter, setDateFilter] = useState('this_month'); // 'last_week', 'this_month', 'last_month', 'custom'
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [customMonth, setCustomMonth] = useState(() => {
+    const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  });
+
   useEffect(() => {
     (async () => {
       try {
@@ -1057,30 +1232,99 @@ export function FinanceReportsPage() {
     })();
   }, []);
 
-  const totalIncome = income.reduce((s, r) => s + Number(r.amount || 0), 0);
-  const totalExpenses = expenses.reduce((s, r) => s + Number(r.amount || 0), 0);
+  // Filter Data Client-side
+  const filteredData = useMemo(() => {
+    let finalIncome = income;
+    let finalExpenses = expenses;
+    
+    // Determine boundaries
+    let dfStart = new Date(0);
+    let dfEnd = new Date(8640000000000000); // Max future
+
+    const now = new Date();
+    if (dateFilter === 'this_month') {
+      dfStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      dfEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+    } else if (dateFilter === 'last_month') {
+      dfStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      dfEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+    } else if (dateFilter === 'last_week') {
+      const lastWeekStart = new Date(now);
+      lastWeekStart.setDate(now.getDate() - 7 - now.getDay());
+      dfStart = new Date(lastWeekStart.getFullYear(), lastWeekStart.getMonth(), lastWeekStart.getDate());
+      dfEnd = new Date(dfStart);
+      dfEnd.setDate(dfStart.getDate() + 6);
+      dfEnd.setHours(23, 59, 59, 999);
+    } else if (dateFilter === 'month_select' && customMonth) {
+      const [yy, mm] = customMonth.split('-');
+      dfStart = new Date(yy, parseInt(mm) - 1, 1);
+      dfEnd = new Date(yy, parseInt(mm), 0, 23, 59, 59);
+    } else if (dateFilter === 'custom' && dateRange.start && dateRange.end) {
+      dfStart = new Date(dateRange.start);
+      dfEnd = new Date(dateRange.end);
+      dfEnd.setHours(23, 59, 59, 999);
+    }
+
+    finalIncome = finalIncome.filter(i => {
+      if (!i.entry_date) return false;
+      const d = new Date(i.entry_date); return d >= dfStart && d <= dfEnd;
+    });
+
+    finalExpenses = finalExpenses.filter(e => {
+      if (!e.expense_date) return false;
+      const d = new Date(e.expense_date); return d >= dfStart && d <= dfEnd;
+    });
+
+    return { inc: finalIncome, exp: finalExpenses };
+  }, [income, expenses, dateFilter, dateRange, customMonth]);
+
+  const totalIncome = filteredData.inc.reduce((s, r) => s + Number(r.amount || 0), 0);
+  const totalExpenses = filteredData.exp.reduce((s, r) => s + Number(r.amount || 0), 0);
 
   // Monthly breakdown
   const monthlyData = useMemo(() => {
     const map = {};
-    income.forEach(i => {
+    filteredData.inc.forEach(i => {
       const m = (i.entry_date || '').slice(0, 7);
       if (!map[m]) map[m] = { income: 0, expenses: 0 };
       map[m].income += Number(i.amount);
     });
-    expenses.forEach(e => {
+    filteredData.exp.forEach(e => {
       const m = (e.expense_date || '').slice(0, 7);
       if (!map[m]) map[m] = { income: 0, expenses: 0 };
       map[m].expenses += Number(e.amount);
     });
     return Object.entries(map).sort((a, b) => b[0].localeCompare(a[0]));
-  }, [income, expenses]);
+  }, [filteredData]);
 
   if (loading) return <section className="panel"><p>Loading reports...</p></section>;
 
   return (
     <section className="panel">
-      <h2 style={{ margin: '0 0 16px', fontSize: '20px' }}>Financial Reports</h2>
+      {/* Date Filters */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginBottom: '20px', background: 'white', padding: '16px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px', background: '#f9fafb', minWidth: '150px' }}>
+          <option value="this_month">This Month</option>
+          <option value="last_week">Last Week</option>
+          <option value="last_month">Last Month</option>
+          <option value="month_select">Select Month</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        
+        {dateFilter === 'month_select' && (
+          <input type="month" value={customMonth} onChange={e => setCustomMonth(e.target.value)}
+            style={{ padding: '7px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }} />
+        )}
+        {dateFilter === 'custom' && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input type="date" value={dateRange.start} onChange={e => setDateRange({ ...dateRange, start: e.target.value })}
+              style={{ padding: '7px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }} />
+            <span style={{ color: '#6b7280' }}>to</span>
+            <input type="date" value={dateRange.end} onChange={e => setDateRange({ ...dateRange, end: e.target.value })}
+              style={{ padding: '7px 12px', borderRadius: '6px', border: '1px solid #d1d5db', fontSize: '13px' }} />
+          </div>
+        )}
+      </div>
 
       <div className="grid-three" style={{ marginBottom: '16px' }}>
         <DashCard label="Total Income" value={`₹${totalIncome.toLocaleString()}`} tone="success" />
@@ -1151,6 +1395,8 @@ export function PaymentVerificationPage() {
   const [selectedInstallment, setSelectedInstallment] = useState(null);
   const [accounts, setAccounts] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [receiptItem, setReceiptItem] = useState(null);
+  const [receiptType, setReceiptType] = useState('payment');
 
   async function load() {
     setLoading(true); setError('');
@@ -1254,6 +1500,8 @@ export function PaymentVerificationPage() {
                     <td data-label="Actions" className="actions">
                       {item.status === 'pending' ? (
                         <button className="small primary" onClick={() => setSelectedPayment(item)}>🔍 Review</button>
+                      ) : item.status === 'verified' ? (
+                        <button onClick={() => { setReceiptItem(item); setReceiptType('payment'); }} style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>🧾 Receipt</button>
                       ) : '—'}
                     </td>
                   </tr>
@@ -1296,6 +1544,8 @@ export function PaymentVerificationPage() {
                     <td data-label="Actions" className="actions">
                       {item.status === 'pending_finance' ? (
                         <button className="small primary" onClick={() => setSelectedTopup(item)}>🔍 Review</button>
+                      ) : item.status === 'verified' ? (
+                        <button onClick={() => { setReceiptItem(item); setReceiptType('topup'); }} style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600 }}>🧾 Receipt</button>
                       ) : '—'}
                     </td>
                   </tr>
@@ -1389,6 +1639,7 @@ export function PaymentVerificationPage() {
           onDone={() => { setSelectedInstallment(null); load(); }}
         />
       )}
+      {receiptItem && <ReceiptModal payment={receiptItem} type={receiptType} onClose={() => setReceiptItem(null)} />}
     </section>
   );
 }

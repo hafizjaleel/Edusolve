@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { getSession } from '../../lib/auth.js';
 import { AddLeadModal } from './components/AddLeadModal.jsx';
+import { GenerateInvoiceModal, ReceiptModal } from '../finance/InvoiceTemplate.jsx';
 
 import { LeadFilters } from './components/LeadFilters.jsx';
 import { SearchSelect } from '../../components/ui/SearchSelect.jsx';
@@ -2880,6 +2881,8 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
   const [showInstallmentModal, setShowInstallmentModal] = useState(null);
   const [myInstallments, setMyInstallments] = useState([]);
   const [loadingMyInstallments, setLoadingMyInstallments] = useState(false);
+  const [showGenerateInvoice, setShowGenerateInvoice] = useState(false);
+  const [receiptPayment, setReceiptPayment] = useState(null);
 
   useEffect(() => {
     if (initialLeadId && leads.length > 0) {
@@ -3079,6 +3082,7 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                       <th>Screenshot</th>
                       <th>Status</th>
                       <th>Submitted</th>
+                      <th>Doc</th>
                     </tr></thead>
                     <tbody>
                       {myInstallments.map(inst => {
@@ -3096,11 +3100,19 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                             <td>{inst.screenshot_url ? <a href={inst.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca', fontSize: '12px' }}>View</a> : '—'}</td>
                             <td><span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: s.bg, color: s.color }}>{s.label}</span></td>
                             <td style={{ fontSize: '12px', color: '#6b7280' }}>{new Date(inst.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                            <td>
+                              {inst.status === 'verified' && (
+                                <button 
+                                  onClick={() => setReceiptPayment({ leads: { student_name: inst.student_name, contact_number: '—' }, amount: inst.amount, total_amount: inst.amount, hours: null, finance_note: inst.finance_note, created_at: inst.created_at, updated_at: inst.created_at, id: inst.id })}
+                                  style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                >🧾 Receipt</button>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}
                       {!myInstallments.length && (
-                        <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No installments submitted yet.</td></tr>
+                        <tr><td colSpan="7" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No installments submitted yet.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -3129,6 +3141,12 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                             {inst.finance_note && <p style={{ margin: '0 0 12px', fontSize: '12px', color: '#6b7280', padding: '8px', background: '#f9fafb', borderRadius: '6px' }}>{inst.finance_note}</p>}
                             {inst.screenshot_url && (
                               <a href={inst.screenshot_url} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '13px', color: '#4f46e5', fontWeight: 600 }}>🖼️ View Receipt</a>
+                            )}
+                            {inst.status === 'verified' && (
+                              <button 
+                                onClick={() => setReceiptPayment({ leads: { student_name: inst.student_name, contact_number: '—' }, amount: inst.amount, total_amount: inst.amount, hours: null, finance_note: inst.finance_note, created_at: inst.created_at, updated_at: inst.created_at, id: inst.id })}
+                                style={{ padding: '6px 12px', margin: '8px 0 0', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '11px', display: 'block', width: 'fit-content' }}
+                              >🧾 Download Receipt</button>
                             )}
                           </>
                         }
@@ -3174,6 +3192,10 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
             {!isCounselorHead && (
               <button className="primary" style={{ flexShrink: 0, padding: '8px 12px', fontSize: '13px', whiteSpace: 'nowrap' }} onClick={() => setShowNewModal(true)}>+ New</button>
             )}
+            <button
+              style={{ flexShrink: 0, padding: '8px 12px', fontSize: '13px', whiteSpace: 'nowrap', background: '#f0fdf4', border: '1px solid #86efac', color: '#15803d', borderRadius: '6px', cursor: 'pointer', fontWeight: 600 }}
+              onClick={() => setShowGenerateInvoice(true)}
+            >📄 Generate Invoice</button>
           </div>
 
           {/* Stats Cards */}
@@ -3240,6 +3262,11 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
                       </td>
                       <td style={{ fontSize: '12px', color: '#6b7280' }}>
                         {new Date(r.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })}
+                      </td>
+                      <td>
+                        {r.status === 'verified' && (
+                          <button onClick={() => setReceiptPayment(r)} style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>🧾 Receipt</button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -3310,6 +3337,8 @@ export function PaymentRequestsPage({ initialLeadId, onReady }) {
           )}
         </>
       )}
+      {showGenerateInvoice && <GenerateInvoiceModal onClose={() => setShowGenerateInvoice(false)} />}
+      {receiptPayment && <ReceiptModal payment={receiptPayment} type="payment" onClose={() => setReceiptPayment(null)} />}
     </section>
   );
 }

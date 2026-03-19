@@ -40,7 +40,7 @@ export async function handleUsers(req, res) {
 
         // GET /admin/users - List users
         if (req.method === 'GET' && req.url === '/admin/users') {
-            const { data: { users }, error } = await adminClient.auth.admin.listUsers();
+            const { data: { users }, error } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
             if (error) throw error;
 
             // Fetch fallback roles from DB just in case metadata is empty
@@ -154,6 +154,7 @@ export async function handleUsers(req, res) {
                 const { error: tpError } = await adminClient.from('teacher_profiles').insert({
                     user_id: data.user.id,
                     teacher_code: teacherCode,
+                    phone: phone,
                     is_in_pool: false,
                     onboarding_completed: false,
                     created_at: now,

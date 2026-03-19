@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useCallback, useRef, Fragment } from 'react';
 import { apiFetch } from '../../lib/api.js';
+import { PhoneInput } from '../../components/PhoneInput.jsx';
+import { ReceiptModal } from '../finance/InvoiceTemplate.jsx';
 
 function ExpandableMobileCard({ title, subtitle, topRight, mainStats, expandedContent, actions, borderColor }) {
   const [expanded, setExpanded] = useState(false);
@@ -1266,7 +1268,7 @@ function StudentDetailPage({ studentId, onBack }) {
 
   const parsePhone = (raw) => {
     if (!raw) return { code: '+91', num: '' };
-    const codes = ['+971', '+966', '+91', '+44', '+61', '+65', '+60', '+1'];
+    const codes = ['+971', '+966', '+974', '+968', '+965', '+973', '+91', '+44', '+61', '+65', '+60', '+1'];
     for (const c of codes) {
       if (raw.startsWith(c)) {
         return { code: c, num: raw.substring(c.length).trim() };
@@ -1458,10 +1460,14 @@ function StudentDetailPage({ studentId, onBack }) {
                       <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                         <select value={editForm.country_code || '+91'} onChange={e => setEditForm({ ...editForm, country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
                           <option value="+91">+91</option>
-                          <option value="+1">+1</option>
-                          <option value="+44">+44</option>
                           <option value="+971">+971</option>
                           <option value="+966">+966</option>
+                          <option value="+974">+974</option>
+                          <option value="+968">+968</option>
+                          <option value="+965">+965</option>
+                          <option value="+973">+973</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
                           <option value="+61">+61</option>
                           <option value="+65">+65</option>
                           <option value="+60">+60</option>
@@ -1473,10 +1479,14 @@ function StudentDetailPage({ studentId, onBack }) {
                       <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                         <select value={editForm.alt_country_code || '+91'} onChange={e => setEditForm({ ...editForm, alt_country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
                           <option value="+91">+91</option>
-                          <option value="+1">+1</option>
-                          <option value="+44">+44</option>
                           <option value="+971">+971</option>
                           <option value="+966">+966</option>
+                          <option value="+974">+974</option>
+                          <option value="+968">+968</option>
+                          <option value="+965">+965</option>
+                          <option value="+973">+973</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
                           <option value="+61">+61</option>
                           <option value="+65">+65</option>
                           <option value="+60">+60</option>
@@ -1488,10 +1498,14 @@ function StudentDetailPage({ studentId, onBack }) {
                       <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                         <select value={editForm.parent_country_code || '+91'} onChange={e => setEditForm({ ...editForm, parent_country_code: e.target.value })} style={{ width: '90px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
                           <option value="+91">+91</option>
-                          <option value="+1">+1</option>
-                          <option value="+44">+44</option>
                           <option value="+971">+971</option>
                           <option value="+966">+966</option>
+                          <option value="+974">+974</option>
+                          <option value="+968">+968</option>
+                          <option value="+965">+965</option>
+                          <option value="+973">+973</option>
+                          <option value="+1">+1</option>
+                          <option value="+44">+44</option>
                           <option value="+61">+61</option>
                           <option value="+65">+65</option>
                           <option value="+60">+60</option>
@@ -1760,10 +1774,14 @@ function StudentOnboardingForm({ onDone }) {
               <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
                 <select value={f.country_code} onChange={e => set('country_code', e.target.value)} style={{ width: '120px', padding: '8px', borderRadius: '4px', border: '1px solid #ccc' }}>
                   <option value="+91">+91 (IND)</option>
-                  <option value="+1">+1 (US/CA)</option>
-                  <option value="+44">+44 (UK)</option>
                   <option value="+971">+971 (UAE)</option>
                   <option value="+966">+966 (KSA)</option>
+                  <option value="+974">+974 (QAT)</option>
+                  <option value="+968">+968 (OMN)</option>
+                  <option value="+965">+965 (KWT)</option>
+                  <option value="+973">+973 (BHR)</option>
+                  <option value="+1">+1 (US/CA)</option>
+                  <option value="+44">+44 (UK)</option>
                   <option value="+61">+61 (AUS)</option>
                   <option value="+65">+65 (SG)</option>
                   <option value="+60">+60 (MY)</option>
@@ -1833,6 +1851,8 @@ export function StudentsHubPage({ role }) {
 
   // Add new student form
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showImportOld, setShowImportOld] = useState(false);
+  const [deleteStudentTarget, setDeleteStudentTarget] = useState(null); // { id, name }
 
   // Group creation modal
   const [groupModal, setGroupModal] = useState(null);
@@ -1917,9 +1937,17 @@ export function StudentsHubPage({ role }) {
     <section className="panel">
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2 style={{ margin: 0 }}>Students</h2>
-        {(isAC || isSuperAdmin) && (
-          <button type="button" onClick={() => setShowAddForm(true)}>+ Add Student</button>
-        )}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {isAC && (
+            <>
+              <button type="button" className="btn-secondary" onClick={() => setShowImportOld(true)}>Old Students</button>
+              <button type="button" onClick={() => setShowAddForm(true)}>+ Add Student</button>
+            </>
+          )}
+          {isSuperAdmin && (
+            <button type="button" onClick={() => setShowAddForm(true)}>+ Add Student</button>
+          )}
+        </div>
       </div>
 
       {error ? <p className="error">{error}</p> : null}
@@ -1981,6 +2009,7 @@ export function StudentsHubPage({ role }) {
           <th>ID</th><th>Name</th><th>Group</th><th>Class</th><th>Status</th><th>Hours Left</th>
           {isSuperAdmin && <th>Coordinator</th>}
           <th>Payment</th>
+          {isAC && <th></th>}
         </tr></thead><tbody>
             {filtered.map(s => <tr key={s.id} onClick={() => setSelId(s.id)} className="clickable-row" style={{ cursor: 'pointer' }}>
               <td data-label="ID" style={{ padding: '16px 12px' }}>{s.student_code || '—'}</td>
@@ -2003,10 +2032,35 @@ export function StudentsHubPage({ role }) {
                 {s.pending_payment === 'initial' && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: '#fce7f3', color: '#9d174d' }}>Initial Pending</span>}
                 {!s.pending_payment && <span style={{ padding: '3px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: '#d1fae5', color: '#065f46' }}>✓ Clear</span>}
               </td>
+              {isAC && (
+                <td style={{ padding: '16px 12px' }} onClick={e => e.stopPropagation()}>
+                  <button
+                    title="Delete Student"
+                    onClick={() => setDeleteStudentTarget({ id: s.id, name: s.student_name })}
+                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: '#dc2626', fontSize: '16px', padding: '4px 8px' }}
+                  >🗑</button>
+                </td>
+              )}
             </tr>)}
             {!filtered.length ? <tr><td colSpan={isSuperAdmin ? 8 : 7}>No students match filters.</td></tr> : null}
           </tbody></table></div>
       </article>
+
+      {/* Delete Student Modal */}
+      {deleteStudentTarget && (
+        <StudentDeleteConfirmModal
+          name={deleteStudentTarget.name}
+          onConfirm={async () => {
+            try {
+              const res = await apiFetch(`/students/${deleteStudentTarget.id}`, { method: 'DELETE' });
+              if (!res.ok) throw new Error(res.error || 'Delete failed');
+              setDeleteStudentTarget(null);
+              loadData();
+            } catch (e) { alert('Delete failed: ' + e.message); }
+          }}
+          onClose={() => setDeleteStudentTarget(null)}
+        />
+      )}
 
       {/* Create Group Modal */}
       {groupModal && (
@@ -2058,6 +2112,7 @@ export function StudentsHubPage({ role }) {
         </div>
       )}
 
+      {showImportOld && <ImportOldStudentsModal onClose={() => { setShowImportOld(false); loadData(); }} />}
       {showAddForm && (
         <div className="modal-overlay" onClick={() => setShowAddForm(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', width: '90%' }}>
@@ -2090,6 +2145,7 @@ export function NewStudentPipelinePage() {
   const [showInstallmentModal, setShowInstallmentModal] = useState(null);
   const [myInstallments, setMyInstallments] = useState([]);
   const [loadingMyInstallments, setLoadingMyInstallments] = useState(false);
+  const [receiptItem, setReceiptItem] = useState(null);
 
   const loadData = useCallback(async () => {
     setError('');
@@ -2209,12 +2265,13 @@ export function NewStudentPipelinePage() {
                   <div className="table-wrap mobile-friendly-table">
                     <table className="data-table">
                       <thead><tr>
-                        <th>Student</th>
+                      <th>Student</th>
                         <th>Amount</th>
                         <th>Note</th>
                         <th>Screenshot</th>
                         <th>Status</th>
                         <th>Submitted</th>
+                        <th>Doc</th>
                       </tr></thead>
                       <tbody>
                         {myInstallments.map(inst => {
@@ -2232,11 +2289,19 @@ export function NewStudentPipelinePage() {
                               <td data-label="Screenshot">{inst.screenshot_url ? <a href={inst.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca', fontSize: '12px' }}>View</a> : '—'}</td>
                               <td data-label="Status"><span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: s.bg, color: s.color }}>{s.label}</span></td>
                               <td data-label="Submitted" style={{ fontSize: '12px', color: '#6b7280' }}>{new Date(inst.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                              <td data-label="Doc">
+                                {inst.status === 'verified' && (
+                                  <button
+                                    onClick={() => setReceiptItem({ leads: { student_name: inst.student_name, contact_number: inst.contact_number || '—' }, amount: inst.amount, total_amount: inst.amount, hours: null, finance_note: inst.finance_note, created_at: inst.created_at, updated_at: inst.created_at, id: inst.id })}
+                                    style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                  >🧾 Receipt</button>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
                         {!myInstallments.length && (
-                          <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No installments submitted yet.</td></tr>
+                          <tr><td colSpan="7" style={{ textAlign: 'center', color: '#9ca3af', padding: '24px' }}>No installments submitted yet.</td></tr>
                         )}
                       </tbody>
                     </table>
@@ -2319,6 +2384,11 @@ export function NewStudentPipelinePage() {
                       <td data-label="Submitted" style={{ fontSize: '12px', color: '#6b7280' }}>
                         {new Date(r.created_at).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })}
                       </td>
+                      <td data-label="Doc">
+                        {r.status === 'verified' && (
+                          <button onClick={() => setReceiptItem(r)} style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>🧾 Receipt</button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                   {!filtered.length && (
@@ -2332,6 +2402,7 @@ export function NewStudentPipelinePage() {
           </div>
         </>
       )}
+      {receiptItem && <ReceiptModal payment={receiptItem} type="payment" onClose={() => setReceiptItem(null)} />}
     </section>
   );
 }
@@ -3628,10 +3699,13 @@ function UploadInstallmentModal({ item, onClose, onSuccess }) {
       });
       if (!uploadRes.ok) throw new Error('Failed to upload file');
       setUploading(false);
+      // Is it a pipeline onboarding payment (has lead_id) or a topup (has student_id)?
+      const refType = item.lead_id ? 'payment_request' : 'student_topup';
+
       await apiFetch('/finance/installments', {
         method: 'POST',
         body: JSON.stringify({
-          reference_type: 'student_topup',
+          reference_type: refType,
           reference_id: item.id,
           amount: Number(amount),
           finance_note: financeNote,
@@ -3697,6 +3771,8 @@ export function TopUpsPage() {
   const [loadingPending, setLoadingPending] = useState(false);
   const [myInstallments, setMyInstallments] = useState([]);
   const [loadingMyInstallments, setLoadingMyInstallments] = useState(false);
+  const [receiptItem, setReceiptItem] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
 
   // Warning State
   const [warningAck, setWarningAck] = useState(false);
@@ -3758,6 +3834,7 @@ export function TopUpsPage() {
         scrUrl = res.url;
       } catch (e) { setError('Upload failed: ' + e.message); return; }
     }
+    setSubmitting(true);
     try {
       await apiFetch(`/students/${sid}/topup-requests`, {
         method: 'POST',
@@ -3765,6 +3842,7 @@ export function TopUpsPage() {
       });
       setMsg('Sent to finance.'); setHrs(''); setTotalAmt(''); setAmt(''); setFNote(''); setScrFile(null); await load();
     } catch (e) { setError(e.message); }
+    finally { setSubmitting(false); }
   }
 
   return (
@@ -3791,7 +3869,7 @@ export function TopUpsPage() {
             </div>
           </div>
         )}
-        <form className="form-grid form-row" onSubmit={submit}><label>Student<select value={sid} onChange={e => setSid(e.target.value)} required><option value="">Select</option>{students.map(s => <option key={s.id} value={s.id}>{s.student_code || s.id} — {s.student_name} ({s.remaining_hours}h)</option>)}</select></label><label>Hours<input type="number" value={hrs} onChange={e => setHrs(e.target.value)} required /></label><label>Total Amount (₹)<input type="number" value={totalAmt} onChange={e => setTotalAmt(e.target.value)} required /></label><label>Paid Amount (₹)<input type="number" value={amt} onChange={e => setAmt(e.target.value)} required /></label><label>Finance Note<textarea value={fNote} onChange={e => setFNote(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></label><label>Screenshot (Upload)<input type="file" accept="image/*" onChange={e => setScrFile(e.target.files[0])} /></label><button type="submit" style={{ alignSelf: 'flex-end', marginTop: '16px' }}>Submit</button></form>{msg ? <p>{msg}</p> : null}
+        <form className="form-grid form-row" onSubmit={submit}><label>Student<select value={sid} onChange={e => setSid(e.target.value)} required><option value="">Select</option>{students.map(s => <option key={s.id} value={s.id}>{s.student_code || s.id} — {s.student_name} ({s.remaining_hours}h)</option>)}</select></label><label>Hours<input type="number" value={hrs} onChange={e => setHrs(e.target.value)} required /></label><label>Total Amount (₹)<input type="number" value={totalAmt} onChange={e => setTotalAmt(e.target.value)} required /></label><label>Paid Amount (₹)<input type="number" value={amt} onChange={e => setAmt(e.target.value)} required /></label><label>Finance Note<textarea value={fNote} onChange={e => setFNote(e.target.value)} rows={2} style={{ resize: 'vertical' }} /></label><label>Screenshot (Upload)<input type="file" accept="image/*" onChange={e => setScrFile(e.target.files[0])} /></label><button type="submit" disabled={submitting} style={{ alignSelf: 'flex-end', marginTop: '16px', opacity: submitting ? 0.7 : 1, cursor: submitting ? 'not-allowed' : 'pointer' }}>{submitting ? '⏳ Submitting...' : 'Submit'}</button></form>{msg ? <p>{msg}</p> : null}
       </article>
 
       <article className="card" style={{ marginTop: '24px' }}>
@@ -3806,7 +3884,7 @@ export function TopUpsPage() {
         </div>
 
         {activeTab === 'all' && (
-          <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Student</th><th>Hrs</th><th>Total ₹</th><th>Paid ₹</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Date</th></tr></thead><tbody>{requests.map(r => <tr key={r.id}><td data-label="Student">{r.students?.student_name || '—'} <span className="text-muted" style={{ fontSize: '11px' }}>({r.students?.student_code || r.student_id})</span></td><td data-label="Hrs">{r.hours_added}</td><td data-label="Total ₹">₹{r.total_amount ? r.total_amount : '—'}</td><td data-label="Paid ₹">₹{r.amount}</td><td data-label="Note" style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.finance_note || '—'}</td><td data-label="Screenshot">{r.screenshot_url ? <a href={r.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>View</a> : '—'}</td><td data-label="Status"><span className={`status-tag ${r.status === 'approved' ? 'success' : ''}`}>{r.status}</span></td><td data-label="Date">{new Date(r.created_at).toLocaleDateString('en-IN')}</td></tr>)}{!requests.length ? <tr><td colSpan="8">No requests.</td></tr> : null}</tbody></table></div>
+          <div className="table-wrap mobile-friendly-table"><table><thead><tr><th>Student</th><th>Hrs</th><th>Total ₹</th><th>Paid ₹</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Date</th><th>Doc</th></tr></thead><tbody>{requests.map(r => <tr key={r.id}><td data-label="Student">{r.students?.student_name || '—'} <span className="text-muted" style={{ fontSize: '11px' }}>({r.students?.student_code || r.student_id})</span></td><td data-label="Hrs">{r.hours_added}</td><td data-label="Total ₹">₹{r.total_amount ? r.total_amount : '—'}</td><td data-label="Paid ₹">₹{r.amount}</td><td data-label="Note" style={{ maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.finance_note || '—'}</td><td data-label="Screenshot">{r.screenshot_url ? <a href={r.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca' }}>View</a> : '—'}</td><td data-label="Status"><span className={`status-tag ${r.status === 'verified' ? 'success' : ''}`}>{r.status}</span></td><td data-label="Date">{new Date(r.created_at).toLocaleDateString('en-IN')}</td><td data-label="Doc">{r.status === 'verified' && <button onClick={() => setReceiptItem(r)} style={{ fontSize: '11px', padding: '3px 8px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>🧾 Receipt</button>}</td></tr>)}{!requests.length ? <tr><td colSpan="9">No requests.</td></tr> : null}</tbody></table></div>
         )}
 
         {activeTab === 'pending' && (
@@ -3837,7 +3915,7 @@ export function TopUpsPage() {
                 {loadingMyInstallments ? <p style={{ color: '#6b7280' }}>Loading...</p> : (
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Student</th><th>Amount</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Submitted</th></tr></thead>
+                      <thead><tr><th>Student</th><th>Amount</th><th>Note</th><th>Screenshot</th><th>Status</th><th>Submitted</th><th>Doc</th></tr></thead>
                       <tbody>
                         {myInstallments.map(inst => {
                           const sm = { pending: { bg: '#fef3c7', color: '#92400e', label: '⏳ Pending' }, verified: { bg: '#dcfce7', color: '#15803d', label: '✅ Verified' }, rejected: { bg: '#fee2e2', color: '#dc2626', label: '❌ Rejected' } };
@@ -3850,10 +3928,18 @@ export function TopUpsPage() {
                               <td>{inst.screenshot_url ? <a href={inst.screenshot_url} target="_blank" rel="noreferrer" style={{ color: '#4338ca', fontSize: '12px' }}>View</a> : '—'}</td>
                               <td><span style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '11px', fontWeight: 600, background: s.bg, color: s.color }}>{s.label}</span></td>
                               <td style={{ fontSize: '12px', color: '#6b7280' }}>{new Date(inst.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                              <td>
+                                {inst.status === 'verified' && (
+                                  <button 
+                                    onClick={() => setReceiptItem({ students: { student_name: inst.student_name, contact_number: '—' }, amount: inst.amount, total_amount: inst.amount, hours: null, finance_note: inst.finance_note, created_at: inst.created_at, updated_at: inst.created_at, id: inst.id })}
+                                    style={{ fontSize: '11px', padding: '3px 10px', background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: '5px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}
+                                  >🧾 Receipt</button>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
-                        {!myInstallments.length && <tr><td colSpan="6" style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>No installments submitted yet.</td></tr>}
+                        {!myInstallments.length && <tr><td colSpan="7" style={{ textAlign: 'center', color: '#9ca3af', padding: '20px' }}>No installments submitted yet.</td></tr>}
                       </tbody>
                     </table>
                   </div>
@@ -3871,6 +3957,7 @@ export function TopUpsPage() {
           onSuccess={() => { setShowInstallmentModal(null); loadPending(); loadMyInstallments(); }}
         />
       )}
+      {receiptItem && <ReceiptModal payment={receiptItem} type="topup" onClose={() => setReceiptItem(null)} />}
     </section>
   );
 }
@@ -4427,6 +4514,19 @@ export function AutomationPage() {
 
   // Build contacts from students + teachers always
   useEffect(() => {
+    const auth = JSON.parse(localStorage.getItem('ehms_auth') || '{}');
+    const isSuperAdmin = auth?.user?.role === 'super_admin';
+
+    // Collect assigned teacher IDs from allStudents to filter the teachers list for ACs
+    const assignedTeacherIds = new Set();
+    allStudents.forEach(s => {
+      if (Array.isArray(s.student_teacher_assignments)) {
+        s.student_teacher_assignments.forEach(a => {
+          if (a.teacher_id) assignedTeacherIds.add(a.teacher_id);
+        });
+      }
+    });
+
     // Only include students who have a WhatsApp group created
     const sList = allStudents
       .filter(s => s.group_jid)
@@ -4444,6 +4544,7 @@ export function AutomationPage() {
     // allTeachers are teacher_profiles rows with users join
     const tList = allTeachers
       .filter(t => t.phone) // teacher_profiles.phone column
+      .filter(t => isSuperAdmin || assignedTeacherIds.has(t.user_id)) // Filter for ACs: only show teachers with student assignments
       .map(t => {
         const cleanPhone = String(t.phone).replace(/\D/g, '');
         return {
@@ -5262,7 +5363,8 @@ export function ViewTeacherModal({ teacher, onClose }) {
   const lead = {
     ...teacher,
     full_name: teacher.users?.full_name || 'Unknown',
-    email: teacher.users?.email,
+    email: teacher.users?.email || teacher.email,
+    phone: teacher.users?.phone || teacher.phone,
     status: 'approved'
   };
 
@@ -5492,9 +5594,29 @@ function EditTeacherModal({ teacher, onClose, onSave }) {
     setLoading(true);
     setError('');
     try {
+      // Clean and format payload
+      const payload = { ...formData };
+      
+      if (payload.per_hour_rate === '' || payload.per_hour_rate === null) {
+        payload.per_hour_rate = null;
+      } else {
+        payload.per_hour_rate = Number(payload.per_hour_rate);
+      }
+
+      // Ensure arrays are arrays
+      payload.subjects_taught = Array.isArray(payload.subjects_taught) ? payload.subjects_taught : [];
+      payload.syllabus = Array.isArray(payload.syllabus) ? payload.syllabus : [];
+      payload.languages = Array.isArray(payload.languages) ? payload.languages : [];
+
+      // Convert empty strings to null for date and other nullable fields
+      const nullableFields = ['dob', 'pincode', 'address', 'city', 'place', 'gender', 'phone', 'gpay_number', 'qualification', 'experience_duration', 'experience_type', 'communication_level', 'account_holder_name', 'account_number', 'ifsc_code', 'upi_id', 'gpay_holder_name'];
+      for (const field of nullableFields) {
+        if (payload[field] === '') payload[field] = null;
+      }
+
       await apiFetch(`/teachers/${teacher.id}`, {
         method: 'PATCH',
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
       onSave();
     } catch (err) {
@@ -5538,7 +5660,14 @@ function EditTeacherModal({ teacher, onClose, onSave }) {
             <h4 style={{ fontSize: '15px', fontWeight: 600, color: '#374151', marginBottom: '12px' }}>Personal Information</h4>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
               <InputField label="Full Name" name="full_name" required />
-              <InputField label="Phone" name="phone" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ fontSize: '13px', fontWeight: 500, color: '#374151' }}>Phone</label>
+                <PhoneInput
+                  value={formData.phone || ''}
+                  onChange={v => updateField('phone', v)}
+                  placeholder="Phone Number"
+                />
+              </div>
               <InputField label="Gender" name="gender" />
               <InputField label="Date of Birth" name="dob" type="date" />
               <InputField label="Address" name="address" />
@@ -5631,6 +5760,185 @@ function EditTeacherModal({ teacher, onClose, onSave }) {
             </div>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function StudentDeleteConfirmModal({ name, onConfirm, onClose }) {
+  const [typed, setTyped] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const matches = typed.trim() === name.trim();
+
+  const handleConfirm = async () => {
+    setDeleting(true);
+    await onConfirm();
+    setDeleting(false);
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose} style={{ zIndex: 2000 }}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '480px', width: '90%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0, color: '#dc2626' }}>🗑 Delete Student</h3>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+        </div>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '12px 16px', marginBottom: 16 }}>
+          <p style={{ margin: 0, fontSize: 13, color: '#b91c1c', fontWeight: 600 }}>⚠ This action cannot be undone.</p>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#7f1d1d' }}>All linked assignments, sessions, and topups will be permanently deleted.</p>
+        </div>
+        <p style={{ fontSize: 14, color: '#374151', marginBottom: 8 }}>
+          Type <strong style={{ fontFamily: 'monospace', background: '#f1f5f9', padding: '1px 6px', borderRadius: 4 }}>{name}</strong> to confirm:
+        </p>
+        <input
+          type="text"
+          value={typed}
+          onChange={e => setTyped(e.target.value)}
+          placeholder={name}
+          style={{ width: '100%', padding: '10px 12px', border: `1px solid ${matches ? '#16a34a' : '#e2e8f0'}`, borderRadius: 6, fontSize: 14, marginBottom: 16, outline: 'none', boxSizing: 'border-box' }}
+          autoFocus
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
+          <button type="button" onClick={onClose} style={{ padding: '8px 16px', border: '1px solid #e2e8f0', borderRadius: 6, background: '#fff', cursor: 'pointer' }}>Cancel</button>
+          <button
+            type="button"
+            disabled={!matches || deleting}
+            onClick={handleConfirm}
+            style={{ padding: '8px 20px', background: matches ? '#dc2626' : '#fca5a5', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 700, cursor: matches ? 'pointer' : 'not-allowed' }}
+          >
+            {deleting ? 'Deleting...' : 'Delete Student'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ImportOldStudentsModal({ onClose }) {
+  const [parsed, setParsed] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const fileRef = useRef(null);
+
+  const downloadSample = () => {
+    const csv = [
+      ['Name', 'Code', 'Phone', 'Class', 'Hours', 'Status'],
+      ['John Smith', 'MR260001', '+919876543210', 'Grade 10', '20', 'active'],
+      ['Priya Patel', '', '+919123456789', 'Grade 8', '15', 'active']
+    ].map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = 'sample_students.csv'; a.click();
+  };
+
+  const parseCSV = (text) => {
+    const separator = text.includes('\t') ? '\t' : ',';
+    const lines = text.trim().split('\n');
+    // Skip header row if it starts with Name/name
+    const start = lines[0].toLowerCase().startsWith('name') ? 1 : 0;
+    return lines.slice(start).map(line => {
+      const parts = line.split(separator);
+      return {
+        student_name: parts[0]?.trim() || '',
+        student_code: parts[1]?.trim() || '',
+        contact_number: parts[2]?.trim() || '',
+        class_level: parts[3]?.trim() || '',
+        total_hours: parts[4]?.trim() || '0',
+        status: parts[5]?.trim() || 'active'
+      };
+    }).filter(p => p.student_name);
+  };
+
+  const handleFile = (e) => {
+    setError(''); setParsed([]);
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const result = parseCSV(ev.target.result);
+      if (!result.length) { setError('No valid rows found. Make sure the first column is the student name.'); return; }
+      setParsed(result);
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImport = async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await apiFetch('/students/import-sheet', { method: 'POST', body: JSON.stringify(parsed) });
+      if (res.ok) {
+        if (res.errors?.length > 0) {
+          const errSummary = res.errors.map(e => `• ${e.student?.student_name || 'row'}: ${e.error}`).join('\n');
+          setError(`${res.errors.length} row(s) failed:\n${errSummary}`);
+        }
+        if (res.imported_count > 0) {
+          setSuccess(`Successfully imported ${res.imported_count} student(s).`);
+          setTimeout(onClose, 2500);
+        }
+      } else throw new Error(res.error || 'Import failed');
+    } catch (e) { setError(e.message); }
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '900px', width: '90%' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Import Old Students</h3>
+          <button type="button" className="icon-btn" onClick={onClose}>✕</button>
+        </div>
+
+        {success ? (
+          <div style={{ padding: '20px', textAlign: 'center', background: '#f0fdf4', borderRadius: '8px', color: '#16a34a' }}>
+            <p style={{ margin: 0, fontSize: '16px', fontWeight: 600 }}>{success}</p>
+          </div>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px', background: '#f8fafc', borderRadius: '8px', marginBottom: '16px', border: '1px solid #e2e8f0' }}>
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#0f172a' }}>Upload a CSV file</p>
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>Columns: <strong>Name*</strong>, Code, Phone, Class, Hours, Status</p>
+              </div>
+              <button type="button" onClick={downloadSample} style={{ padding: '8px 14px', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', fontSize: '13px', fontWeight: 600, color: '#475569', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                ⬇ Sample CSV
+              </button>
+              <button type="button" onClick={() => fileRef.current?.click()} style={{ padding: '8px 16px', background: '#4338ca', color: '#fff', border: 'none', borderRadius: '6px', fontWeight: 600, fontSize: '13px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                📂 Choose File
+              </button>
+              <input ref={fileRef} type="file" accept=".csv,.tsv,.txt" onChange={handleFile} style={{ display: 'none' }} />
+            </div>
+
+            {parsed.length > 0 && (
+              <>
+                <p style={{ fontSize: '13px', color: '#16a34a', marginBottom: '8px', fontWeight: 600 }}>✓ {parsed.length} rows parsed — preview below:</p>
+                <div style={{ maxHeight: '280px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '8px', marginBottom: '16px' }}>
+                  <table className="data-table" style={{ fontSize: '12px' }}>
+                    <thead><tr><th>Name</th><th>Code</th><th>Phone</th><th>Class</th><th>Hours</th><th>Status</th></tr></thead>
+                    <tbody>
+                      {parsed.map((p, i) => (
+                        <tr key={i}>
+                          <td>{p.student_name}</td><td>{p.student_code || '—'}</td>
+                          <td>{p.contact_number || '—'}</td><td>{p.class_level || '—'}</td>
+                          <td>{p.total_hours}</td><td>{p.status}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {error && <p className="error" style={{ marginBottom: '16px' }}>{error}</p>}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button type="button" onClick={onClose} className="secondary">Cancel</button>
+              <button type="button" className="primary" disabled={loading || parsed.length === 0} onClick={handleImport}>
+                {loading ? 'Importing...' : `Import ${parsed.length} Students`}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

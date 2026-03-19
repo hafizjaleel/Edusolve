@@ -19,7 +19,7 @@ const meetingLinkSchema = z.object({
 
 const updateTeacherSchema = z.object({
   experience_level: z.string().max(100).nullable().optional(),
-  per_hour_rate: z.number().positive().max(10000).nullable().optional(),
+  per_hour_rate: z.coerce.number().positive().max(10000).nullable().optional(),
   phone: phoneSchema.nullable().optional(),
   qualification: z.string().max(200).nullable().optional(),
   subjects_taught: z.array(z.string().max(100)).nullable().optional(),
@@ -114,7 +114,7 @@ async function generateTeacherCode(adminClient) {
 }
 
 export async function handleTeachers(req, res, url) {
-  if (!url.pathname.startsWith('/teachers')) return false;
+  if (!url.pathname.startsWith('/teachers') && url.pathname !== '/admin/tcs') return false;
 
   const DAY_MAP = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -127,6 +127,110 @@ export async function handleTeachers(req, res, url) {
   const actor = actorFromHeaders(req);
 
   try {
+    // ─── POST /teachers/import-sheet ───────────────────────────
+    if (req.method === 'POST' && url.pathname === '/teachers/import-sheet') {
+      if (!['teacher_coordinator', 'super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'only teacher coordinator or super admin can import teachers' });
+        return true;
+      }
+      const rawPayload = await readJson(req);
+      const items = Array.isArray(rawPayload) ? rawPayload : [rawPayload];
+
+      const imported = [];
+      const skipped = [];
+      const errors = [];
+
+      const { data: { users: authUsers } } = await adminClient.auth.admin.listUsers();
+      const existingEmails = new Set(authUsers.map(u => u.email.toLowerCase()));
+
+      for (const item of items) {
+        try {
+          if (!item.email || !item.full_name) {
+            errors.push({ teacher: item, error: 'email and full_name are required' });
+            continue;
+          }
+
+          let authUser;
+          let isNewUser = false;
+
+          if (existingEmails.has(item.email.toLowerCase())) {
+            authUser = authUsers.find(u => u.email.toLowerCase() === item.email.toLowerCase());
+          } else {
+            const { data: authData, error: authErr } = await adminClient.auth.admin.createUser({
+              email: item.email,
+              password: item.password || 'Teacher@123',
+              email_confirm: true,
+              app_metadata: { role: 'teacher' }
+            });
+            if (authErr) throw authErr;
+            authUser = authData.user;
+            isNewUser = true;
+          }
+
+          // Check if teacher profile already exists for this user
+          const { data: existingProfile } = await adminClient
+            .from('teacher_profiles')
+            .select('id')
+            .eq('user_id', authUser.id)
+            .maybeSingle();
+
+          if (existingProfile && !isNewUser) {
+            skipped.push({ teacher: item, reason: 'already exists' });
+            continue;
+          }
+
+          // Upsert users record
+          const { error: userErr } = await adminClient
+            .from('users')
+            .upsert({ id: authUser.id, full_name: item.full_name, email: item.email, phone: item.phone || null, is_active: true });
+          if (userErr) throw userErr;
+
+          // Assign teacher role
+          const { data: roleRow } = await adminClient.from('roles').select('id').eq('code', 'teacher').single();
+          if (roleRow) {
+            await adminClient.from('user_roles').upsert({ user_id: authUser.id, role_id: roleRow.id });
+          }
+
+          // Resolve teacher code — if provided code already used by someone else, auto-generate
+          let teacherCode = item.teacher_code;
+          if (teacherCode) {
+            const { data: codeConflict } = await adminClient
+              .from('teacher_profiles')
+              .select('id')
+              .eq('teacher_code', teacherCode)
+              .neq('user_id', authUser.id)
+              .maybeSingle();
+            if (codeConflict) teacherCode = await generateTeacherCode(adminClient);
+          } else {
+            teacherCode = await generateTeacherCode(adminClient);
+          }
+
+          const { data: profile, error: profileErr } = await adminClient
+            .from('teacher_profiles')
+            .upsert({
+              user_id: authUser.id,
+              teacher_code: teacherCode,
+              teacher_coordinator_id: actor.userId,
+              experience_level: item.experience_level || 'Intermediate',
+              per_hour_rate: Number(item.per_hour_rate) || 300,
+              is_in_pool: true,
+              onboarding_completed: true
+            }, { onConflict: 'user_id' })
+            .select('*')
+            .single();
+
+          if (profileErr) throw profileErr;
+          imported.push({ ...profile, email: item.email, full_name: item.full_name });
+
+        } catch (e) {
+          errors.push({ teacher: item, error: e.message });
+        }
+      }
+
+      sendJson(res, 200, { ok: true, imported_count: imported.length, skipped_count: skipped.length, errors });
+      return true;
+    }
+
     // ── GET /teachers/directory — fetch all teachers (AC/Admin) ──
     if (req.method === 'GET' && url.pathname === '/teachers/directory') {
       if (!['super_admin', 'teacher_coordinator'].includes(actor.role)) {
@@ -135,23 +239,35 @@ export async function handleTeachers(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone), coordinator:users!teacher_coordinator_id(id,full_name,phone)')
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
       return true;
     }
 
-    // ── GET /admin/tcs — list all teacher coordinators (super_admin only) ──
+    // ── GET /admin/tcs — list all teacher coordinators ──
     if (req.method === 'GET' && url.pathname === '/admin/tcs') {
-      if (actor.role !== 'super_admin') {
+      if (!['super_admin', 'teacher_coordinator'].includes(actor.role)) {
         sendJson(res, 403, { ok: false, error: 'forbidden' });
         return true;
       }
-      const { data: { users }, error } = await adminClient.auth.admin.listUsers();
+      const { data: { users }, error } = await adminClient.auth.admin.listUsers({ perPage: 1000 });
       if (error) throw new Error(error.message);
+
+      const { data: dbRoles } = await adminClient.from('user_roles').select('user_id, roles(code)');
+      const dbRoleMap = new Map();
+      (dbRoles || []).forEach(r => {
+          const code = Array.isArray(r.roles) ? r.roles[0]?.code : r.roles?.code;
+          if (code) dbRoleMap.set(r.user_id, code);
+      });
+
       const tcs = (users || [])
-        .filter(u => (u.user_metadata?.role || u.app_metadata?.role) === 'teacher_coordinator')
+        .filter(u => {
+             let role = u.app_metadata?.role || u.user_metadata?.role;
+             if (!role || role === 'unknown') role = dbRoleMap.get(u.id);
+             return role === 'teacher_coordinator';
+        })
         .map(u => ({ id: u.id, full_name: u.user_metadata?.full_name || u.user_metadata?.name || u.email, email: u.email }));
       sendJson(res, 200, { ok: true, items: tcs });
       return true;
@@ -178,6 +294,54 @@ export async function handleTeachers(req, res, url) {
         .single();
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, item: data });
+      return true;
+    }
+
+    // ── PATCH /teachers/bulk-pool-status — bulk toggle is_in_pool ──
+    if (req.method === 'PATCH' && url.pathname === '/teachers/bulk-pool-status') {
+      if (!['academic_coordinator', 'super_admin', 'teacher_coordinator'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'forbidden' });
+        return true;
+      }
+      const rawBody = await readJson(req);
+      if (!Array.isArray(rawBody.teacher_ids) || rawBody.teacher_ids.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'teacher_ids array required' });
+        return true;
+      }
+      const is_in_pool = !!rawBody.is_in_pool;
+
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .update({ is_in_pool, updated_at: nowIso() })
+        .in('id', rawBody.teacher_ids)
+        .select('*');
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, count: data?.length || 0 });
+      return true;
+    }
+
+    // ── PATCH /teachers/bulk-assign-tc — bulk assign teacher coordinator ──
+    if (req.method === 'PATCH' && url.pathname === '/teachers/bulk-assign-tc') {
+      if (actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'super_admin role required' });
+        return true;
+      }
+      const rawBody = await readJson(req);
+      if (!Array.isArray(rawBody.teacher_ids) || rawBody.teacher_ids.length === 0) {
+        sendJson(res, 400, { ok: false, error: 'teacher_ids array required' });
+        return true;
+      }
+      const teacher_coordinator_id = rawBody.teacher_coordinator_id ?? null;
+
+      const { data, error } = await adminClient
+        .from('teacher_profiles')
+        .update({ teacher_coordinator_id, updated_at: nowIso() })
+        .in('id', rawBody.teacher_ids)
+        .select('id, teacher_coordinator_id');
+
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, count: data?.length || 0 });
       return true;
     }
 
@@ -208,14 +372,12 @@ export async function handleTeachers(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/teachers/pool') {
       let query = adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone), coordinator:users!teacher_coordinator_id(id,full_name,phone), teacher_availability(day_of_week,start_time,end_time)')
         .eq('is_in_pool', true)
         .order('created_at', { ascending: false });
 
       const requestedUserId = url.searchParams.get('user_id');
-      if (actor.role === 'teacher_coordinator') {
-        query = query.eq('teacher_coordinator_id', actor.userId);
-      } else if (actor.role === 'super_admin' && requestedUserId) {
+      if (requestedUserId) {
         query = query.eq('teacher_coordinator_id', requestedUserId);
       }
 
@@ -312,7 +474,7 @@ export async function handleTeachers(req, res, url) {
       }
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone), coordinator:users!teacher_coordinator_id(id,full_name,phone), teacher_availability(id,day_of_week,start_time,end_time)')
         .eq('user_id', actor.userId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -570,7 +732,7 @@ export async function handleTeachers(req, res, url) {
       const teacherId = parts[1];
       const { data, error } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), coordinator:users!teacher_coordinator_id(id,full_name), teacher_availability(day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone), coordinator:users!teacher_coordinator_id(id,full_name,phone), teacher_availability(day_of_week,start_time,end_time)')
         .eq('id', teacherId)
         .maybeSingle();
       if (error) throw new Error(error.message);
@@ -630,7 +792,7 @@ export async function handleTeachers(req, res, url) {
         // Return updated profile
         const { data: updatedProfile, error: fetchError } = await adminClient
           .from('teacher_profiles')
-          .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name)')
+          .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone)')
           .eq('id', teacherId)
           .single();
 
@@ -698,7 +860,7 @@ export async function handleTeachers(req, res, url) {
 
       const { data: profileWithRel, error: relError } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone)')
         .eq('id', teacherProfile.id)
         .single();
       if (relError) throw new Error(relError.message);
@@ -783,7 +945,7 @@ export async function handleTeachers(req, res, url) {
       // Return updated profile
       const { data: updated, error: fetchErr } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name), teacher_availability(id,day_of_week,start_time,end_time)')
+        .select('*, users!teacher_profiles_user_id_fkey(id,email,full_name,phone), teacher_availability(id,day_of_week,start_time,end_time)')
         .eq('id', profile.id)
         .single();
       if (fetchErr) throw new Error(fetchErr.message);
@@ -1130,7 +1292,45 @@ export async function handleTeachers(req, res, url) {
       return true;
     }
 
+    // ─── DELETE /teachers/:id ────────────────────────────────────
+    if (req.method === 'DELETE' && parts.length === 2 && parts[0] === 'teachers') {
+      if (!['teacher_coordinator', 'super_admin'].includes(actor.role)) {
+        sendJson(res, 403, { ok: false, error: 'only teacher coordinator or super admin can delete teachers' });
+        return true;
+      }
+      const teacherProfileId = parts[1];
+
+      // Fetch teacher profile to get user_id
+      const { data: profile } = await adminClient
+        .from('teacher_profiles')
+        .select('id, user_id, users!teacher_profiles_user_id_fkey(id, full_name, email)')
+        .eq('id', teacherProfileId)
+        .maybeSingle();
+      if (!profile) {
+        sendJson(res, 404, { ok: false, error: 'teacher not found' });
+        return true;
+      }
+      const userId = profile.user_id;
+      const teacherName = profile.users?.full_name || 'Unknown';
+
+      // Delete linked data in order
+      await adminClient.from('teacher_availability').delete().eq('teacher_profile_id', teacherProfileId);
+      await adminClient.from('student_teacher_assignments').delete().eq('teacher_id', userId);
+      // Nullify teacher_id on sessions instead of deleting sessions
+      await adminClient.from('academic_sessions').update({ teacher_id: null }).eq('teacher_id', userId);
+      await adminClient.from('user_roles').delete().eq('user_id', userId);
+      await adminClient.from('teacher_profiles').delete().eq('id', teacherProfileId);
+      await adminClient.from('users').delete().eq('id', userId);
+
+      // Delete the Supabase Auth account
+      await adminClient.auth.admin.deleteUser(userId);
+
+      sendJson(res, 200, { ok: true, deleted: teacherName });
+      return true;
+    }
+
     sendJson(res, 404, { ok: false, error: 'route not found' });
+
     return true;
   } catch (error) {
     sendJson(res, 500, { ok: false, error: error.message || 'internal server error' });

@@ -215,7 +215,7 @@ export async function calculateAllTeacherSalaries(month, year) {
   // Fetch active teachers
   const { data: teachers, error: tErr } = await adminClient
     .from('teacher_profiles')
-    .select('*, users!teacher_profiles_user_id_fkey(id, email, full_name)')
+    .select('*, users!teacher_profiles_user_id_fkey(id, email, full_name, phone)')
     .eq('is_in_pool', true);
 
   if (tErr) throw new Error(tErr.message);

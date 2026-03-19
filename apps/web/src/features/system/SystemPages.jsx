@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { ROLE_OPTIONS } from '../../lib/roles.js';
 import { PhoneInput, isValidEmail } from '../../components/PhoneInput.jsx';
+import { CompanyBrandingSettings } from '../finance/InvoiceTemplate.jsx';
 
 export function UsersPage() {
     const [users, setUsers] = useState([]);
@@ -10,6 +11,7 @@ export function UsersPage() {
     const [showAdd, setShowAdd] = useState(false);
     const [deleteConfirm, setDeleteConfirm] = useState(null);
     const [searchQuery, setSearchQuery] = useState('');
+    const [selectedRole, setSelectedRole] = useState('all');
     const [usersPage, setUsersPage] = useState(1);
     const USERS_PAGE_SIZE = 20;
 
@@ -25,19 +27,29 @@ export function UsersPage() {
     }
 
     useEffect(() => { load(); }, []);
-    useEffect(() => { setUsersPage(1); }, [searchQuery]);
+    useEffect(() => { setUsersPage(1); }, [searchQuery, selectedRole]);
 
     return (
         <section className="panel">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px' }}>
                 <input
                     type="text"
-                    placeholder="🔍 Search by name, email, role, phone..."
+                    placeholder="🔍 Search name, email, phone..."
                     value={searchQuery}
                     onChange={e => setSearchQuery(e.target.value)}
-                    style={{ padding: '8px 14px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '260px', flex: 1 }}
+                    style={{ flex: 1, padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '150px' }}
                 />
-                <button className="primary" onClick={() => setShowAdd(true)}>+ Add User</button>
+                <select 
+                    value={selectedRole} 
+                    onChange={e => setSelectedRole(e.target.value)}
+                    style={{ padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '13px', minWidth: '130px', background: '#fff' }}
+                >
+                    <option value="all">All Roles</option>
+                    {ROLE_OPTIONS.map(r => (
+                        <option key={r.value} value={r.value}>{r.label}</option>
+                    ))}
+                </select>
+                <button className="primary" onClick={() => setShowAdd(true)} style={{ whiteSpace: 'nowrap', padding: '8px 16px' }}>+ Add User</button>
             </div>
 
             {loading ? <p>Loading users...</p> : (
@@ -57,12 +69,20 @@ export function UsersPage() {
                             <tbody>
                                 {(() => {
                                     const q = searchQuery.toLowerCase().trim();
-                                    const filtered = q ? users.filter(u =>
-                                        (u.name || '').toLowerCase().includes(q) ||
-                                        (u.email || '').toLowerCase().includes(q) ||
-                                        (u.role || '').toLowerCase().includes(q) ||
-                                        (u.phone || '').toLowerCase().includes(q)
-                                    ) : users;
+                                    let filtered = users;
+                                    
+                                    if (selectedRole !== 'all') {
+                                        filtered = filtered.filter(u => u.role === selectedRole);
+                                    }
+                                    
+                                    if (q) {
+                                        filtered = filtered.filter(u =>
+                                            (u.name || '').toLowerCase().includes(q) ||
+                                            (u.email || '').toLowerCase().includes(q) ||
+                                            (u.role || '').toLowerCase().includes(q) ||
+                                            (u.phone || '').toLowerCase().includes(q)
+                                        );
+                                    }
                                     const totalPages = Math.max(1, Math.ceil(filtered.length / USERS_PAGE_SIZE));
                                     const paginated = filtered.slice((usersPage - 1) * USERS_PAGE_SIZE, usersPage * USERS_PAGE_SIZE);
                                     if (!filtered.length) return <tr><td colSpan="6" style={{ textAlign: 'center', padding: '20px' }}>No users found</td></tr>;
@@ -321,6 +341,10 @@ export function SystemSettingsPage() {
                     <p style={{ fontSize: '13px', color: 'var(--muted)', margin: '8px 0 16px' }}>Temporarily disable login for non-admin users.</p>
                     <button className="secondary" disabled>Enable Maintenance Mode</button>
                 </div>
+            </div>
+
+            <div className="card" style={{ marginTop: '20px', padding: '24px' }}>
+                <CompanyBrandingSettings />
             </div>
         </section>
     );

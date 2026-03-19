@@ -1,0 +1,14 @@
+⚠️  Node.js 18 and below are deprecated and will no longer be supported in future versions of @supabase/supabase-js. Please upgrade to Node.js 20 or later. For more information, visit: https://github.com/orgs/supabase/discussions/37217
+TCS count: 5
+Sample: [
+  {
+    id: 'b06ace84-eb48-489b-bc4f-710ea5058606',
+    full_name: 'Jaseena',
+    email: 'edusolvetc3@gmail.com'
+  },
+  {
+    id: 'e27c0de1-b8d2-42d9-94d8-3f7867b38586',
+    full_name: 'Fahima',
+    email: 'edusolvetc2@gmail.com'
+  }
+]

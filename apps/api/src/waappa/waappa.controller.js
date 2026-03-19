@@ -37,7 +37,7 @@ export class WaappaController {
 
         // Session Management Endpoints
         if (url.pathname === '/waappa/sessions' && req.method === 'GET') {
-            return this.getSession(req, res);
+            return this.getSession(req, res, user);
         }
         if (url.pathname === '/waappa/sessions' && req.method === 'POST') {
             return this.createSession(req, res, user);
@@ -51,14 +51,14 @@ export class WaappaController {
 
         // Chat / Messages Endpoints
         if (url.pathname === '/waappa/contacts' && req.method === 'GET') {
-            return this.getContacts(req, res);
+            return this.getContacts(req, res, user);
         }
         if (url.pathname === '/waappa/messages' && req.method === 'GET') {
             const phone = url.searchParams.get('phone');
-            return this.getMessages(req, res, phone);
+            return this.getMessages(req, res, user, phone);
         }
         if (url.pathname === '/waappa/messages/send' && req.method === 'POST') {
-            return this.sendMessage(req, res);
+            return this.sendMessage(req, res, user);
         }
         if (url.pathname === '/waappa/messages/upload' && req.method === 'POST') {
             return this.uploadMedia(req, res);
@@ -103,12 +103,16 @@ export class WaappaController {
 
     // --- Session Methods ---
 
-    async getSession(req, res) {
+    async getSession(req, res, user = {}) {
         try {
-            // Get the most recently updated session (coordinator's session)
-            const { data, error } = await supabase
-                .from('whatsapp_sessions')
-                .select('*')
+            let query = supabase.from('whatsapp_sessions').select('*');
+            
+            // Filter by user_id if provided
+            if (user.id) {
+                query = query.eq('user_id', user.id);
+            }
+
+            const { data, error } = await query
                 .order('updated_at', { ascending: false })
                 .limit(1)
                 .maybeSingle();
@@ -203,14 +207,25 @@ export class WaappaController {
 
     // --- Messages Methods ---
 
-    async getContacts(req, res) {
+    async getContacts(req, res, user = {}) {
         try {
-            // Group unique contact_phones from messages
-            // We can do this efficiently using a raw SQL or by fetching distinct in Supabase
-            const { data, error } = await supabase
+            // 1. Find user session first
+            let sessionName = null;
+            if (user.id) {
+                const { data: sess } = await supabase.from('whatsapp_sessions').select('session_name').eq('user_id', user.id).maybeSingle();
+                sessionName = sess?.session_name;
+            }
+
+            // 2. Fetch messages for that session
+            let query = supabase
                 .from('whatsapp_messages')
-                .select('contact_phone, contact_type, from_jid, to_jid')
-                .order('timestamp', { ascending: false });
+                .select('contact_phone, contact_type, from_jid, to_jid');
+            
+            if (sessionName) {
+                query = query.eq('session_name', sessionName);
+            }
+
+            const { data, error } = await query.order('timestamp', { ascending: false });
 
             if (error) throw error;
 
@@ -246,28 +261,41 @@ export class WaappaController {
         }
     }
 
-    async getMessages(req, res, chatId) {
+    async getMessages(req, res, user, chatId) {
         try {
             const url = new URL(req.url, `http://localhost`);
             const phone = url.searchParams.get('phone') || chatId;
             if (!phone) return sendJson(res, 400, { error: 'phone required' });
 
+            // 1. Find user session first
+            let sessionName = null;
+            if (user.id) {
+                const { data: sess } = await supabase.from('whatsapp_sessions').select('session_name').eq('user_id', user.id).maybeSingle();
+                sessionName = sess?.session_name;
+            }
+
             const limit = Math.min(parseInt(url.searchParams.get('limit') || '15', 10), 50);
             const offset = parseInt(url.searchParams.get('offset') || '0', 10);
 
             // Fetch total count
-            const { count } = await supabase
+            let countQuery = supabase
                 .from('whatsapp_messages')
                 .select('*', { count: 'exact', head: true })
                 .eq('contact_phone', phone);
+            
+            if (sessionName) countQuery = countQuery.eq('session_name', sessionName);
+            const { count } = await countQuery;
 
             // Fetch latest `limit` rows, paginated via offset from the END
-            const { data, error } = await supabase
+            let dataQuery = supabase
                 .from('whatsapp_messages')
                 .select('*')
                 .eq('contact_phone', phone)
                 .order('timestamp', { ascending: false })
                 .range(offset, offset + limit - 1);
+            
+            if (sessionName) dataQuery = dataQuery.eq('session_name', sessionName);
+            const { data, error } = await dataQuery;
 
             if (error) throw error;
 
@@ -280,7 +308,7 @@ export class WaappaController {
         }
     }
 
-    async sendMessage(req, res) {
+    async sendMessage(req, res, user = {}) {
         try {
             let { chatId, text, sessionName, mediaUrl, mediaName, mimetype, caption } = await readJson(req);
             if (!chatId) throw new Error('chatId required');
@@ -291,9 +319,14 @@ export class WaappaController {
                 chatId = chatId.replace('@s.whatsapp.net', '@c.us');
             }
 
-            // Look up the session — use provided sessionName or get the most recent active one
-            const query = supabase.from('whatsapp_sessions').select('session_name, api_key').eq('status', 'WORKING');
-            if (sessionName) query.eq('session_name', sessionName);
+            // Look up the session — use provided sessionName or get the most recent active one for the user
+            let query = supabase.from('whatsapp_sessions').select('session_name, api_key').eq('status', 'WORKING');
+            if (sessionName) {
+                query = query.eq('session_name', sessionName);
+            } else if (user.id) {
+                query = query.eq('user_id', user.id);
+            }
+            
             const { data: sessionData, error: sessErr } = await query.order('updated_at', { ascending: false }).limit(1).maybeSingle();
 
             if (sessErr || !sessionData) throw new Error('No active WhatsApp session found');

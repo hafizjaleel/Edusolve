@@ -5,6 +5,11 @@ const COUNTRY_CODES = [
     { code: '+1', label: 'USA (+1)', length: 10 },
     { code: '+44', label: 'UK (+44)', length: 10 },
     { code: '+971', label: 'UAE (+971)', length: 9 },
+    { code: '+966', label: 'KSA (+966)', length: 9 },
+    { code: '+974', label: 'QAT (+974)', length: 8 },
+    { code: '+968', label: 'OMN (+968)', length: 8 },
+    { code: '+965', label: 'KWT (+965)', length: 8 },
+    { code: '+973', label: 'BHR (+973)', length: 8 },
     { code: '+61', label: 'AUS (+61)', length: 9 },
     { code: '+65', label: 'SGP (+65)', length: 8 }
 ];

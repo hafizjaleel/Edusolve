@@ -40,7 +40,7 @@ async function enrichTeachers(adminClient, items) {
   // Try fetching from users first
   const { data: users } = await adminClient.from('users').select('id, full_name').in('id', teacherIds);
   // Also try teacher_profiles (since teacher_id might be profile id)
-  const { data: profiles } = await adminClient.from('teacher_profiles').select('id, users!teacher_profiles_user_id_fkey(full_name)').in('id', teacherIds);
+  const { data: profiles } = await adminClient.from('teacher_profiles').select('id, users!teacher_profiles_user_id_fkey(id, full_name, email, phone)').in('id', teacherIds);
 
   const teacherMap = {};
   (users || []).forEach(u => teacherMap[u.id] = u.full_name);
@@ -125,7 +125,7 @@ export async function handleFinance(req, res, url) {
       const status = url.searchParams.get('status') || 'pending_finance';
       let query = adminClient
         .from('student_topups')
-        .select('*, students(student_code,student_name), users!student_topups_requested_by_fkey(full_name)')
+        .select('*, students(student_code,student_name,contact_number), users!student_topups_requested_by_fkey(full_name)')
         .order('status', { ascending: true })
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
@@ -434,7 +434,29 @@ export async function handleFinance(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/finance/accounts') {
       const { data, error } = await adminClient.from('finance_accounts').select('*').order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
-      sendJson(res, 200, { ok: true, items: data || [] });
+      const accounts = data || [];
+      if (accounts.length > 0) {
+        const accountIds = accounts.map(a => a.id);
+        const [incomeRes, expenseRes] = await Promise.all([
+          adminClient.from('ledger_entries').select('account_id, amount').eq('entry_type', 'income').in('account_id', accountIds),
+          adminClient.from('expenses').select('account_id, amount').in('account_id', accountIds)
+        ]);
+        const incomeByAccount = {};
+        (incomeRes.data || []).forEach(r => {
+          incomeByAccount[r.account_id] = (incomeByAccount[r.account_id] || 0) + Number(r.amount || 0);
+        });
+        const expenseByAccount = {};
+        (expenseRes.data || []).forEach(r => {
+          expenseByAccount[r.account_id] = (expenseByAccount[r.account_id] || 0) + Number(r.amount || 0);
+        });
+        const enriched = accounts.map(a => ({
+          ...a,
+          computed_balance: (incomeByAccount[a.id] || 0) - (expenseByAccount[a.id] || 0)
+        }));
+        sendJson(res, 200, { ok: true, items: enriched });
+      } else {
+        sendJson(res, 200, { ok: true, items: [] });
+      }
       return true;
     }
     if (req.method === 'POST' && url.pathname === '/finance/accounts') {
@@ -446,6 +468,20 @@ export async function handleFinance(req, res, url) {
       }).select('*').single();
       if (error) throw new Error(error.message);
       sendJson(res, 201, { ok: true, account: data });
+      return true;
+    }
+    if (req.method === 'PATCH' && parts.length === 3 && parts[1] === 'accounts') {
+      const accountId = parts[2];
+      const payload = await readJson(req);
+      const update = { updated_at: nowIso() };
+      if (payload.name !== undefined) update.name = payload.name;
+      if (payload.type !== undefined) update.type = payload.type;
+      if (payload.is_main !== undefined) update.is_main = payload.is_main;
+      if (payload.balance !== undefined) update.balance = Number(payload.balance);
+      if (payload.description !== undefined) update.description = payload.description || null;
+      const { data, error } = await adminClient.from('finance_accounts').update(update).eq('id', accountId).select('*').single();
+      if (error) throw new Error(error.message);
+      sendJson(res, 200, { ok: true, account: data });
       return true;
     }
 
@@ -741,7 +777,7 @@ export async function handleFinance(req, res, url) {
     if (req.method === 'GET' && url.pathname === '/finance/hr-payment-requests') {
       const { data, error } = await adminClient
         .from('hr_payment_requests')
-        .select('*, employees(full_name, designation, department), teacher_profiles(users!teacher_profiles_user_id_fkey(full_name))')
+        .select('*, employees(full_name, designation, department), teacher_profiles(users!teacher_profiles_user_id_fkey(id, full_name, phone))')
         .order('created_at', { ascending: false });
       if (error) throw new Error(error.message);
       sendJson(res, 200, { ok: true, items: data || [] });
@@ -932,14 +968,17 @@ export async function handleFinance(req, res, url) {
       // Stitch parent data
       const items = await Promise.all((data || []).map(async (inst) => {
         let studentName = '—';
+        let contactNumber = '—';
         if (inst.reference_type === 'payment_request') {
-          const { data: p } = await adminClient.from('payment_requests').select('leads(student_name)').eq('id', inst.reference_id).single();
+          const { data: p } = await adminClient.from('payment_requests').select('leads(student_name,contact_number)').eq('id', inst.reference_id).single();
           studentName = p?.leads?.student_name || '—';
+          contactNumber = p?.leads?.contact_number || '—';
         } else if (inst.reference_type === 'student_topup') {
-          const { data: t } = await adminClient.from('student_topups').select('students(student_name)').eq('id', inst.reference_id).single();
+          const { data: t } = await adminClient.from('student_topups').select('students(student_name,contact_number)').eq('id', inst.reference_id).single();
           studentName = t?.students?.student_name || '—';
+          contactNumber = t?.students?.contact_number || '—';
         }
-        return { ...inst, student_name: studentName };
+        return { ...inst, student_name: studentName, contact_number: contactNumber };
       }));
 
       sendJson(res, 200, { ok: true, items });

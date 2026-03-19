@@ -292,7 +292,7 @@ export class LeadsService {
 
     const { data, error } = await adminClient
       .from('leads')
-      .select('*, teacher_profiles(id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email)), students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))')
+      .select('*, teacher_profiles(id, teacher_code, users!teacher_profiles_user_id_fkey(id, full_name, email, phone)), students!students_lead_id_fkey(academic_coordinator_id, users!students_academic_coordinator_id_fkey(full_name, email))')
       .eq('id', id)
       .is('deleted_at', null)
       .maybeSingle();

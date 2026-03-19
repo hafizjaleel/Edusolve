@@ -75,11 +75,11 @@ const messageReminderSchema = z.object({
 });
 
 const topupSchema = z.object({
-  hours_added: z.coerce.number().positive(),
+  hours_added: z.coerce.number().min(0.1),
   total_amount: z.coerce.number().positive(),
-  amount: z.coerce.number().positive(),
-  finance_note: z.string().max(1000).optional(),
-  screenshot_url: z.string().url().max(500).optional()
+  amount: z.coerce.number().min(0),
+  finance_note: z.string().max(1000).optional().nullable(),
+  screenshot_url: z.string().url().max(500).optional().nullable()
 });
 
 
@@ -429,7 +429,7 @@ export async function handleStudents(req, res, url) {
       const status = url.searchParams.get('status') || 'all';
       let query = adminClient
         .from('student_topups')
-        .select('*, students!inner(student_code,student_name,academic_coordinator_id)')
+        .select('*, students!inner(student_code,student_name,contact_number,academic_coordinator_id)')
         .order('created_at', { ascending: false });
       if (status !== 'all') query = query.eq('status', status);
 
@@ -1365,7 +1365,90 @@ export async function handleStudents(req, res, url) {
       return true;
     }
 
+    // ─── POST /students/import-sheet ──────────────────────────
+    if (req.method === 'POST' && url.pathname === '/students/import-sheet') {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator or super admin can import students' });
+        return true;
+      }
+      const rawPayload = await readJson(req);
+      const items = Array.isArray(rawPayload) ? rawPayload : [rawPayload];
+      
+      const imported = [];
+      const errors = [];
+      
+      for (const item of items) {
+        try {
+          if (!item.student_name) {
+            errors.push({ student: item, error: 'student_name is required' });
+            continue;
+          }
+          
+          let studentCode = item.student_code;
+          if (!studentCode) {
+            studentCode = await generateStudentCode(adminClient);
+          }
+          
+          const { data: student, error: insertErr } = await adminClient
+            .from('students')
+            .insert({
+              student_name: item.student_name,
+              parent_name: item.parent_name || null,
+              contact_number: item.contact_number || null,
+              class_level: item.class_level || null,
+              total_hours: Number(item.total_hours) || 0,
+              remaining_hours: Number(item.total_hours) || 0,
+              academic_coordinator_id: actor.userId,
+              student_code: studentCode,
+              status: item.status || 'active',
+              joined_at: new Date().toISOString()
+            })
+            .select('*')
+            .single();
+            
+          if (insertErr) throw insertErr;
+          imported.push(student);
+          
+        } catch (e) {
+          errors.push({ student: item, error: e.message });
+        }
+      }
+      
+      sendJson(res, 200, { ok: true, imported_count: imported.length, errors });
+      return true;
+    }
+
+
+    // ─── DELETE /students/:id ────────────────────────────────────
+    if (req.method === 'DELETE' && parts.length === 2 && parts[0] === 'students') {
+      if (!isAC(actor) && actor.role !== 'super_admin') {
+        sendJson(res, 403, { ok: false, error: 'only academic coordinator or super admin can delete students' });
+        return true;
+      }
+      const studentId = parts[1];
+
+      // Fetch student to confirm it exists
+      const { data: student } = await adminClient.from('students').select('id, student_name').eq('id', studentId).maybeSingle();
+      if (!student) {
+        sendJson(res, 404, { ok: false, error: 'student not found' });
+        return true;
+      }
+
+      // Delete linked data in dependency order
+      await adminClient.from('session_student_links').delete().eq('student_id', studentId);
+      await adminClient.from('student_teacher_assignments').delete().eq('student_id', studentId);
+      await adminClient.from('student_topups').delete().eq('student_id', studentId);
+
+      // Delete the student record
+      const { error: delErr } = await adminClient.from('students').delete().eq('id', studentId);
+      if (delErr) throw new Error(delErr.message);
+
+      sendJson(res, 200, { ok: true, deleted: student.student_name });
+      return true;
+    }
+
     sendJson(res, 404, { ok: false, error: 'route not found' });
+
     return true;
   } catch (error) {
     sendJson(res, 500, { ok: false, error: error.message || 'internal server error' });

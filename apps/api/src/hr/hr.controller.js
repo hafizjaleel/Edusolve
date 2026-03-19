@@ -327,7 +327,7 @@ export async function handleHR(req, res, url) {
       // Fetch teacher profile
       const { data: teacher, error: tErr } = await adminClient
         .from('teacher_profiles')
-        .select('*, users!teacher_profiles_user_id_fkey(id, email, full_name)')
+        .select('*, users!teacher_profiles_user_id_fkey(id, email, full_name, phone)')
         .eq('user_id', teacherUserId)
         .maybeSingle();
       if (tErr) throw new Error(tErr.message);
@@ -953,7 +953,7 @@ export async function handleHR(req, res, url) {
 
       const { data, error } = await adminClient
         .from('hr_payment_requests')
-        .select('*, employees(id, full_name), teacher_profiles(id, user_id, users!teacher_profiles_user_id_fkey(full_name))')
+        .select('*, employees(id, full_name), teacher_profiles(id, user_id, users!teacher_profiles_user_id_fkey(id, full_name, phone))')
         .eq('year', year)
         .eq('month', month)
         .order('created_at', { ascending: false });
