@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { MultiSelectDropdown } from '../../components/ui/MultiSelectDropdown.jsx';
 
 export function TeacherOnboardingModal({ profile, onComplete, apiFetch }) {
     const [step, setStep] = useState(1);
@@ -29,6 +30,46 @@ export function TeacherOnboardingModal({ profile, onComplete, apiFetch }) {
     const [slots, setSlots] = useState(profile?.teacher_availability || []);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
+
+    const [allSubjects, setAllSubjects] = useState([]);
+    const [allSyllabus, setAllSyllabus] = useState([]);
+    const [allLanguages, setAllLanguages] = useState([]);
+
+    useEffect(() => {
+        apiFetch('/subjects').then(r => r.ok && setAllSubjects(r.subjects.map(s => s.name)));
+        apiFetch('/boards').then(r => r.ok && setAllSyllabus(r.boards.map(b => b.name)));
+        apiFetch('/mediums').then(r => r.ok && setAllLanguages(r.mediums.map(m => m.name)));
+    }, []);
+
+    const createSubject = async (name) => {
+        try {
+            const res = await apiFetch('/subjects', { method: 'POST', body: JSON.stringify({ name }) });
+            if (res.ok) {
+                setAllSubjects(prev => [...prev, res.subject.name].sort());
+                setFormData(f => ({ ...f, subjects_taught: [...(f.subjects_taught || []), res.subject.name] }));
+            }
+        } catch (e) { console.error('Failed to create subject', e); }
+    };
+
+    const createSyllabus = async (name) => {
+        try {
+            const res = await apiFetch('/boards', { method: 'POST', body: JSON.stringify({ name }) });
+            if (res.ok) {
+                setAllSyllabus(prev => [...prev, res.board.name].sort());
+                setFormData(f => ({ ...f, syllabus: [...(f.syllabus || []), res.board.name] }));
+            }
+        } catch (e) { console.error('Failed to create syllabus', e); }
+    };
+
+    const createLanguage = async (name) => {
+        try {
+            const res = await apiFetch('/mediums', { method: 'POST', body: JSON.stringify({ name }) });
+            if (res.ok) {
+                setAllLanguages(prev => [...prev, res.medium.name].sort());
+                setFormData(f => ({ ...f, languages: [...(f.languages || []), res.medium.name] }));
+            }
+        } catch (e) { console.error('Failed to create language', e); }
+    };
 
     const updateField = (key, val) => setFormData(prev => ({ ...prev, [key]: val }));
 
@@ -96,7 +137,9 @@ export function TeacherOnboardingModal({ profile, onComplete, apiFetch }) {
                 body: JSON.stringify({ slots })
             });
 
-            onComplete(res.teacher);
+            // 3. Fetch full updated profile to ensure data like teacher_availability is included
+            const fullProfileRes = await apiFetch('/teachers/me');
+            onComplete(fullProfileRes.teacher);
         } catch (e) {
             setError(e.message || 'Failed to complete onboarding. Please try again.');
         } finally {
@@ -222,17 +265,38 @@ export function TeacherOnboardingModal({ profile, onComplete, apiFetch }) {
                                 <input value={formData.experience_duration} onChange={e => updateField('experience_duration', e.target.value)} style={inputStyle} placeholder="e.g. 5 years" />
                             </div>
                         </div>
-                        <label style={labelStyle}>Subjects Taught (comma separated) {requiredStar}</label>
-                        <input value={Array.isArray(formData.subjects_taught) ? formData.subjects_taught.join(', ') : formData.subjects_taught} onChange={e => updateField('subjects_taught', e.target.value)} style={inputStyle} placeholder="Maths, Science, etc." />
                         
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div style={{ marginBottom: '16px' }}>
+                            <label style={labelStyle}>Subjects Taught {requiredStar}</label>
+                            <MultiSelectDropdown 
+                                value={formData.subjects_taught} 
+                                onChange={v => updateField('subjects_taught', v)}
+                                options={allSubjects}
+                                onCreate={createSubject}
+                                placeholder="Select subjects..."
+                            />
+                        </div>
+                        
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
                             <div>
-                                <label style={labelStyle}>Syllabus (comma separated) {requiredStar}</label>
-                                <input value={Array.isArray(formData.syllabus) ? formData.syllabus.join(', ') : formData.syllabus} onChange={e => updateField('syllabus', e.target.value)} style={inputStyle} placeholder="CBSE, ICSE, etc." />
+                                <label style={labelStyle}>Syllabus {requiredStar}</label>
+                                <MultiSelectDropdown 
+                                    value={formData.syllabus} 
+                                    onChange={v => updateField('syllabus', v)}
+                                    options={allSyllabus}
+                                    onCreate={createSyllabus}
+                                    placeholder="Select syllabus..."
+                                />
                             </div>
                             <div>
-                                <label style={labelStyle}>Languages (comma separated) {requiredStar}</label>
-                                <input value={Array.isArray(formData.languages) ? formData.languages.join(', ') : formData.languages} onChange={e => updateField('languages', e.target.value)} style={inputStyle} placeholder="English, Malayalam, etc." />
+                                <label style={labelStyle}>Languages {requiredStar}</label>
+                                <MultiSelectDropdown 
+                                    value={formData.languages} 
+                                    onChange={v => updateField('languages', v)}
+                                    options={allLanguages}
+                                    onCreate={createLanguage}
+                                    placeholder="Select languages..."
+                                />
                             </div>
                         </div>
 

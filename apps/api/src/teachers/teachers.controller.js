@@ -58,14 +58,37 @@ const teacherProfileUpdateSchema = z.object({
   city: z.string().max(100).nullable().optional(),
   place: z.string().max(100).nullable().optional(),
   meeting_link: z.string().max(500).nullable().optional().or(z.literal('')),
-  full_name: z.string().min(2).max(100).nullable().optional()
+  full_name: z.string().min(2).max(100).nullable().optional(),
+  
+  // Professional details allowed during onboarding
+  experience_level: z.string().max(100).nullable().optional(),
+  per_hour_rate: z.coerce.number().positive().max(10000).nullable().optional(),
+  phone: phoneSchema.nullable().optional(),
+  qualification: z.string().max(200).nullable().optional(),
+  subjects_taught: z.array(z.string().max(100)).nullable().optional(),
+  syllabus: z.array(z.string().max(100)).nullable().optional(),
+  languages: z.array(z.string().max(100)).nullable().optional(),
+  experience_duration: z.string().max(100).nullable().optional(),
+  experience_type: z.string().max(100).nullable().optional(),
+  communication_level: z.string().max(50).nullable().optional(),
+  
+  // Bank details allowed during onboarding
+  account_holder_name: z.string().max(150).nullable().optional(),
+  account_number: z.string().max(50).nullable().optional(),
+  ifsc_code: z.string().max(20).nullable().optional(),
+  gpay_holder_name: z.string().max(150).nullable().optional(),
+  gpay_number: phoneSchema.nullable().optional(),
+  upi_id: z.string().max(100).nullable().optional(),
+
+  // Onboarding control
+  is_completing_onboarding: z.boolean().optional()
 });
 
 const updateAvailabilitySchema = z.object({
   slots: z.array(z.object({
     day_of_week: z.enum(['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']),
-    start_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time (HH:MM)'),
-    end_time: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Invalid time (HH:MM)')
+    start_time: z.string().regex(/^([0-1]?[0-9]|2[0-4]):[0-5][0-9]$/, 'Invalid time (HH:MM)'),
+    end_time: z.string().regex(/^([0-1]?[0-9]|2[0-4]):[0-5][0-9]$/, 'Invalid time (HH:MM)')
   }))
 });
 

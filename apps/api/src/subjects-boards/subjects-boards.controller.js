@@ -1,7 +1,7 @@
 import { getSupabaseAdminClient } from '../config/supabase.js';
 import { readJson, sendJson } from '../common/http.js';
 
-const ALLOWED_ROLES = ['teacher_coordinator', 'super_admin', 'hr', 'finance', 'academic_coordinator'];
+const ALLOWED_ROLES = ['teacher_coordinator', 'super_admin', 'hr', 'finance', 'academic_coordinator', 'teacher'];
 
 function actorFromHeaders(req) {
     const rawRole = req.headers['x-user-role'];
@@ -15,7 +15,21 @@ export async function handleSubjectsBoards(req, res, url) {
     if (!adminClient) { sendJson(res, 500, { ok: false, error: 'supabase not configured' }); return true; }
 
     const role = actorFromHeaders(req);
-    if (!ALLOWED_ROLES.includes(role)) { sendJson(res, 403, { ok: false, error: 'insufficient role' }); return true; }
+    
+    // Only allow GET for all roles (including teacher)
+    // POST/PATCH/DELETE restricted to coordinators/admins
+    const isWrite = req.method !== 'GET';
+    const writeRoles = ['teacher_coordinator', 'super_admin', 'hr', 'finance', 'academic_coordinator'];
+    
+    if (isWrite && !writeRoles.includes(role)) {
+        sendJson(res, 403, { ok: false, error: 'insufficient role for modifications' });
+        return true;
+    }
+
+    if (!ALLOWED_ROLES.includes(role)) { 
+        sendJson(res, 403, { ok: false, error: 'insufficient role' }); 
+        return true; 
+    }
 
     // ─── SUBJECTS ───
     if (url.pathname === '/subjects' || url.pathname.startsWith('/subjects/')) {

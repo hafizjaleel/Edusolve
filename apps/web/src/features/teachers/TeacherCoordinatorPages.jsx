@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiFetch } from '../../lib/api.js';
 import { getSession } from '../../lib/auth.js';
 import DateTimePicker from '../../components/DateTimePicker.jsx';
+import { MultiSelectDropdown } from '../../components/ui/MultiSelectDropdown.jsx';
 
 /* ─── Inline SVG Icons ─── */
 const Icon = ({ d, color = 'currentColor', size = 16 }) => (
@@ -59,70 +60,6 @@ function CustomDropdown({ value, onChange, options, placeholder, icon }) {
     );
 }
 
-/* ─── Multi-Select Dropdown with "Create new" ─── */
-function MultiSelectDropdown({ value = [], onChange, options, placeholder, onCreate }) {
-    const [open, setOpen] = useState(false);
-    const [search, setSearch] = useState('');
-    const ref = useRef(null);
-
-    useEffect(() => {
-        function close(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
-        document.addEventListener('mousedown', close);
-        return () => document.removeEventListener('mousedown', close);
-    }, []);
-
-    const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()));
-    const exactMatch = options.some(o => o.toLowerCase() === search.toLowerCase());
-
-    const toggle = (opt) => {
-        const set = new Set(value);
-        if (set.has(opt)) set.delete(opt);
-        else set.add(opt);
-        onChange(Array.from(set));
-    };
-
-    return (
-        <div className="custom-dropdown" ref={ref}>
-            <div className={`custom-dropdown-trigger${open ? ' open' : ''}`} onClick={() => setOpen(o => !o)} style={{ minHeight: '42px', height: 'auto', flexWrap: 'wrap', gap: '4px' }}>
-                {value.length > 0 ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', flex: 1 }}>
-                        {value.map(v => (
-                            <span key={v} style={{ background: '#eff6ff', color: '#3b82f6', padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                {v} <span onClick={(e) => { e.stopPropagation(); toggle(v); }} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}><Icon d="M18 6L6 18M6 6l12 12" size={12} /></span>
-                            </span>
-                        ))}
-                    </div>
-                ) : <span className="dd-placeholder">{placeholder || 'Select...'}</span>}
-                <Icon d="M6 9l6 6 6-6" size={14} />
-            </div>
-            {open && (
-                <div className="custom-dropdown-menu">
-                    <input autoFocus value={search} onChange={e => setSearch(e.target.value)}
-                        placeholder="Search..."
-                        onClick={e => e.stopPropagation()}
-                        style={{ width: '100%', border: 'none', borderBottom: '1px solid #eee', padding: '8px 12px', fontSize: '13px', outline: 'none', marginBottom: '4px' }} />
-                    <div style={{ maxHeight: '180px', overflowY: 'auto' }}>
-                        {filtered.map(opt => (
-                            <div key={opt} className={`custom-dropdown-item${value.includes(opt) ? ' selected' : ''}`}
-                                onClick={() => toggle(opt)}
-                                style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                {opt}
-                                {value.includes(opt) && <span style={{ color: '#3b82f6' }}><Icon d="M20 6L9 17l-5-5" size={14} /></span>}
-                            </div>
-                        ))}
-                        {filtered.length === 0 && <div style={{ padding: '8px 12px', fontSize: '12px', color: '#999' }}>No options found</div>}
-                    </div>
-                    {search && !exactMatch && (
-                        <div onClick={() => { onCreate(search); setSearch(''); }}
-                            style={{ padding: '10px 12px', background: '#eff6ff', color: '#3b82f6', borderTop: '1px solid #dbeafe', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <Icon d="M12 5v14M5 12h14" size={12} /> Create "{search}"
-                        </div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
 
 const StatusIcon = ({ status, size = 16 }) => {
     const iconPaths = {
